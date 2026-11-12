@@ -258,6 +258,49 @@ static int scan_params(VirtualMachine *vm, Token *p, Token *close, Template *t,
                 last = e;
         }
         Token *decl_end = eq ? eq : e;
+        Token *dots     = NULL;
+        int    dd       = 0;
+        for (Token *q = a; q != decl_end && !dots; q = q->next) {
+            if (equal(q, "("))
+                dd++;
+            else if (equal(q, ")"))
+                dd--;
+            else if (dd == 0 && equal(q, "..."))
+                dots = q;
+        }
+        if (dots) {
+            if (eq) {
+                *err     = "a template parameter pack cannot have a default";
+                *err_tok = eq;
+                return -1;
+            }
+            if (dots == a) {
+                *err     = "expected a parameter before '...' in @template";
+                *err_tok = dots;
+                return -1;
+            }
+            for (int j = 0; j < t->nparams; j++)
+                if (t->params[j].def) {
+                    *err     = "a template with a parameter pack cannot have "
+                               "default arguments";
+                    *err_tok = t->params[j].name;
+                    return -1;
+                }
+            if (dots->next == decl_end) {
+                // `Ts...`: the name is the one token before the dots.
+                if (a->next != dots || a->kind != TK_IDENT) {
+                    *err     = "expected a type parameter name before '...'";
+                    *err_tok = dots;
+                    return -1;
+                }
+                last = a;
+            }
+        }
+        if (t->nparams && t->params[t->nparams - 1].is_pack) {
+            *err     = "a template parameter pack must be the last parameter";
+            *err_tok = a;
+            return -1;
+        }
         if (last && equal(last, ")")) {
             // `int (*F)(int)`: the name is the identifier in `( * F )`.
             Token *found = NULL;
@@ -290,7 +333,7 @@ static int scan_params(VirtualMachine *vm, Token *p, Token *close, Template *t,
                 *err_tok = last;
                 return -1;
             }
-        if (!eq && t->nparams && t->params[t->nparams - 1].def) {
+        if (!eq && !dots && t->nparams && t->params[t->nparams - 1].def) {
             *err     = arena_format(vm,
                                     "template parameter '%.*s' needs a default "
                                     "after a defaulted parameter",
@@ -303,6 +346,8 @@ static int scan_params(VirtualMachine *vm, Token *p, Token *close, Template *t,
         t->params[t->nparams].decl_end   = decl_end;
         t->params[t->nparams].def        = eq ? eq->next : NULL;
         t->params[t->nparams].def_end    = eq ? e : NULL;
+        t->params[t->nparams].is_pack    = dots != NULL;
+        t->params[t->nparams].dots       = dots && last != a ? dots : NULL;
         t->nparams++;
         a = e;
         if (equal(a, ","))
@@ -908,6 +953,522 @@ static bool is_enumerator(Token **names, int count, Token *p) {
     return false;
 }
 
+// ---- parameter packs ------------------------------------------------------
+//
+// A template whose last parameter is a pack (`Ts...`, `int... Ns`) has each
+// element bound under `__cccc_pk_<pack>_<k>`. expand_packs() rewrites the
+// cloned tokens so the body only names those elements:
+//   sizeof...(Ts)        the length
+//   Ts...[k]  xs...[k]   element k
+//   Ts... xs             a declaration per element: `T0 xs0, T1 xs1`
+//   f(xs)...             the pattern once per element, comma separated
+//   (xs + ...)           a fold over the elements
+
+static bool tmpl_has_pack(const Template *t) {
+    return t->nparams && t->params[t->nparams - 1].is_pack;
+}
+
+typedef enum {
+    DOTS_NONE,
+    DOTS_PENDING,
+    DOTS_SIZEOF,
+    DOTS_INDEX,
+    DOTS_FOLD,
+    DOTS_ITEM,
+    DOTS_OTHER // C varargs, GNU case and designator ranges
+} DotsKind;
+
+typedef struct {
+    const char *name;
+    int         len;
+    bool        declared; // `Ts... xs`: its elements are xs0, xs1, ...
+} Pack;
+
+typedef struct {
+    int  op;     // the operator token
+    int  a, b;   // the pattern, [a, b)
+    int  ia, ib; // a binary fold's initial value, [ia, ib)
+    bool right, binary;
+} FoldShape;
+
+typedef struct {
+    VirtualMachine *vm;
+    Token         **toks;
+    int             ntoks, n;   // n: elements in every pack
+    int            *match, *encl;
+    DotsKind       *kind;
+    int            *item_dots;  // by item start: the item's `...`, else -1
+    int            *fold_close; // by `(`: its `)` when it is a fold, else -1
+    int            *fold_dots;
+    Pack           *packs;
+    int             npacks;
+    Token         **out;
+    int             nout, cap;
+    Token          *comma, *semi, *lp, *rp;
+} Expander;
+
+static bool tok_is_open(Token *t) {
+    return equal(t, "(") || equal(t, "[") || equal(t, "{");
+}
+
+static bool tok_is_close(Token *t) {
+    return equal(t, ")") || equal(t, "]") || equal(t, "}");
+}
+
+static bool brackets_pair(Token *open, Token *close) {
+    return (equal(open, "(") && equal(close, ")")) ||
+           (equal(open, "[") && equal(close, "]")) ||
+           (equal(open, "{") && equal(close, "}"));
+}
+
+static bool is_fold_op(Token *t) {
+    static const char *ops[] = {
+        "+",  "-",  "*",  "/",  "%",  "^",  "&",   "|",   "<<", ">>", "&&",
+        "||", ",",  "==", "!=", "<",  ">",  "<=",  ">=",  "=",  "+=", "-=",
+        "*=", "/=", "%=", "^=", "&=", "|=", "<<=", ">>=", NULL};
+    for (int i = 0; ops[i]; i++)
+        if (equal(t, ops[i]))
+            return true;
+    return false;
+}
+
+static void ex_put(Expander *ex, Token *tok) {
+    if (ex->nout == ex->cap) {
+        int     ncap = ex->cap ? ex->cap * 2 : 64;
+        Token **grown =
+            arena_alloc(&ex->vm->compiler.parser_arena, sizeof(Token *) * ncap);
+        if (ex->nout)
+            memcpy(grown, ex->out, sizeof(Token *) * ex->nout);
+        ex->out = grown;
+        ex->cap = ncap;
+    }
+    ex->out[ex->nout++] = tok;
+}
+
+static void ex_punct(Expander *ex, Token *proto) {
+    ex_put(ex, copy_tok(ex->vm, proto));
+}
+
+static void ex_text(Expander *ex, const char *text) {
+    Token *t =
+        tokenize_string(ex->vm, "<template>", arena_strdup(ex->vm, text));
+    convert_pp_tokens(ex->vm, t);
+    for (; t->kind != TK_EOF; t = t->next)
+        ex_put(ex, copy_tok(ex->vm, t));
+}
+
+// The pack that token `i` names, else -1.
+static int ex_pack_at(Expander *ex, int i) {
+    Token *t = ex->toks[i];
+    if (t->kind != TK_IDENT)
+        return -1;
+    if (i > 0) {
+        Token *p = ex->toks[i - 1];
+        if (equal(p, ".") || equal(p, "->") || equal(p, "struct") ||
+            equal(p, "union") || equal(p, "enum"))
+            return -1;
+    }
+    for (int k = 0; k < ex->npacks; k++)
+        if (ex->packs[k].len == (int)t->len &&
+            !strncmp(ex->packs[k].name, t->loc, t->len))
+            return k;
+    return -1;
+}
+
+static bool ex_has_pack(Expander *ex, int from, int to) {
+    for (int i = from; i < to; i++)
+        if (ex_pack_at(ex, i) >= 0)
+            return true;
+    return false;
+}
+
+// The first token of the list item that holds the `...` at `d`.
+static int ex_item_start(Expander *ex, int d) {
+    int i = d - 1;
+    while (i >= 0) {
+        Token *t = ex->toks[i];
+        if (tok_is_close(t))
+            i = ex->match[i] - 1;
+        else if (tok_is_open(t) || equal(t, ",") || equal(t, ";"))
+            break;
+        else
+            i--;
+    }
+    return i + 1;
+}
+
+// The token after the list item that holds the `...` at `d`: its `,`, `;` or
+// closing bracket.
+static int ex_item_end(Expander *ex, int d) {
+    int i = d + 1;
+    while (i < ex->ntoks) {
+        Token *t = ex->toks[i];
+        if (tok_is_open(t))
+            i = ex->match[i] + 1;
+        else if (tok_is_close(t) || equal(t, ",") || equal(t, ";"))
+            break;
+        else
+            i++;
+    }
+    return i;
+}
+
+static Token *ex_elem(Expander *ex, int pack, int k, Token *like) {
+    const Pack *p = &ex->packs[pack];
+    Token      *c = copy_tok(ex->vm, like);
+    c->loc = p->declared ? arena_format(ex->vm, "%.*s%d", p->len, p->name, k)
+                         : arena_format(ex->vm, "__cccc_pk_%.*s_%d", p->len,
+                                        p->name, k);
+    c->len = strlen(c->loc);
+    return c;
+}
+
+static void ex_range(Expander *ex, int lo, int hi, int k);
+
+// The constant pack index in `[from, to)`.
+static int ex_index(Expander *ex, int from, int to, Token *site) {
+    VirtualMachine *vm   = ex->vm;
+    Token           head = {};
+    Token          *cur  = &head;
+    int             base = ex->nout;
+    ex_range(ex, from, to, -1);
+    for (int i = base; i < ex->nout; i++)
+        cur = cur->next = copy_tok(vm, ex->out[i]);
+    ex->nout  = base;
+    cur->next = synth_token(vm, "");
+    Token *rest;
+    Node  *expr =
+        cc_expand_const_macro_calls(vm, conditional(vm, &rest, head.next));
+    if (rest->kind != TK_EOF)
+        error_tok(vm, rest, "unexpected token in the pack index");
+    add_type(vm, expr);
+    if (!is_integer(expr->ty) || !is_const_expr(vm, expr))
+        error_tok(vm, site, "a pack index must be an integer constant");
+    int64_t v = eval(vm, expr);
+    if (v < 0 || v >= ex->n)
+        error_tok(vm, site, "pack index %lld is out of range for %d element%s",
+                  (long long)v, ex->n, ex->n == 1 ? "" : "s");
+    return (int)v;
+}
+
+static bool ex_fold_shape(Expander *ex, int o, int d, int c, FoldShape *f) {
+    memset(f, 0, sizeof(*f));
+    bool lop = d > o + 1 && is_fold_op(ex->toks[d - 1]);
+    bool rop = d + 1 < c && is_fold_op(ex->toks[d + 1]);
+    if (d == o + 1 && rop) { // ( ... op E )
+        f->op = d + 1;
+        f->a  = d + 2;
+        f->b  = c;
+        return ex_has_pack(ex, f->a, f->b);
+    }
+    if (d == c - 1 && lop) { // ( E op ... )
+        f->op    = d - 1;
+        f->a     = o + 1;
+        f->b     = d - 1;
+        f->right = true;
+        return ex_has_pack(ex, f->a, f->b);
+    }
+    if (lop && rop) { // ( E op ... op I ) or ( I op ... op E )
+        Token *l = ex->toks[d - 1], *r = ex->toks[d + 1];
+        if (l->len != r->len || strncmp(l->loc, r->loc, l->len))
+            return false;
+        bool pl = ex_has_pack(ex, o + 1, d - 1);
+        bool pr = ex_has_pack(ex, d + 2, c);
+        if (pl && pr)
+            error_tok(ex->vm, ex->toks[d],
+                      "only one side of a binary fold can hold a parameter "
+                      "pack");
+        if (!pl && !pr)
+            return false;
+        f->binary = true;
+        f->op     = d - 1;
+        f->right  = pl;
+        f->a      = pl ? o + 1 : d + 2;
+        f->b      = pl ? d - 1 : c;
+        f->ia     = pl ? d + 2 : o + 1;
+        f->ib     = pl ? c : d - 1;
+        return true;
+    }
+    return false;
+}
+
+static void ex_operand(Expander *ex, int a, int b, int k) {
+    ex_punct(ex, ex->lp);
+    ex_range(ex, a, b, k);
+    ex_punct(ex, ex->rp);
+}
+
+// Replaces the parenthesised fold at `o` by explicitly nested parentheses.
+static void ex_fold(Expander *ex, int o) {
+    FoldShape f;
+    ex_fold_shape(ex, o, ex->fold_dots[o], ex->fold_close[o], &f);
+    Token *op = ex->toks[f.op];
+    int    n  = ex->n;
+    if (n == 0) {
+        if (f.binary)
+            ex_operand(ex, f.ia, f.ib, -1);
+        else if (equal(op, "&&"))
+            ex_text(ex, "(1)");
+        else if (equal(op, "||"))
+            ex_text(ex, "(0)");
+        else if (equal(op, ","))
+            ex_text(ex, "((void)0)");
+        else
+            error_tok(ex->vm, op,
+                      "a fold over '%.*s' of an empty pack needs an initial "
+                      "value",
+                      (int)op->len, op->loc);
+        return;
+    }
+    int opens = f.binary ? n : n - 1;
+    if (!f.right) {
+        for (int i = 0; i < opens; i++)
+            ex_punct(ex, ex->lp);
+        if (f.binary)
+            ex_operand(ex, f.ia, f.ib, -1);
+        else
+            ex_operand(ex, f.a, f.b, 0);
+        for (int k = f.binary ? 0 : 1; k < n; k++) {
+            ex_punct(ex, op);
+            ex_operand(ex, f.a, f.b, k);
+            ex_punct(ex, ex->rp);
+        }
+        return;
+    }
+    for (int k = 0; k < opens; k++) {
+        ex_punct(ex, ex->lp);
+        ex_operand(ex, f.a, f.b, k);
+        ex_punct(ex, op);
+    }
+    if (f.binary)
+        ex_operand(ex, f.ia, f.ib, -1);
+    else
+        ex_operand(ex, f.a, f.b, n - 1);
+    for (int i = 0; i < opens; i++)
+        ex_punct(ex, ex->rp);
+}
+
+// Expands the list item that starts at `s`; returns the index to resume at.
+static int ex_item(Expander *ex, int s) {
+    int d            = ex->item_dots[s];
+    ex->item_dots[s] = -1;
+    int  e           = ex_item_end(ex, d);
+    bool decl        = d + 1 < e;
+    if (decl && ex->toks[d + 1]->kind != TK_IDENT)
+        error_tok(ex->vm, ex->toks[d + 1], "expected a name after '...'");
+    bool semi = e < ex->ntoks && equal(ex->toks[e], ";");
+    if (ex->n == 0) {
+        if (semi || (e < ex->ntoks && equal(ex->toks[e], ",")))
+            return e + 1;
+        if (s > 0 && ex->nout && ex->out[ex->nout - 1] == ex->toks[s - 1] &&
+            equal(ex->toks[s - 1], ","))
+            ex->nout--;
+        return e;
+    }
+    int pk = -1;
+    if (decl)
+        for (int i = 0; i < ex->npacks; i++)
+            if (ex->packs[i].declared &&
+                ex->packs[i].len == (int)ex->toks[d + 1]->len &&
+                !strncmp(ex->packs[i].name, ex->toks[d + 1]->loc,
+                         ex->packs[i].len))
+                pk = i;
+    for (int k = 0; k < ex->n; k++) {
+        if (k)
+            ex_punct(ex, semi ? ex->semi : ex->comma);
+        ex_range(ex, s, d, k);
+        if (decl) {
+            ex_put(ex, ex_elem(ex, pk, k, ex->toks[d + 1]));
+            ex_range(ex, d + 2, e, k);
+        }
+    }
+    return e;
+}
+
+// Emits `[lo, hi)` with every pack expanded. `k` is the element a bare pack
+// name stands for inside a pattern, and -1 outside one.
+static void ex_range(Expander *ex, int lo, int hi, int k) {
+    VirtualMachine *vm = ex->vm;
+    for (int i = lo; i < hi;) {
+        Token *tok = ex->toks[i];
+        if (ex->fold_close[i] >= 0) {
+            if (k >= 0)
+                error_tok(vm, tok,
+                          "a fold cannot be nested in a pack expansion");
+            ex_fold(ex, i);
+            i = ex->fold_close[i] + 1;
+            continue;
+        }
+        if (ex->item_dots[i] >= 0) {
+            if (k >= 0)
+                error_tok(vm, ex->toks[ex->item_dots[i]],
+                          "a pack expansion cannot be nested in another");
+            i = ex_item(ex, i);
+            continue;
+        }
+        if (equal(tok, "sizeof") && i + 1 < hi &&
+            ex->kind[i + 1] == DOTS_SIZEOF) {
+            ex_put(ex, synth_token(vm, arena_format(vm, "%d", ex->n)));
+            i += 5;
+            continue;
+        }
+        int pk = ex_pack_at(ex, i);
+        if (pk >= 0) {
+            if (i + 1 < hi && ex->kind[i + 1] == DOTS_INDEX) {
+                int close = ex->match[i + 2];
+                ex_put(ex,
+                       ex_elem(ex, pk, ex_index(ex, i + 3, close, tok), tok));
+                i = close + 1;
+                continue;
+            }
+            if (k < 0)
+                error_tok(vm, tok,
+                          "parameter pack '%.*s' must be expanded with '...'",
+                          (int)tok->len, tok->loc);
+            ex_put(ex, ex_elem(ex, pk, k, tok));
+            i++;
+            continue;
+        }
+        ex_put(ex, k < 0 ? tok : copy_tok(vm, tok));
+        i++;
+    }
+}
+
+// Rewrites the cloned chain `chain` of template `t`, whose pack has `n`
+// elements; returns the new chain, which ends in the same EOF.
+static Token *expand_packs(VirtualMachine *vm, Template *t, Token *chain,
+                           int n) {
+    int count = 0;
+    for (Token *p = chain; p->kind != TK_EOF; p = p->next)
+        count++;
+    if (!count)
+        return chain;
+    Arena   *a  = &vm->compiler.parser_arena;
+
+    Expander ex = {};
+    ex.vm       = vm;
+    ex.n        = n;
+    ex.ntoks    = count;
+    ex.toks     = arena_alloc(a, sizeof(Token *) * count);
+    Token *eof  = chain;
+    for (int i = 0; i < count; i++, eof = eof->next)
+        ex.toks[i] = eof;
+    ex.match      = arena_alloc(a, sizeof(int) * count);
+    ex.encl       = arena_alloc(a, sizeof(int) * count);
+    ex.kind       = arena_alloc(a, sizeof(DotsKind) * count);
+    ex.item_dots  = arena_alloc(a, sizeof(int) * count);
+    ex.fold_close = arena_alloc(a, sizeof(int) * count);
+    ex.fold_dots  = arena_alloc(a, sizeof(int) * count);
+    int *cnt      = arena_alloc(a, sizeof(int) * count);
+    ex.packs      = arena_alloc(a, sizeof(Pack) * (count + 1));
+    memset(ex.kind, 0, sizeof(DotsKind) * count);
+    memset(cnt, 0, sizeof(int) * count);
+    for (int i = 0; i < count; i++)
+        ex.match[i] = ex.item_dots[i] = ex.fold_close[i] = -1;
+
+    // Bracket structure.
+    int *stack = arena_alloc(a, sizeof(int) * count);
+    int  sp    = 0;
+    for (int i = 0; i < count; i++) {
+        Token *tok = ex.toks[i];
+        ex.encl[i] = sp ? stack[sp - 1] : -1;
+        if (tok_is_open(tok)) {
+            stack[sp++] = i;
+        } else if (tok_is_close(tok)) {
+            if (!sp || !brackets_pair(ex.toks[stack[sp - 1]], tok))
+                error_tok(vm, tok, "unbalanced '%.*s' in a template body",
+                          (int)tok->len, tok->loc);
+            int o       = stack[--sp];
+            ex.match[o] = i;
+            ex.match[i] = o;
+            ex.encl[i]  = sp ? stack[sp - 1] : -1;
+        }
+    }
+    if (sp)
+        error_tok(
+            vm, ex.toks[stack[sp - 1]], "unbalanced '%.*s' in a template body",
+            (int)ex.toks[stack[sp - 1]]->len, ex.toks[stack[sp - 1]]->loc);
+
+    const TemplateParam *pp = &t->params[t->nparams - 1];
+    ex.packs[ex.npacks++]   = (Pack){pp->name->loc, (int)pp->name->len, false};
+
+    // Packs declared by `Pattern... name`.
+    for (int d = 1; d + 1 < count; d++) {
+        if (!equal(ex.toks[d], "...") || equal(ex.toks[d - 1], "sizeof") ||
+            ex.toks[d + 1]->kind != TK_IDENT || ex_pack_at(&ex, d + 1) >= 0)
+            continue;
+        if (!ex_has_pack(&ex, ex_item_start(&ex, d), d))
+            continue;
+        Token *name           = ex.toks[d + 1];
+        ex.packs[ex.npacks++] = (Pack){name->loc, (int)name->len, true};
+    }
+
+    // What each `...` is.
+    for (int d = 0; d < count; d++) {
+        if (!equal(ex.toks[d], "..."))
+            continue;
+        if (d > 0 && equal(ex.toks[d - 1], "sizeof")) {
+            if (!(d + 3 < count && equal(ex.toks[d + 1], "(") &&
+                  ex_pack_at(&ex, d + 2) >= 0 && equal(ex.toks[d + 3], ")")))
+                error_tok(vm, ex.toks[d], "expected 'sizeof...(pack)'");
+            ex.kind[d] = DOTS_SIZEOF;
+        } else if (d > 0 && d + 1 < count && equal(ex.toks[d + 1], "[") &&
+                   ex_pack_at(&ex, d - 1) >= 0) {
+            ex.kind[d] = DOTS_INDEX;
+        } else {
+            ex.kind[d] = DOTS_PENDING;
+            if (ex.encl[d] >= 0)
+                cnt[ex.encl[d]]++;
+        }
+    }
+    for (int d = 0; d < count; d++) {
+        if (ex.kind[d] != DOTS_PENDING)
+            continue;
+        int       o = ex.encl[d];
+        FoldShape f;
+        if (o >= 0 && equal(ex.toks[o], "(") && cnt[o] == 1 &&
+            ex_fold_shape(&ex, o, d, ex.match[o], &f)) {
+            ex.kind[d]       = DOTS_FOLD;
+            ex.fold_close[o] = ex.match[o];
+            ex.fold_dots[o]  = d;
+            continue;
+        }
+        int s = ex_item_start(&ex, d);
+        if (s == d) {
+            ex.kind[d] = DOTS_OTHER;
+            continue;
+        }
+        if (!ex_has_pack(&ex, s, d)) {
+            Token *next = d + 1 < count ? ex.toks[d + 1] : NULL;
+            if (!next || equal(next, ",") || equal(next, ")") ||
+                equal(next, ";"))
+                error_tok(vm, ex.toks[d],
+                          "the pattern before '...' contains no parameter "
+                          "pack");
+            ex.kind[d] = DOTS_OTHER;
+            continue;
+        }
+        if (ex.item_dots[s] >= 0)
+            error_tok(vm, ex.toks[d],
+                      "a list item can hold only one pack expansion");
+        ex.kind[d]      = DOTS_ITEM;
+        ex.item_dots[s] = d;
+    }
+
+    ex.comma = synth_token(vm, ",");
+    ex.semi  = synth_token(vm, ";");
+    ex.lp    = synth_token(vm, "(");
+    ex.rp    = synth_token(vm, ")");
+    ex_range(&ex, 0, count, -1);
+
+    if (!ex.nout)
+        return eof;
+    for (int i = 0; i + 1 < ex.nout; i++)
+        ex.out[i]->next = ex.out[i + 1];
+    ex.out[ex.nout - 1]->next = eof;
+    return ex.out[0];
+}
+
 static bool has_linkage_static(Template *t) {
     for (Token *p = t->start; p != t->name_tok && p->kind != TK_EOF;
          p        = p->next)
@@ -922,7 +1483,7 @@ static bool has_linkage_static(Template *t) {
 // instance is `static`.
 static Token *clone_template(VirtualMachine *vm, Template *t,
                              const char *mangled, Token *limit, bool prototype,
-                             bool internal, ExpansionFrame *frame) {
+                             bool internal, ExpansionFrame *frame, int npack) {
     Token  head = {};
     Token *cur  = &head;
     if (internal && t->kind == TMPL_FUNC && !has_linkage_static(t))
@@ -988,7 +1549,7 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
         cur = cur->next = synth_token(vm, ";");
     Token *eof = synth_token(vm, "");
     cur->next  = eof;
-    return head.next;
+    return npack >= 0 ? expand_packs(vm, t, head.next, npack) : head.next;
 }
 
 typedef struct {
@@ -1072,20 +1633,29 @@ static void snapshot_clear(VirtualMachine *vm) {
 #undef X
 }
 
-// The tokens `[from, to)` as a NUL-terminated chain ending in EOF.
-static Token *clone_range(VirtualMachine *vm, Token *from, Token *to) {
+// The tokens `[from, to)` less `skip` as a chain ending in EOF.
+static Token *clone_range_skip(VirtualMachine *vm, Token *from, Token *to,
+                               Token *skip) {
     Token  head = {};
     Token *cur  = &head;
     for (Token *p = from; p != to; p = p->next)
-        cur = cur->next = copy_tok(vm, p);
+        if (p != skip)
+            cur = cur->next = copy_tok(vm, p);
     cur->next = synth_token(vm, "");
     return head.next;
 }
 
-static char *range_text(VirtualMachine *vm, Token *from, Token *to) {
+static Token *clone_range(VirtualMachine *vm, Token *from, Token *to) {
+    return clone_range_skip(vm, from, to, NULL);
+}
+
+static char *range_text(VirtualMachine *vm, Token *from, Token *to,
+                        Token *skip) {
     char *s = "";
     for (Token *p = from; p != to; p = p->next)
-        s = arena_format(vm, "%s%s%.*s", s, *s ? " " : "", (int)p->len, p->loc);
+        if (p != skip)
+            s = arena_format(vm, "%s%s%.*s", s, *s ? " " : "", (int)p->len,
+                             p->loc);
     return s;
 }
 
@@ -1189,7 +1759,7 @@ static Type *param_type(VirtualMachine *vm, Template *t, int i) {
     if (p->ty)
         return p->ty;
     Token *rest;
-    Token *toks = clone_range(vm, p->type_start, p->decl_end);
+    Token *toks = clone_range_skip(vm, p->type_start, p->decl_end, p->dots);
     Type  *ty   = declspec(vm, &rest, toks, NULL);
     ty          = declarator(vm, &rest, rest, ty);
     if (rest->kind != TK_EOF || !ty->name || ty->name->len != p->name->len ||
@@ -1214,6 +1784,10 @@ static Type *param_type(VirtualMachine *vm, Template *t, int i) {
                   "integer, float, double or pointer type",
                   (int)p->name->len, p->name->loc);
     }
+    if (p->is_pack && !is_integer(ty))
+        error_tok(vm, p->name,
+                  "constant parameter pack '%.*s' must have an integer type",
+                  (int)p->name->len, p->name->loc);
     if (!p->dependent)
         p->ty = ty;
     return ty;
@@ -1235,7 +1809,7 @@ static void param_value(VirtualMachine *vm, Template *t, int i, Type *ty,
                 arg->val_unsigned
                     ? arena_format(vm, "%llu", (unsigned long long)arg->val)
                     : arena_format(vm, "%lld", (long long)arg->val),
-                range_text(vm, p->type_start, p->name));
+                range_text(vm, p->type_start, p->name, p->dots));
     } else if (ty->kind == TY_PTR) {
         arg->sym = pointer_arg(vm, arg->expr, ty, site);
     } else {
@@ -1260,10 +1834,9 @@ static void param_value(VirtualMachine *vm, Template *t, int i, Type *ty,
 // Binds parameter `i` in `bindings` to `arg`. A float or pointer parameter is
 // bound to a constexpr object kept in `*hidden` until the instance has its
 // name.
-static void bind_param(VirtualMachine *vm, Template *t, int i, Type *ty,
-                       TemplateArg *arg, Scope *bindings, Obj **hidden) {
-    TemplateParam *p     = &t->params[i];
-    Node          *value = NULL;
+static void bind_param_as(VirtualMachine *vm, TemplateParam *p, Type *ty,
+                          TemplateArg *arg, Scope *bindings, Obj **hidden) {
+    Node *value = NULL;
     if (p->type_start) {
         ty = copy_type(vm, ty);
         if (ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE) {
@@ -1299,6 +1872,11 @@ static void bind_param(VirtualMachine *vm, Template *t, int i, Type *ty,
                        ty->kind == TY_ENUM;
         vs->type_def = tagged ? ty : copy_type(vm, ty);
     }
+}
+
+static void bind_param(VirtualMachine *vm, Template *t, int i, Type *ty,
+                       TemplateArg *arg, Scope *bindings, Obj **hidden) {
+    bind_param_as(vm, &t->params[i], ty, arg, bindings, hidden);
 }
 
 // The shortest decimal that reads back as `v` in the parameter's type,
@@ -1453,18 +2031,37 @@ typedef struct {
     bool  bound;
 } ParamState;
 
+static void ensure_bindings(VirtualMachine *vm, Scope **bindings) {
+    if (*bindings)
+        return;
+    *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
+    memset(*bindings, 0, sizeof(Scope));
+    vm->compiler.tmpl_bindings = *bindings;
+}
+
 // Binds parameter `i` once, creating the bindings scope on first use.
 static void bind_state(VirtualMachine *vm, Template *t, int i,
                        ParamState *state, TemplateArg *args, Scope **bindings) {
     if (state[i].bound)
         return;
-    if (!*bindings) {
-        *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
-        memset(*bindings, 0, sizeof(Scope));
-        vm->compiler.tmpl_bindings = *bindings;
-    }
+    ensure_bindings(vm, bindings);
     bind_param(vm, t, i, state[i].ty, &args[i], *bindings, &state[i].hidden);
     state[i].bound = true;
+}
+
+// Binds the elements `[fixed, total)` of the pack as `__cccc_pk_<name>_<k>`.
+static void bind_pack(VirtualMachine *vm, Template *t, int fixed, int total,
+                      ParamState *state, TemplateArg *args, Scope **bindings) {
+    TemplateParam *pack = &t->params[fixed];
+    for (int i = fixed; i < total; i++) {
+        ensure_bindings(vm, bindings);
+        TemplateParam element = *pack;
+        element.name          = synth_token(
+            vm, arena_format(vm, "__cccc_pk_%.*s_%d", (int)pack->name->len,
+                             pack->name->loc, i - fixed));
+        Obj *unused = NULL;
+        bind_param_as(vm, &element, state[i].ty, &args[i], *bindings, &unused);
+    }
 }
 
 // ---- partial specialization -----------------------------------------------
@@ -1810,32 +2407,39 @@ static Template *select_partial(VirtualMachine *vm, Template *t,
 static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                                      TemplateArg *args, int nargs, Token *site,
                                      Template *def) {
-    int required = t->nparams;
-    while (required > 0 && t->params[required - 1].def)
+    bool pack     = tmpl_has_pack(t);
+    int  fixed    = t->nparams - pack; // parameters before the pack
+    int  required = fixed;
+    while (!pack && required > 0 && t->params[required - 1].def)
         required--;
-    if (nargs < required || nargs > t->nparams) {
+    if (nargs < required || (!pack && nargs > t->nparams)) {
+        if (pack)
+            error_tok(vm, site,
+                      "template '%s' takes at least %d argument%s, %d given",
+                      t->name, fixed, fixed == 1 ? "" : "s", nargs);
         if (required == t->nparams)
             error_tok(vm, site, "template '%s' takes %d argument%s, %d given",
                       t->name, t->nparams, t->nparams == 1 ? "" : "s", nargs);
         error_tok(vm, site, "template '%s' takes %d to %d arguments, %d given",
                   t->name, required, t->nparams, nargs);
     }
+    int total = pack ? nargs : t->nparams; // arguments after the defaults
     // A repeat @inst keeps its state on the stack; only a new instance moves
     // its arguments to the arena.
     TemplateArg  stack_args[TMPL_STACK_PARAMS];
     ParamState   stack_state[TMPL_STACK_PARAMS];
     TemplateArg *given = args;
     ParamState  *state = stack_state;
-    if (t->nparams <= TMPL_STACK_PARAMS) {
+    if (total <= TMPL_STACK_PARAMS) {
         args = stack_args;
     } else {
-        args  = arena_alloc(&vm->compiler.parser_arena,
-                            sizeof(TemplateArg) * t->nparams);
-        state = arena_alloc(&vm->compiler.parser_arena,
-                            sizeof(ParamState) * t->nparams);
+        args = arena_alloc(&vm->compiler.parser_arena,
+                           sizeof(TemplateArg) * total);
+        state =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(ParamState) * total);
     }
     memcpy(args, given, sizeof(TemplateArg) * nargs);
-    memset(state, 0, sizeof(ParamState) * t->nparams);
+    memset(state, 0, sizeof(ParamState) * total);
 
     TemplateInstance *volatile inst = NULL;
     Scope       *bindings           = NULL;
@@ -1865,16 +2469,17 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     MangleBuf mb;
     mb_init(&mb, vm);
     mb_puts(&mb, t->name);
-    for (int i = 0; i < t->nparams; i++) {
-        TemplateParam *p = &t->params[i];
+    for (int i = 0; i < total; i++) {
+        int            pi = i < t->nparams ? i : t->nparams - 1;
+        TemplateParam *p  = &t->params[pi];
         if (i >= nargs)
             default_arg(vm, t, i, &args[i]);
-        state[i].ty = p->type_start ? param_type(vm, t, i) : args[i].ty;
+        state[i].ty = p->type_start ? param_type(vm, t, pi) : args[i].ty;
         if (p->type_start)
-            param_value(vm, t, i, state[i].ty, &args[i], site);
+            param_value(vm, t, pi, state[i].ty, &args[i], site);
         mb_puts(&mb, "__");
-        mangle_arg(&mb, t, i, state[i].ty, &args[i], site);
-        if (p->needed)
+        mangle_arg(&mb, t, pi, state[i].ty, &args[i], site);
+        if (p->needed && !p->is_pack)
             bind_state(vm, t, i, state, args, &bindings);
     }
 
@@ -1893,9 +2498,10 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         spec->mangled = arena_strndup(vm, mb.p, (int)mb.len);
         spec->state   = TI_SPECIALIZED;
         spec->spec    = def;
+        spec->nargs   = total;
         spec->args    = memcpy(arena_alloc(&vm->compiler.parser_arena,
-                                           sizeof(TemplateArg) * t->nparams),
-                               args, sizeof(TemplateArg) * t->nparams);
+                                           sizeof(TemplateArg) * (total + 1)),
+                               args, sizeof(TemplateArg) * total);
         hashmap_put(&vm->compiler.template_insts, spec->mangled, spec);
         snapshot_restore(vm, &snap);
         vm->error_jmp_buf = saved_jb;
@@ -1903,18 +2509,21 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     }
     bool from_spec = found && found->state == TI_SPECIALIZED;
     if (found) {
-        for (int i = 0; i < t->nparams; i++) {
+        bool clash = found->tmpl != t || found->nargs != total;
+        for (int i = 0; !clash && i < total; i++) {
+            int        pi = i < t->nparams ? i : t->nparams - 1;
             const Obj *x = found->args[i].sym, *y = args[i].sym;
             Type      *xa = root_aggregate(found->args[i].ty);
             Type      *ya = root_aggregate(args[i].ty);
-            if ((t->params[i].type_start &&
-                 (!x != !y || (x && strcmp(x->name, y->name)))) ||
-                xa != ya)
-                error_tok(vm, site,
-                          "cannot name the instance: '%s' is also the name of "
-                          "a different instance",
-                          mb.p);
+            clash         = (t->params[pi].type_start &&
+                             (!x != !y || (x && strcmp(x->name, y->name)))) ||
+                            xa != ya;
         }
+        if (clash)
+            error_tok(vm, site,
+                      "cannot name the instance: '%s' is also the name of "
+                      "a different instance",
+                      mb.p);
         if (!from_spec) {
             snapshot_restore(vm, &snap);
             vm->error_jmp_buf = saved_jb;
@@ -1961,13 +2570,15 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                 bind_param(vm, impl, k, var_ty, &var, bindings, &unused);
             }
         } else {
-            for (int i = 0; i < t->nparams; i++)
+            for (int i = 0; i < fixed; i++)
                 bind_state(vm, t, i, state, args, &bindings);
+            if (pack)
+                bind_pack(vm, t, fixed, total, state, args, &bindings);
         }
         mangled = arena_strndup(vm, mb.p, (int)mb.len);
         args    = memcpy(arena_alloc(&vm->compiler.parser_arena,
-                                     sizeof(TemplateArg) * t->nparams),
-                         args, sizeof(TemplateArg) * t->nparams);
+                                     sizeof(TemplateArg) * (total + 1)),
+                         args, sizeof(TemplateArg) * total);
 
         inst    = arena_alloc(&vm->compiler.parser_arena, sizeof(*inst));
         memset(inst, 0, sizeof(*inst));
@@ -1975,6 +2586,7 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         inst->mangled = mangled;
         inst->state   = TI_IN_PROGRESS;
         inst->args    = args;
+        inst->nargs   = total;
         hashmap_put(&vm->compiler.template_insts, mangled, inst);
         inst->next_inst = t->insts;
         t->insts        = inst;
@@ -1983,7 +2595,7 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         impl = t;
     vm->compiler.tmpl_depth++;
 
-    for (int i = 0; i < t->nparams && !from_spec && impl == t; i++)
+    for (int i = 0; i < fixed && !from_spec && impl == t; i++)
         if (state[i].hidden) {
             state[i].hidden->name = arena_format(
                 vm, "__cccc_tp_%s__%.*s", mangled, (int)t->params[i].name->len,
@@ -2002,10 +2614,11 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
 
     // The prototype or `struct M;` is declared first so the body can refer to
     // the instance (recursion, `struct M *next`). Enums and typedefs have none.
+    int    npack   = tmpl_has_pack(impl) ? total - fixed : -1;
     Token *forward = NULL;
     if (t->kind == TMPL_FUNC) {
         forward = clone_template(vm, impl, mangled, impl->body_open, true,
-                                 local, frame);
+                                 local, frame, npack);
     } else if (t->kind == TMPL_STRUCT || t->kind == TMPL_UNION) {
         forward = tokenize_string(
             vm, "<template>",
@@ -2013,7 +2626,8 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                          t->kind == TMPL_UNION ? "union" : "struct", mangled));
         convert_pp_tokens(vm, forward);
     }
-    Token *whole = clone_template(vm, impl, mangled, NULL, false, local, frame);
+    Token *whole =
+        clone_template(vm, impl, mangled, NULL, false, local, frame, npack);
 
     Token *name_probe = synth_token(vm, mangled);
     if (forward) {
@@ -2049,13 +2663,34 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
 // the template's parameter is a constant.
 static void parse_inst_arg(VirtualMachine *vm, Template *t, int n, Token **rest,
                            Token *tok, TemplateArg *out) {
-    if (n == TMPL_MAX_ARGS)
-        error_tok(vm, tok, "too many template arguments");
     memset(out, 0, sizeof(*out));
-    if (n < t->nparams && t->params[n].type_start)
+    int pi = n < t->nparams ? n : (tmpl_has_pack(t) ? t->nparams - 1 : n);
+    if (pi < t->nparams && t->params[pi].type_start)
         parse_const_arg(vm, rest, tok, out);
     else
         out->ty = strip_arg_bounds(vm, typename(vm, rest, tok));
+}
+
+// The arguments in the list that starts at `tok` (its first `,`, or the `)`
+// that ends it): one per depth-0 comma.
+static int count_inst_args(Token *tok) {
+    int n = 0, depth = 0;
+    for (Token *p = tok; p->kind != TK_EOF; p = p->next) {
+        if (tok_is_open(p))
+            depth++;
+        else if (tok_is_close(p)) {
+            if (depth-- == 0)
+                break;
+        } else if (depth == 0 && equal(p, ","))
+            n++;
+    }
+    return n;
+}
+
+static TemplateArg *alloc_args(VirtualMachine *vm, TemplateArg *stack, int n) {
+    if (n <= TMPL_STACK_PARAMS)
+        return stack;
+    return arena_alloc(&vm->compiler.parser_arena, sizeof(TemplateArg) * n);
 }
 
 // Parses the rewritten `( Name {, Arg} )` after the `__cccc_inst` marker at
@@ -2070,8 +2705,9 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
         error_tok(vm, tok, "'%.*s' is not a template", (int)tok->len, tok->loc);
     tok = tok->next;
 
-    TemplateArg args[TMPL_MAX_ARGS];
-    int         n = 0;
+    TemplateArg  stack[TMPL_STACK_PARAMS];
+    TemplateArg *args = alloc_args(vm, stack, count_inst_args(tok));
+    int          n    = 0;
     while (equal(tok, ",")) {
         parse_inst_arg(vm, t, n, &tok, tok->next, &args[n]);
         n++;
@@ -2152,9 +2788,10 @@ Token *cc_specialize_capture(VirtualMachine *vm, Token *tok) {
         error_tok(vm, scan.name_tok, "'%s' is a %s template, not a %s", t->name,
                   kind_name(t->kind), kind_name(scan.kind));
 
-    TemplateArg args[TMPL_MAX_ARGS];
-    int         n = 0;
-    Token      *a = scan.marker->next->next;
+    Token       *a = scan.marker->next->next;
+    TemplateArg  stack[TMPL_STACK_PARAMS];
+    TemplateArg *args = alloc_args(vm, stack, count_inst_args(a) + 1);
+    int          n    = 0;
     while (!equal(a, ")")) {
         parse_inst_arg(vm, t, n, &a, a, &args[n]);
         n++;
@@ -2286,6 +2923,11 @@ static Type *pattern_inst_type(VirtualMachine *vm, Token **rest, Token *tok) {
     Template *t    = cc_find_template(vm, name);
     if (!t)
         return NULL;
+    if (tmpl_has_pack(t))
+        error_tok(vm, name,
+                  "a partial specialization pattern cannot name an instance "
+                  "of variadic template '%s'",
+                  t->name);
     TemplateArg *pat = arena_alloc(&vm->compiler.parser_arena,
                                    sizeof(TemplateArg) * t->nparams);
     int         *pat_var =
@@ -2368,12 +3010,20 @@ static void register_partial(VirtualMachine *vm, Template *pt) {
                   kind_name(t->kind), kind_name(pt->kind));
     if (vm->compiler.in_macro_mode)
         error_tok(vm, site, "@specialize is not supported in comptime code");
+    if (tmpl_has_pack(t))
+        error_tok(vm, site,
+                  "partial specialization of variadic template '%s' is not "
+                  "supported",
+                  t->name);
     if (pt->nparams > TMPL_MAX_ARGS)
         error_tok(vm, pt->params[TMPL_MAX_ARGS].name,
                   "a partial specialization takes at most %d parameters",
                   TMPL_MAX_ARGS);
     for (int k = 0; k < pt->nparams; k++) {
         TemplateParam *p = &pt->params[k];
+        if (p->is_pack)
+            error_tok(vm, p->name,
+                      "a partial specialization parameter cannot be a pack");
         if (p->def)
             error_tok(vm, p->name,
                       "a partial specialization parameter cannot have a "

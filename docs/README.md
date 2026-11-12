@@ -18,6 +18,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | [macros.md](macros.md) | *hub* — `@comptime` functions, the return model, AST building and quoting |
 | [derive.md](derive.md) | *hub* — attributes that generate code for a type: `@serialize`, `@to_json`, `@to_string`, ... |
 | [templates.md](templates.md) | `@template`, `@inst` and `@specialize`: generic structs, unions and functions |
+| [templates-variadic.md](templates-variadic.md) | Template parameter packs: `Ts...`, `sizeof...`, pattern expansion and folds |
 | [comptime-policy.md](comptime-policy.md) | What comptime code may call, and `--comptime-allow` |
 | [comptime-limits.md](comptime-limits.md) | Memory confinement and node-list checks for comptime code |
 | [security.md](security.md) | What runs or downloads while compiling, `--sandbox`, untrusted code |

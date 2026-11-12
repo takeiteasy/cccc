@@ -4119,6 +4119,8 @@ typedef struct TemplateParam {
     Type  *ty; // a constant's type, parsed on the first @inst unless dependent
     bool   dependent; // its type names an earlier parameter
     bool   needed;    // a later type or default names this parameter
+    bool   is_pack;   // `Ts...` or `int... Ns`: takes any number of arguments
+    Token *dots;      // a constant pack's `...`, left out of its declaration
 } TemplateParam;
 
 // One `@inst` argument: a type, or a constant. A constant is parsed into
@@ -4189,6 +4191,7 @@ typedef struct TemplateInstance {
     Type             *ty; // struct, union, enum and typedef instances
     Obj              *fn; // function instances
     TemplateArg      *args; // resolved arguments, to detect name clashes
+    int               nargs; // length of `args`; a parameter pack varies it
     Template         *spec; // TI_SPECIALIZED: the hand-written definition
     struct TemplateInstance *next_inst; // the template's other instances
 } TemplateInstance;
