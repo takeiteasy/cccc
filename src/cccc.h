@@ -4134,6 +4134,17 @@ typedef struct TemplateArg {
     Obj    *sym;  // pointer parameters; NULL is a null pointer
 } TemplateArg;
 
+// The argument patterns of a partial specialization or of an instance in its
+// pattern: `n` leading entries, then, with `tail >= 0`, the pack variable that
+// takes every argument after them (`Ts...`). Entry `i` of a variadic template
+// beyond its fixed parameters is an element of its pack.
+typedef struct PatList {
+    TemplateArg *pat;
+    int         *pat_var; // constant variable an entry binds, else -1
+    int          n;
+    int          tail;
+} PatList;
+
 // In a partial specialization's pattern, a template instance that names a
 // variable (`Pair@(T, U)`): the placeholder type standing for it and its
 // argument patterns.
@@ -4141,8 +4152,7 @@ typedef struct InstPat {
     struct InstPat  *next;
     struct Type     *ty;
     struct Template *tmpl;
-    TemplateArg     *pat;
-    int             *pat_var; // constant variable a position binds, else -1
+    PatList          pl;
 } InstPat;
 
 // In a pattern, an array whose length is a constant variable (`T[N]`).
@@ -4169,8 +4179,7 @@ typedef struct Template {
     struct Template *primary;     // partial: the template it specializes
     struct Template *partials;    // primary: its partial specializations
     struct Template *next_partial;
-    TemplateArg     *pat; // partial: the pattern argument per primary parameter
-    int *pat_var;       // partial: constant variable a position binds, else -1
+    PatList          pl;          // partial: the pattern's arguments
     struct Type **vars; // partial: the placeholder type of each type variable
     InstPat      *inst_pats; // partial: instances its pattern names
     ArrPat       *arr_pats;  // partial: arrays its pattern binds a length of

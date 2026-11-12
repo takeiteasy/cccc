@@ -253,6 +253,7 @@ Box@(int[3]) c;              // N is 3
 | Pattern | A type pattern may use pointers, qualifiers, arrays (`T[4]`, `T[N]`), function types, blocks and template instances (`Pair@(T, U)`) around a variable. A constant position is a value (`4`) or a bare variable (`N`); an array length is a value or a bare variable, not an expression (`T[N + 1]`) |
 | Selection | An exact `@specialize` wins; otherwise the most specialised matching partial; otherwise the template. Matching partials where none is narrower than all the others are an error |
 | Variables | Every variable appears in the pattern; no defaults. A variable that appears twice stands for one type or one value (`T, T`, `N, N`, `T[N], N`). A pattern leaves an argument out only when its default names no earlier parameter |
+| Packs | A pattern over a [variadic template](templates-variadic.md#partial-specialization) ends in a pack variable (`@specialize(T *, Ts...)`) |
 | Order | After the template, before the first `@inst` the pattern covers |
 | Name | The instance keeps its argument-list name (`Vec__char_ptr`), and its linkage follows the template |
 | Errors | `ambiguous partial specializations of 'Two' for 'Two__int_ptr__int_ptr'`, `redefinition of partial specialization of 'Vec'`, `a partial specialization must be more specific than the primary template`, `partial specialization parameter 'U' is not deduced by the pattern` |

@@ -90,7 +90,26 @@ An exact `@specialize` names the whole argument list, including an empty one.
 @specialize(short, short) struct Tuple { int both; };
 ```
 
-A partial specialization of a variadic template, and a pattern that names an instance of one, are an error.
+### Partial specialization
+
+A partial specialization names its leading arguments, then a pack variable that takes the rest, written alone as the last item (`Ts...`).
+
+```c
+@template(Ts...) struct Tuple { Ts... v; };
+@template(T, Ts...) @specialize(T *, Ts...) struct Tuple { T *head; Ts... tail; };  // first element a pointer
+@template(Ts...) @specialize(int, Ts...) struct Tuple { int first; };               // first element int
+@template(T) @specialize(T *) struct Tuple { T *only; };                            // exactly one pointer
+@template(T, int... Ms) @specialize(T, 0, Ms...) struct Nd { int rest[sizeof...(Ms) + 1]; };
+```
+
+The body sees the pack variable as a pack: `sizeof...(Ts)`, `Ts...[k]`, `Ts... name` and folds work on the arguments it took. A pattern may also name an instance of a variadic template: `@specialize(Pack@(T, Ts...))`.
+
+| Rule | Detail |
+|---|---|
+| Length | Without a pack variable a pattern matches that many arguments; with one, that many or more. `(T, Ts...)` matches one argument or more |
+| Selection | The most specialised matching partial wins: `(T, U)` over `(T, U, Ts...)` over `(T, Ts...)`, and `(int, Ts...)` over `(T, Ts...)`. Partials where none is narrower than all the others are an error |
+| Pack variable | A pack parameter of the `@template`, of the same kind (types or constants) as the pack it takes, used once, written `Ts...` as the last item of a list |
+| Errors | `a pack in a pattern is written alone as the last item, 'Ts...'`, `pack 'Ts' appears twice in the pattern`, `cannot expand pack 'Ts' into template 'Pair', which is not variadic`, `a partial specialization must be more specific than the primary template` |
 
 ## Instance names
 
@@ -109,7 +128,8 @@ An instance is `Name__Arg` for each argument, as for any template[^names].
 | Float or pointer constant packs | Compile error |
 | A pack parameter in the middle of the list, or two packs | Compile error |
 | Defaults in a template with a pack | Compile error |
-| Partial specialization of a variadic template | Compile error |
+| A pattern on each pack element (`Ts *...`) | Compile error |
+| A pack variable used twice in one pattern | Compile error |
 | A pack expansion inside another pack's pattern | Compile error |
 | Expanding another instance's members (`t.v0...`) | Compile error |
 
