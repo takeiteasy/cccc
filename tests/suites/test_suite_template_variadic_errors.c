@@ -104,12 +104,6 @@ void test_constant_pack_takes_constants(void) {
 @template(int *...Ps) int ptrs(void) {
     return 0;
 }
-@template(T, T... Vs) int dep(void) {
-    return 0;
-}
-@template(int... Ns) @specialize(double, Ns...) int dep(void) {
-    return 1;
-}
 
 [[cccc::test(error = "NaN is not a valid template argument")]]
 void test_float_pack_rejects_nan(void) {
@@ -125,11 +119,6 @@ void test_long_double_pack_is_rejected(void) {
 void test_pointer_pack_needs_static_storage(void) {
     int local = 0;
     ptrs @(&local)();
-}
-
-[[cccc::test(error = "cannot take float or pointer constants in a partial")]]
-void test_partial_tail_over_float_pack_is_rejected(void) {
-    dep @(double, 1.0)();
 }
 
 @template(Ts...) struct Amb {

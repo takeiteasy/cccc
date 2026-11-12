@@ -440,3 +440,54 @@ void test_element_pattern_ranks_with_leading_items(void) {
     AssertEq(sizeof(c.kind), 3);
     AssertEq(sizeof(d.kind), 1);
 }
+
+// Float and pointer constant packs.
+@template(double... Ds) double fold(void) {
+    return 0;
+}
+@template(double... Ds) @specialize(1.0, Ds...) double fold(void) {
+    return 100 + sizeof...(Ds) + (Ds + ... + 0.0);
+}
+
+static int vp_a = 3, vp_b = 4;
+
+@template(int *... Ps) int deref(void) {
+    return 0;
+}
+@template(int *... Ps) @specialize(&vp_a, Ps...) int deref(void) {
+    return 10 * sizeof...(Ps) + (*Ps + ... + 0);
+}
+
+[[cccc::test]]
+void test_float_pack_variable(void) {
+    AssertEq(fold @(1.0, 2.0, 4.0)(), 108.0);
+    AssertEq(fold @(1.0)(), 100.0);
+    AssertEq(fold @(2.0, 4.0)(), 0.0);
+    AssertEq(fold @()(), 0.0);
+}
+
+[[cccc::test]]
+void test_pointer_pack_variable(void) {
+    AssertEq(deref @(&vp_a, &vp_b, &vp_a)(), 27);
+    AssertEq(deref @(&vp_a)(), 0);
+    AssertEq(deref @(&vp_b, &vp_a)(), 0);
+}
+
+// The pack of a dependent primary takes whatever its first argument is, so a
+// partial over integers does not match a float instance.
+@template(T, T... Vs) int dep(void) {
+    return 0;
+}
+@template(int... Ns) @specialize(int, Ns...) int dep(void) {
+    return 1 + sizeof...(Ns);
+}
+@template(int... Ns) @specialize(double, Ns...) int dep(void) {
+    return 99;
+}
+
+[[cccc::test]]
+void test_dependent_pack_skips_a_partial_of_the_wrong_kind(void) {
+    AssertEq(dep @(int, 1, 2)(), 3);
+    AssertEq(dep @(int)(), 1);
+    AssertEq(dep @(double, 1.0)(), 0);
+}

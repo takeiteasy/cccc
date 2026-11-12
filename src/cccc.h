@@ -4127,6 +4127,7 @@ typedef struct TemplateParam {
 // `expr` and bound to its parameter's type once that type is known.
 typedef struct TemplateArg {
     Type   *ty;
+    Type   *cty; // a constant's parameter type, set with its value
     Node   *expr;
     int64_t val;
     bool    val_unsigned;

@@ -19,7 +19,7 @@ int s = sum@(int, long)(40, 2);                        // sum__int__long
 | `double... Ds` | Any number of floats | `@template(double... Ds)` |
 | `int *... Ps`, `int (*...Fs)(int)` | Any number of pointers or functions | `@template(int (*...Fs)(int))` |
 
-The pack is the last parameter, and a template has one. A pack takes no default, and a template with a pack has no defaulted parameters. A constant pack has any type a single constant parameter has (an integer up to 64 bits, `float`, `double` or a pointer), and each element follows the same rules as that single parameter. A partial specialization's pack variable takes integer packs only: `pack 'Ns' cannot take float or pointer constants`.
+The pack is the last parameter, and a template has one. A pack takes no default, and a template with a pack has no defaulted parameters. A constant pack has any type a single constant parameter has (an integer up to 64 bits, `float`, `double` or a pointer), and each element follows the same rules as that single parameter. A [partial specialization](#partial-specialization)'s pack variable has the kind of the pack it takes: `pack 'Ns' holds integer constants, but 'f' takes floating ones`.
 
 ```c
 @inst(int, 2, 3, 4) Nd nd;      // @template(T, int... Ns) struct Nd {...}
@@ -137,7 +137,6 @@ An instance is `Name__Arg` for each argument, as for any template[^names].
 
 | Not supported | Result |
 |---|---|
-| A partial specialization's pack variable over a float or pointer pack | Compile error |
 | A pack parameter in the middle of the list, or two packs | Compile error |
 | Defaults in a template with a pack | Compile error |
 | A pack variable used twice in one pattern | Compile error |

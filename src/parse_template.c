@@ -1677,6 +1677,49 @@ static bool const_fits(Type *ty, int64_t v, bool v_unsigned) {
            (bits >= 64 ? (uint64_t)INT64_MAX : (1ULL << (bits - 1)) - 1);
 }
 
+static bool pointer_kind_matches(const Obj *sym, Type *pty) {
+    return (pty->base->kind == TY_FUNC) == (sym->ty->kind == TY_FUNC);
+}
+
+// Whether `sym` points to a type compatible with parameter type `pty`'s
+// pointee, ignoring top-level qualifiers.
+static bool pointer_target_compatible(VirtualMachine *vm, const Obj *sym,
+                                      Type *pty) {
+    if (pty->base->kind == TY_VOID)
+        return true;
+    Type *have = sym->ty->kind == TY_ARRAY ? sym->ty->base : sym->ty;
+    Type *a = copy_type(vm, pty->base), *b = copy_type(vm, have);
+    a->is_const = a->is_volatile = b->is_const = b->is_volatile = false;
+    return is_compatible(a, b);
+}
+
+static bool is_float_kind(Type *ty) {
+    return ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE;
+}
+
+// "integer", "floating" or "pointer": what a constant of type `ty` can bind.
+static const char *const_kind(Type *ty) {
+    return is_integer(ty)      ? "integer"
+           : is_float_kind(ty) ? "floating"
+                               : "pointer";
+}
+
+// Whether constant `arg` is a value that variable type `ty` can take: the same
+// kind (integer, floating or pointer), and a value it represents exactly. An
+// argument without a type is an integer (an array length).
+static bool arg_fits(VirtualMachine *vm, Type *ty, const TemplateArg *arg) {
+    Type *cty = arg->cty;
+    if (is_integer(ty))
+        return (!cty || is_integer(cty)) &&
+               const_fits(ty, arg->val, arg->val_unsigned);
+    if (is_float_kind(ty))
+        return cty && is_float_kind(cty) &&
+               (ty->kind == TY_DOUBLE || (double)(float)arg->fval == arg->fval);
+    return cty && cty->kind == TY_PTR &&
+           (!arg->sym || (pointer_kind_matches(arg->sym, ty) &&
+                          pointer_target_compatible(vm, arg->sym, ty)));
+}
+
 // The pointer a constant argument names: a function, a file-scope or static
 // object (or an array, as its first element), or null (NULL). `expr` is the
 // argument and `pty` the parameter's pointer type.
@@ -1719,25 +1762,19 @@ static Obj *pointer_arg(VirtualMachine *vm, Node *expr, Type *pty, Token *site) 
                   "object with file-scope or static storage",
                   sym->display_name ? sym->display_name : sym->name);
 
-    bool want_fn = pty->base->kind == TY_FUNC;
-    bool is_fn   = sym->ty->kind == TY_FUNC;
-    if (want_fn != is_fn)
+    if (!pointer_kind_matches(sym, pty))
         error_tok(vm, site,
-                  want_fn ? "'%s' is an object but the template parameter "
-                            "points to a function"
-                          : "'%s' is a function but the template parameter "
-                            "points to an object",
+                  pty->base->kind == TY_FUNC
+                      ? "'%s' is an object but the template parameter "
+                        "points to a function"
+                      : "'%s' is a function but the template parameter "
+                        "points to an object",
                   sym->name);
-    Type *have = sym->ty->kind == TY_ARRAY ? sym->ty->base : sym->ty;
-    if (pty->base->kind != TY_VOID) {
-        Type *a = copy_type(vm, pty->base), *b = copy_type(vm, have);
-        a->is_const = a->is_volatile = b->is_const = b->is_volatile = false;
-        if (!is_compatible(a, b))
-            error_tok(vm, site,
-                      "template argument '%s' does not match the parameter's "
-                      "pointer type",
-                      sym->name);
-    }
+    if (!pointer_target_compatible(vm, sym, pty))
+        error_tok(vm, site,
+                  "template argument '%s' does not match the parameter's "
+                  "pointer type",
+                  sym->name);
     warn_implicit_conversion(vm, expr, pty, site);
     return sym;
 }
@@ -1800,6 +1837,7 @@ static void param_value(VirtualMachine *vm, Template *t, int i, Type *ty,
     TemplateParam *p = &t->params[i];
     add_type(vm, arg->expr);
     Type *aty = arg->expr->ty;
+    arg->cty  = ty;
     if (is_integer(ty)) {
         arg->val          = eval(vm, arg->expr);
         arg->val_unsigned = aty && aty->is_unsigned;
@@ -2022,6 +2060,19 @@ static void mark_instance(VirtualMachine *vm, TemplateInstance *inst,
     obj_fn_mut(vm, inst->fn)->tmpl_origin = t->start;
 }
 
+// Names the constexpr object of a bound float or pointer parameter (element
+// `elem` of a pack, or -1) after the instance, and links it.
+static void link_hidden(VirtualMachine *vm, Obj *obj, const char *mangled,
+                        const TemplateParam *p, int elem) {
+    if (!obj)
+        return;
+    obj->name = elem < 0 ? arena_format(vm, "__cccc_tp_%s__%.*s", mangled,
+                                        (int)p->name->len, p->name->loc)
+                         : arena_format(vm, "__cccc_tp_%s__%.*s_%d", mangled,
+                                        (int)p->name->len, p->name->loc, elem);
+    link_gvar(vm, obj);
+}
+
 #define TMPL_STACK_PARAMS 16
 
 // Per-parameter state of one instantiation.
@@ -2088,8 +2139,8 @@ static void bind_pack(VirtualMachine *vm, Template *t, int fixed, int total,
 // pack variable is the slice of arguments it took.
 typedef struct {
     Type              *ty[TMPL_MAX_ARGS];
-    int64_t            val[TMPL_MAX_ARGS];
-    bool               unsig[TMPL_MAX_ARGS];
+    TemplateArg        cv[TMPL_MAX_ARGS];  // a constant variable's value
+    int                var[TMPL_MAX_ARGS]; // or the argument pattern's variable
     bool               set[TMPL_MAX_ARGS];
     bool               is_var[TMPL_MAX_ARGS];
     const TemplateArg *pk[TMPL_MAX_ARGS];
@@ -2108,9 +2159,8 @@ typedef struct {
 
 // A constant argument: a value, or variable `var` of the argument pattern.
 typedef struct {
-    int64_t val;
-    bool    unsig;
-    int     var;
+    const TemplateArg *arg;
+    int                var;
 } ConstArg;
 
 // The parameter of `t` that entry `i` of an argument list belongs to.
@@ -2247,15 +2297,17 @@ static bool same_const(const TemplateArg *a, const TemplateArg *b) {
 // bound to the same value.
 static bool bind_const(Matcher *m, int k, ConstArg c) {
     Deduced *d = m->d;
-    if (c.var < 0 && !const_fits(param_type(m->vm, m->pt, k), c.val, c.unsig))
+    if (c.var < 0 && !arg_fits(m->vm, param_type(m->vm, m->pt, k), c.arg))
         return false;
-    int64_t v = c.var >= 0 ? c.var : c.val;
-    if (d->set[k])
-        return d->is_var[k] == (c.var >= 0) && d->val[k] == v;
+    if (d->set[k]) {
+        if (d->is_var[k] != (c.var >= 0))
+            return false;
+        return c.var >= 0 ? d->var[k] == c.var : same_const(&d->cv[k], c.arg);
+    }
     d->set[k]    = true;
     d->is_var[k] = c.var >= 0;
-    d->val[k]    = v;
-    d->unsig[k]  = c.unsig;
+    d->var[k]    = c.var;
+    d->cv[k]     = *c.arg;
     return true;
 }
 
@@ -2271,8 +2323,7 @@ static bool bind_tail(Matcher *m, const PatList *pl, const TemplateArg *args,
     if (m->pt->params[k].type_start)
         for (int i = from; i < nargs; i++)
             if (!(apl && apl->pat_var[i] >= 0) &&
-                !const_fits(param_type(m->vm, m->pt, k), args[i].val,
-                            args[i].val_unsigned))
+                !arg_fits(m->vm, param_type(m->vm, m->pt, k), &args[i]))
                 return false;
     const TemplateArg *els = args + from;
     if (pl->tail_pat) {
@@ -2318,8 +2369,7 @@ static bool match_args(Matcher *m, const Template *t, const PatList *pl,
                 return false;
             continue;
         }
-        ConstArg c = {args[i].val, args[i].val_unsigned,
-                      apl ? apl->pat_var[i] : -1};
+        ConstArg c = {&args[i], apl ? apl->pat_var[i] : -1};
         if (pl->pat_var[i] < 0) {
             if (c.var >= 0 || !same_const(&pl->pat[i], &args[i]))
                 return false;
@@ -2395,7 +2445,8 @@ static bool match_type(Matcher *m, Type *pat, Type *arg) {
             ArrPat *ap    = arr_pat_of(m->pt, pat);
             ArrPat *other = arr_pat_of(m->arg_pt, arg);
             if (ap) {
-                ConstArg c = {arg->array_len, false, -1};
+                TemplateArg len = {.val = arg->array_len};
+                ConstArg    c   = {&len, -1};
                 if (other)
                     c.var = other->var;
                 else if (arg->is_flexible || arg->array_len < 0)
@@ -2628,15 +2679,6 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         t                          = found->spec;
     } else {
         Deduced deduced;
-        if (pack && total > fixed && t->params[fixed].type_start &&
-            !is_integer(state[fixed].ty))
-            for (Template *c = t->partials; c; c = c->next_partial)
-                if (c->pl.tail >= 0)
-                    error_tok(vm, site,
-                              "pack '%.*s' cannot take float or pointer "
-                              "constants in a partial specialization",
-                              (int)t->params[fixed].name->len,
-                              t->params[fixed].name->loc);
         impl = t->partials
                    ? select_partial(vm, t, args, total, &deduced, site, mb.p)
                    : NULL;
@@ -2646,24 +2688,29 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
             memset(bindings, 0, sizeof(Scope));
             vm->compiler.tmpl_bindings = bindings;
             for (int k = 0; k < impl->nparams; k++) {
-                if (impl->params[k].is_pack) {
+                TemplateParam *p = &impl->params[k];
+                if (p->is_pack) {
                     npack = deduced.pk_n[k];
-                    bind_pack_elems(vm, &impl->params[k], deduced.pk[k], npack,
-                                    impl->params[k].type_start
-                                        ? param_type(vm, impl, k)
-                                        : NULL,
-                                    bindings, NULL);
+                    Obj **hidden = arena_alloc(&vm->compiler.parser_arena,
+                                               sizeof(Obj *) * (npack + 1));
+                    memset(hidden, 0, sizeof(Obj *) * (npack + 1));
+                    bind_pack_elems(vm, p, deduced.pk[k], npack,
+                                    p->type_start ? param_type(vm, impl, k)
+                                                  : NULL,
+                                    bindings, hidden);
+                    for (int e = 0; e < npack; e++)
+                        link_hidden(vm, hidden[e], mb.p, p, e);
                     continue;
                 }
                 TemplateArg var    = {};
                 Type       *var_ty = deduced.ty[k];
-                if (impl->params[k].type_start) {
-                    var.val          = deduced.val[k];
-                    var.val_unsigned = deduced.unsig[k];
-                    var_ty           = param_type(vm, impl, k);
+                if (p->type_start) {
+                    var    = deduced.cv[k];
+                    var_ty = param_type(vm, impl, k);
                 }
-                Obj *unused = NULL;
-                bind_param(vm, impl, k, var_ty, &var, bindings, &unused);
+                Obj *hidden = NULL;
+                bind_param(vm, impl, k, var_ty, &var, bindings, &hidden);
+                link_hidden(vm, hidden, mb.p, p, -1);
             }
         } else {
             for (int i = 0; i < fixed; i++)
@@ -2694,16 +2741,8 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     vm->compiler.tmpl_depth++;
 
     for (int i = 0; i < total && !from_spec && impl == t; i++)
-        if (state[i].hidden) {
-            const TemplateParam *p = &t->params[param_at(t, i)];
-            state[i].hidden->name =
-                i < fixed
-                    ? arena_format(vm, "__cccc_tp_%s__%.*s", mangled,
-                                   (int)p->name->len, p->name->loc)
-                    : arena_format(vm, "__cccc_tp_%s__%.*s_%d", mangled,
-                                   (int)p->name->len, p->name->loc, i - fixed);
-            link_gvar(vm, state[i].hidden);
-        }
+        link_hidden(vm, state[i].hidden, mangled, &t->params[param_at(t, i)],
+                    i < fixed ? -1 : i - fixed);
 
     ExpansionFrame *frame =
         arena_alloc(&vm->compiler.parser_arena, sizeof(ExpansionFrame));
@@ -3036,9 +3075,13 @@ static int pattern_tail(VirtualMachine *vm, Template *pt, Template *t, Token *a,
                   pt->params[k].type_start ? "types" : "constants");
     const TemplateParam *tp = &t->params[t->nparams - 1];
     if (tp->type_start && !tp->dependent &&
-        !is_integer(param_type(vm, t, t->nparams - 1)))
-        error_tok(vm, a, "pack '%.*s' cannot take float or pointer constants",
-                  (int)pt->params[k].name->len, pt->params[k].name->loc);
+        strcmp(const_kind(param_type(vm, pt, k)),
+               const_kind(param_type(vm, t, t->nparams - 1))))
+        error_tok(vm, a,
+                  "pack '%.*s' holds %s constants, but '%s' takes %s ones",
+                  (int)pt->params[k].name->len, pt->params[k].name->loc,
+                  const_kind(param_type(vm, pt, k)), t->name,
+                  const_kind(param_type(vm, t, t->nparams - 1)));
     if (pack_var_taken(pt, k))
         error_tok(vm, a, "pack '%.*s' appears twice in the pattern",
                   (int)pt->params[k].name->len, pt->params[k].name->loc);
@@ -3082,12 +3125,21 @@ static Token *parse_pattern_args(VirtualMachine *vm, Template *pt, Template *t,
         Token *rest = NULL;
         if (t->params[pi].type_start) {
             if (bare >= 0) {
-                if (t->params[pi].dependent ||
-                    !is_integer(param_type(vm, t, pi)))
+                if (t->params[pi].dependent)
                     error_tok(vm, a,
-                              "'%.*s' cannot bind a parameter that is not a "
-                              "plain integer constant",
-                              (int)a->len, a->loc);
+                              "'%.*s' cannot bind '%.*s': its type depends on "
+                              "another parameter",
+                              (int)a->len, a->loc, (int)t->params[pi].name->len,
+                              t->params[pi].name->loc);
+                Type *var_ty = param_type(vm, pt, bare);
+                Type *par_ty = param_type(vm, t, pi);
+                if (strcmp(const_kind(var_ty), const_kind(par_ty)))
+                    error_tok(vm, a,
+                              "'%.*s' has %s type and cannot bind '%.*s', "
+                              "which has %s type",
+                              (int)a->len, a->loc, const_kind(var_ty),
+                              (int)t->params[pi].name->len,
+                              t->params[pi].name->loc, const_kind(par_ty));
                 pat_var[given] = bare;
             } else {
                 parse_const_arg(vm, &rest, a, &pat[given]);
@@ -3198,6 +3250,11 @@ int cc_template_pattern_length_var(VirtualMachine *vm, Token *tok) {
         error_tok(vm, named,
                   "'%.*s' must be the whole array length in a pattern",
                   (int)named->len, named->loc);
+    if (!is_integer(param_type(vm, pt, var)))
+        error_tok(vm, named,
+                  "'%.*s' must have an integer type to be an array "
+                  "length",
+                  (int)named->len, named->loc);
     return var;
 }
 
@@ -3264,11 +3321,7 @@ static void register_partial(VirtualMachine *vm, Template *pt) {
 
     for (int k = 0; k < pt->nparams; k++) {
         if (pt->params[k].type_start) {
-            Type *ty = param_type(vm, pt, k);
-            if (!is_integer(ty))
-                error_tok(vm, pt->params[k].name,
-                          "a partial specialization constant must have an "
-                          "integer type");
+            param_type(vm, pt, k);
             continue;
         }
         Type *ph                         = struct_type(vm);

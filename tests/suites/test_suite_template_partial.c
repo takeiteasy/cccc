@@ -167,3 +167,96 @@ void test_instance_names_ignore_the_partial(void) {
     struct Vec__int_ptr *b = &a;
     AssertTrue(b == &a);
 }
+
+// Float and pointer constants bind partial specialization variables.
+@template(double A, double B) struct FPair {
+    char kind;
+};
+@template(double D) @specialize(D, D) struct FPair {
+    char   kind[2];
+    double v[(int)D];
+};
+@template(float F) @specialize(F, 1.0) struct FPair {
+    char kind[3];
+};
+
+@template(double A, double B) double fsum(void) {
+    return A + B;
+}
+@template(double D) @specialize(D, D) double fsum(void) {
+    return D * 100;
+}
+
+[[cccc::test]]
+void test_float_variable_binds_repeated_value(void) {
+    @inst(2.0, 2.0) FPair a;
+    @inst(2.0, 3.0) FPair b;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(a.v), 2 * sizeof(double));
+    AssertEq(sizeof(b.kind), 1);
+}
+
+[[cccc::test]]
+void test_float_variable_must_represent_the_value(void) {
+    @inst(0.5, 1.0) FPair exact;
+    @inst(0.1, 1.0) FPair inexact;
+    AssertEq(sizeof(exact.kind), 3);
+    AssertEq(sizeof(inexact.kind), 1);
+}
+
+[[cccc::test]]
+void test_float_variable_is_readable_in_the_body(void) {
+    AssertEq(fsum @(1.5, 1.5)(), 150.0);
+    AssertEq(fsum @(1.5, 2.5)(), 4.0);
+}
+
+static int tp_a, tp_b;
+static int tp_fn(void) {
+    return 1;
+}
+
+@template(int *P, int *Q) struct PPair {
+    char kind;
+};
+@template(int *P) @specialize(P, P) struct PPair {
+    char kind[2];
+};
+
+@template(int *P, int *Q) int pread(void) {
+    return 0;
+}
+@template(int *P) @specialize(P, P) int pread(void) {
+    return *P + 10;
+}
+
+@template(int (*F)(void), int (*G)(void)) int pcall(void) {
+    return 0;
+}
+@template(int (*F)(void)) @specialize(F, F) int pcall(void) {
+    return F() + 20;
+}
+
+[[cccc::test]]
+void test_pointer_variable_binds_repeated_object(void) {
+    @inst(&tp_a, &tp_a) PPair a;
+    @inst(&tp_a, &tp_b) PPair b;
+    @inst(0, 0) PPair c;
+    @inst(&tp_a, 0) PPair d;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 1);
+    AssertEq(sizeof(c.kind), 2);
+    AssertEq(sizeof(d.kind), 1);
+}
+
+[[cccc::test]]
+void test_pointer_variable_is_readable_in_the_body(void) {
+    tp_a = 5;
+    AssertEq(pread @(&tp_a, &tp_a)(), 15);
+    AssertEq(pread @(&tp_a, &tp_b)(), 0);
+}
+
+[[cccc::test]]
+void test_function_pointer_variable(void) {
+    AssertEq(pcall @(tp_fn, tp_fn)(), 21);
+    AssertEq(pcall @(tp_fn, 0)(), 0);
+}
