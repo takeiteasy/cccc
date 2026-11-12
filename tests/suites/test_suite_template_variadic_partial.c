@@ -491,3 +491,129 @@ void test_dependent_pack_skips_a_partial_of_the_wrong_kind(void) {
     AssertEq(dep @(int)(), 1);
     AssertEq(dep @(double, 1.0)(), 0);
 }
+
+// A pack variable used more than once stands for one argument list.
+@template(Ts...) struct Bag {
+    char k;
+};
+@template(Ts...) struct Bag2 {
+    char k;
+};
+@template(Ts...) struct Twin {
+    char kind;
+};
+@template(Ts...) @specialize(Bag @(Ts...), Ts...) struct Twin {
+    char kind[2];
+};
+@template(T, Ts...) @specialize(T, Ts...) struct Twin {
+    char kind[3];
+};
+
+[[cccc::test]]
+void test_repeated_pack_variable_needs_equal_lists(void) {
+    @inst(Bag @(int, char), int, char) Twin       a;
+    @inst(Bag @(int, char), int, long) Twin       b;
+    @inst(Bag @(int, char), int) Twin             c;
+    @inst(Bag @(int, char), int, char, char) Twin d;
+    @inst(Bag @(int, char), char, int) Twin       e;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 3);
+    AssertEq(sizeof(c.kind), 3);
+    AssertEq(sizeof(d.kind), 3);
+    AssertEq(sizeof(e.kind), 3);
+}
+
+[[cccc::test]]
+void test_repeated_pack_variable_matches_empty_lists(void) {
+    @inst(Bag @()) Twin a;
+    @inst(int) Twin     b;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 3);
+}
+
+[[cccc::test]]
+void test_repeated_pack_variable_compares_qualified_types(void) {
+    @inst(Bag @(int *, const char), int *, const char) Twin a;
+    @inst(Bag @(int *, const char), int *, char) Twin       b;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 3);
+}
+
+@template(Ts...) struct PtrTwin {
+    char kind;
+};
+@template(Ts...) @specialize(Bag @(Ts *...), Ts...) struct PtrTwin {
+    char kind[2];
+};
+@template(Ts...) @specialize(Bag @(Ts...), Ts...) struct PtrTwin {
+    char kind[3];
+};
+
+[[cccc::test]]
+void test_repeated_pack_variable_with_an_element_pattern(void) {
+    @inst(Bag @(int *, char *), int, char) PtrTwin     a;
+    @inst(Bag @(int *, char *), int, long) PtrTwin     b;
+    @inst(Bag @(int, char), int, char) PtrTwin         c;
+    @inst(Bag @(int *, char *), int *, char *) PtrTwin d;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 1);
+    AssertEq(sizeof(c.kind), 3);
+    AssertEq(sizeof(d.kind), 3);
+}
+
+@template(int... Ns) struct Row {
+    char k;
+};
+@template(T, int... Ns) struct Grid {
+    char kind;
+};
+@template(int... Ns) @specialize(Row @(Ns...), Ns...) struct Grid {
+    char kind[2];
+};
+
+[[cccc::test]]
+void test_repeated_constant_pack_variable(void) {
+    @inst(Row @(1, 2), 1, 2) Grid a;
+    @inst(Row @(1, 2), 1, 3) Grid b;
+    @inst(Row @(1, 2), 1) Grid    c;
+    @inst(Row @()) Grid           d;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 1);
+    AssertEq(sizeof(c.kind), 1);
+    AssertEq(sizeof(d.kind), 2);
+}
+
+@template(double... Ds) struct FRow {
+    char k;
+};
+@template(T, double... Ds) struct FGrid {
+    char kind;
+};
+@template(double... Ds) @specialize(FRow @(Ds...), Ds...) struct FGrid {
+    char kind[2];
+};
+
+[[cccc::test]]
+void test_repeated_float_pack_variable(void) {
+    @inst(FRow @(1.5, 2.5), 1.5, 2.5) FGrid a;
+    @inst(FRow @(1.5, 2.5), 1.5, 2.0) FGrid b;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 1);
+}
+
+@template(A, B) struct Join {
+    char kind;
+};
+@template(Ts...) @specialize(Bag @(Ts...), Bag2 @(Ts...)) struct Join {
+    char kind[2];
+};
+
+[[cccc::test]]
+void test_pack_variable_shared_by_two_instance_patterns(void) {
+    @inst(Bag @(int, char), Bag2 @(int, char)) Join a;
+    @inst(Bag @(int, char), Bag2 @(int, long)) Join b;
+    @inst(Bag @(int, char), Bag2 @(int)) Join       c;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 1);
+    AssertEq(sizeof(c.kind), 1);
+}

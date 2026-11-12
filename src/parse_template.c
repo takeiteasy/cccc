@@ -2134,6 +2134,19 @@ static void bind_pack(VirtualMachine *vm, Template *t, int fixed, int total,
 
 // ---- partial specialization -----------------------------------------------
 
+// The arguments a pack variable took: `n` of them, then, when the argument
+// list is another pattern with an open tail, every argument that tail stands
+// for (`open_ty` is the type of each, `open_var` the variable of a constant
+// pack). `vars` is the argument pattern's constant variables, if any.
+typedef struct {
+    const TemplateArg *els;
+    int                n;
+    const int         *vars;
+    bool               open;
+    Type              *open_ty;
+    int                open_var;
+} PackBind;
+
 // What a partial specialization's variables stood for in one match. A constant
 // is a value or, when two patterns are compared, a variable of the other. A
 // pack variable is the slice of arguments it took.
@@ -2143,8 +2156,7 @@ typedef struct {
     int                var[TMPL_MAX_ARGS]; // or the argument pattern's variable
     bool               set[TMPL_MAX_ARGS];
     bool               is_var[TMPL_MAX_ARGS];
-    const TemplateArg *pk[TMPL_MAX_ARGS];
-    int                pk_n[TMPL_MAX_ARGS];
+    PackBind           pk[TMPL_MAX_ARGS];
 } Deduced;
 
 // A match of `pt`'s pattern. When two partials are compared, `arg_pt` is the
@@ -2313,21 +2325,50 @@ static bool bind_const(Matcher *m, int k, ConstArg c) {
 
 static bool match_type(Matcher *m, Type *pat, Type *arg);
 
+// Whether two argument lists bound to pack variable `k` are one list: the same
+// length, each element the same type or value, and the same open tail.
+static bool same_pack(Matcher *m, int k, const PackBind *a, const PackBind *b) {
+    if (a->n != b->n || a->open != b->open)
+        return false;
+    bool is_const = m->pt->params[k].type_start;
+    for (int i = 0; i < a->n; i++) {
+        int av = a->vars ? a->vars[i] : -1, bv = b->vars ? b->vars[i] : -1;
+        if (!is_const) {
+            if (!same_arg_type(m->vm, a->els[i].ty, b->els[i].ty, m->site))
+                return false;
+        } else if (av >= 0 || bv >= 0) {
+            if (av != bv)
+                return false;
+        } else if (!same_const(&a->els[i], &b->els[i])) {
+            return false;
+        }
+    }
+    if (!a->open)
+        return true;
+    if (is_const)
+        return a->open_var == b->open_var;
+    return a->open_ty && b->open_ty &&
+           same_arg_type(m->vm, a->open_ty, b->open_ty, m->site);
+}
+
 // Binds `pl`'s pack variable to the arguments `[pl->n, nargs)`. A constant
 // pack's elements must fit its type; when `apl` is the argument pattern, an
 // element that is one of its variables fits any. With an element pattern, the
-// variable is bound to what each argument matched.
+// variable is bound to what each argument matched. A variable that is already
+// bound (it appears twice) must be bound to the same list.
 static bool bind_tail(Matcher *m, const PatList *pl, const TemplateArg *args,
                       int nargs, const PatList *apl) {
-    int k = pl->tail, from = pl->n;
+    int      k = pl->tail, from = pl->n;
+    Deduced *d    = m->d;
+    bool     open = apl && apl->tail >= 0;
     if (m->pt->params[k].type_start)
         for (int i = from; i < nargs; i++)
             if (!(apl && apl->pat_var[i] >= 0) &&
                 !arg_fits(m->vm, param_type(m->vm, m->pt, k), &args[i]))
                 return false;
-    const TemplateArg *els = args + from;
+    const TemplateArg *els     = args + from;
+    Type              *open_ty = NULL;
     if (pl->tail_pat) {
-        Deduced     *d = m->d;
         TemplateArg *own =
             arena_alloc(&m->vm->compiler.parser_arena,
                         sizeof(TemplateArg) * (nargs - from + 1));
@@ -2338,19 +2379,25 @@ static bool bind_tail(Matcher *m, const PatList *pl, const TemplateArg *args,
             own[i - from].ty = d->ty[k];
         }
         // Another pattern's open tail stands for arguments of its own.
-        if (apl && apl->tail >= 0) {
+        if (open) {
             d->ty[k] = NULL;
             Type *other =
                 apl->tail_pat ? apl->tail_pat : m->arg_pt->vars[apl->tail];
             if (!match_type(m, pl->tail_pat, other))
                 return false;
+            open_ty = d->ty[k];
         }
         d->ty[k] = NULL;
         els      = own;
+    } else if (open && !m->pt->params[k].type_start) {
+        open_ty = apl->tail_pat ? apl->tail_pat : m->arg_pt->vars[apl->tail];
     }
-    m->d->set[k]  = true;
-    m->d->pk[k]   = els;
-    m->d->pk_n[k] = nargs - from;
+    PackBind got = {els,  nargs - from, apl ? apl->pat_var + from : NULL,
+                    open, open_ty,      open ? apl->tail : -1};
+    if (d->set[k])
+        return same_pack(m, k, &d->pk[k], &got);
+    d->set[k] = true;
+    d->pk[k]  = got;
     return true;
 }
 
@@ -2690,11 +2737,11 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
             for (int k = 0; k < impl->nparams; k++) {
                 TemplateParam *p = &impl->params[k];
                 if (p->is_pack) {
-                    npack = deduced.pk_n[k];
+                    npack        = deduced.pk[k].n;
                     Obj **hidden = arena_alloc(&vm->compiler.parser_arena,
                                                sizeof(Obj *) * (npack + 1));
                     memset(hidden, 0, sizeof(Obj *) * (npack + 1));
-                    bind_pack_elems(vm, p, deduced.pk[k], npack,
+                    bind_pack_elems(vm, p, deduced.pk[k].els, npack,
                                     p->type_start ? param_type(vm, impl, k)
                                                   : NULL,
                                     bindings, hidden);
@@ -3005,15 +3052,6 @@ static int pack_var_index(const Template *pt, const Token *tok) {
     return -1;
 }
 
-// Whether the pattern list of `pt` already names pack variable `k` as an
-// instance's tail.
-static bool pack_var_taken(const Template *pt, int k) {
-    for (InstPat *ip = pt->inst_pats; ip; ip = ip->next)
-        if (ip->pl.tail == k)
-            return true;
-    return false;
-}
-
 // The pack variable that `ty` names, or -1. A template has one pack.
 static int pattern_pack_var(const Template *pt, Type *ty) {
     bool used[TMPL_MAX_ARGS] = {};
@@ -3082,9 +3120,6 @@ static int pattern_tail(VirtualMachine *vm, Template *pt, Template *t, Token *a,
                   (int)pt->params[k].name->len, pt->params[k].name->loc,
                   const_kind(param_type(vm, pt, k)), t->name,
                   const_kind(param_type(vm, t, t->nparams - 1)));
-    if (pack_var_taken(pt, k))
-        error_tok(vm, a, "pack '%.*s' appears twice in the pattern",
-                  (int)pt->params[k].name->len, pt->params[k].name->loc);
     return k;
 }
 
