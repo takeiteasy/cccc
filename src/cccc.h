@@ -4137,12 +4137,15 @@ typedef struct TemplateArg {
 // The argument patterns of a partial specialization or of an instance in its
 // pattern: `n` leading entries, then, with `tail >= 0`, the pack variable that
 // takes every argument after them (`Ts...`). Entry `i` of a variadic template
-// beyond its fixed parameters is an element of its pack.
+// beyond its fixed parameters is an element of its pack. `tail_pat` is the
+// pattern each of those arguments must match (`Ts *...`), NULL for a bare
+// `Ts...`.
 typedef struct PatList {
     TemplateArg *pat;
     int         *pat_var; // constant variable an entry binds, else -1
     int          n;
     int          tail;
+    struct Type *tail_pat;
 } PatList;
 
 // In a partial specialization's pattern, a template instance that names a
@@ -4183,6 +4186,7 @@ typedef struct Template {
     struct Type **vars; // partial: the placeholder type of each type variable
     InstPat      *inst_pats; // partial: instances its pattern names
     ArrPat       *arr_pats;  // partial: arrays its pattern binds a length of
+    bool             pat_elem; // partial: parsing the element pattern of a pack
     struct TemplateInstance *insts; // primary: the instances made from it
 } Template;
 

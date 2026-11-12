@@ -136,6 +136,70 @@
     char rest[sizeof...(Ts) + 1];
 };
 
+// An element pattern: every argument after the leading ones must match it, and
+// the pack variable takes what each one matched.
+@template(Ts...) struct Ptrs {
+    char kind[1];
+};
+@template(Ts...) @specialize(Ts *...) struct Ptrs {
+    char kind[2];
+    Ts... pointee;
+};
+@template(Ts...) @specialize(Ts **...) struct Ptrs {
+    char kind[3];
+    Ts... pointee;
+};
+@template(Ts...) struct CPtrs {
+    char kind[1];
+};
+@template(Ts...) @specialize(const Ts *...) struct CPtrs {
+    char kind[4];
+    Ts... pointee;
+};
+
+@template(T) struct Cell {
+    T x;
+};
+@template(Ts...) struct Cells {
+    char kind[1];
+};
+@template(Ts...) @specialize(Cell @(Ts)...) struct Cells {
+    char kind[2];
+    Ts... inner;
+};
+
+@template(T, U) struct Link {
+    T a;
+    U b;
+};
+@template(Ts...) struct Links {
+    char kind[1];
+};
+@template(T, Ts...) @specialize(T, Link @(T, Ts)...) struct Links {
+    char kind[2];
+    Ts... rest;
+};
+
+@template(Ts...) struct Outer {
+    char kind[1];
+};
+@template(Ts...) @specialize(Ptrs @(Ts *...)) struct Outer {
+    char kind[2];
+};
+
+@template(Ts...) struct PtrLead {
+    char kind[1];
+};
+@template(Ts...) @specialize(int *, Ts...) struct PtrLead {
+    char kind[2];
+};
+@template(Ts...) @specialize(Ts *...) struct PtrLead {
+    char kind[3];
+};
+@template(Ts...) @specialize(int *, Ts *...) struct PtrLead {
+    char kind[4];
+};
+
 [[cccc::test]]
 void test_leading_pointer_and_pack_tail(void) {
     int                            x = 7;
@@ -296,4 +360,83 @@ void test_instance_names_ignore_the_partial(void) {
 void test_repeated_variable_before_a_pack_tail(void) {
     @inst(Pack @(short, short, char)) Seq s;
     AssertEq(sizeof(s.rest), 2);
+}
+
+[[cccc::test]]
+void test_element_pattern_selects_by_every_argument(void) {
+    @inst(int *, char *) Ptrs   a;
+    @inst(int *, char) Ptrs     b;
+    @inst(int, char *) Ptrs     c;
+    @inst() Ptrs                d;
+    @inst(int **, char **) Ptrs e;
+    @inst(int **, char *) Ptrs  f;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 1);
+    AssertEq(sizeof(c.kind), 1);
+    AssertEq(sizeof(d.kind),
+             3); // the empty pack matches both; `Ts **...` is narrower
+    AssertEq(sizeof(e.kind), 3);
+    AssertEq(sizeof(f.kind), 2);
+}
+
+[[cccc::test]]
+void test_element_pattern_binds_what_each_argument_matched(void) {
+    @inst(int *, char *, long *) Ptrs a;
+    AssertEq(sizeof(a.pointee0), sizeof(int));
+    AssertEq(sizeof(a.pointee1), sizeof(char));
+    AssertEq(sizeof(a.pointee2), sizeof(long));
+    @inst(int **, long **) Ptrs b;
+    AssertEq(sizeof(b.pointee0), sizeof(int));
+    AssertEq(sizeof(b.pointee1), sizeof(long));
+}
+
+[[cccc::test]]
+void test_element_pattern_may_carry_qualifiers(void) {
+    @inst(const int *, const char *) CPtrs a;
+    AssertEq(sizeof(a.kind), 4);
+    AssertEq(sizeof(a.pointee0), sizeof(int));
+    @inst(const int *, char *) CPtrs b;
+    AssertEq(sizeof(b.kind), 1);
+}
+
+[[cccc::test]]
+void test_element_pattern_names_an_instance(void) {
+    @inst(Cell @(int), Cell @(char)) Cells a;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(a.inner0), sizeof(int));
+    AssertEq(sizeof(a.inner1), sizeof(char));
+    @inst(Cell @(int), char) Cells b;
+    AssertEq(sizeof(b.kind), 1);
+}
+
+[[cccc::test]]
+void test_element_pattern_shares_a_leading_variable(void) {
+    @inst(int, Link @(int, char), Link @(int, long)) Links a;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(a.rest0), sizeof(char));
+    AssertEq(sizeof(a.rest1), sizeof(long));
+    @inst(int, Link @(int, char), Link @(short, long)) Links b;
+    AssertEq(sizeof(b.kind), 1);
+    @inst(int) Links c;
+    AssertEq(sizeof(c.kind), 2);
+}
+
+[[cccc::test]]
+void test_element_pattern_in_a_pattern_instance(void) {
+    @inst(Ptrs @(int *, char *)) Outer a;
+    AssertEq(sizeof(a.kind), 2);
+    @inst(Ptrs @(int *, char)) Outer b;
+    AssertEq(sizeof(b.kind), 1);
+}
+
+[[cccc::test]]
+void test_element_pattern_ranks_with_leading_items(void) {
+    @inst(int *, char *) PtrLead  a;
+    @inst(int *, char) PtrLead    b;
+    @inst(char *, long *) PtrLead c;
+    @inst(char, long) PtrLead     d;
+    AssertEq(sizeof(a.kind), 4);
+    AssertEq(sizeof(b.kind), 2);
+    AssertEq(sizeof(c.kind), 3);
+    AssertEq(sizeof(d.kind), 1);
 }

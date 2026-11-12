@@ -104,14 +104,24 @@ A partial specialization names its leading arguments, then a pack variable that 
 @template(T, int... Ms) @specialize(T, 0, Ms...) struct Nd { int rest[sizeof...(Ms) + 1]; };
 ```
 
+An element pattern before the `...` makes every argument of the tail match it, and the pack variable takes what each one matched (`Ts` is `int, char` for `int *, char *`).
+
+```c
+@template(Ts...) struct Ptrs { char kind[1]; };
+@template(Ts...) @specialize(Ts *...) struct Ptrs { Ts... pointee; };            // every argument a pointer
+@template(Ts...) @specialize(Ts **...) struct Ptrs { Ts... pointee; };           // narrower: every argument a pointer to pointer
+@template(T, Ts...) @specialize(T, Pair@(T, Ts)...) struct Links { Ts... rest; }; // a leading variable may repeat
+```
+
 The body sees the pack variable as a pack: `sizeof...(Ts)`, `Ts...[k]`, `Ts... name` and folds work on the arguments it took. A pattern may also name an instance of a variadic template: `@specialize(Pack@(T, Ts...))`.
 
 | Rule | Detail |
 |---|---|
 | Length | Without a pack variable a pattern matches that many arguments; with one, that many or more. `(T, Ts...)` matches one argument or more |
-| Selection | The most specialised matching partial wins: `(T, U)` over `(T, U, Ts...)` over `(T, Ts...)`, and `(int, Ts...)` over `(T, Ts...)`. Partials where none is narrower than all the others are an error |
-| Pack variable | A pack parameter of the `@template`, of the same kind (types or constants) as the pack it takes, used once, written `Ts...` as the last item of a list |
-| Errors | `a pack in a pattern is written alone as the last item, 'Ts...'`, `pack 'Ts' appears twice in the pattern`, `cannot expand pack 'Ts' into template 'Pair', which is not variadic`, `a partial specialization must be more specific than the primary template` |
+| Selection | The most specialised matching partial wins: `(T, U)` over `(T, U, Ts...)` over `(T, Ts...)`, `(int, Ts...)` over `(T, Ts...)`, and `(Ts *...)` over `(Ts...)`. Partials where none is narrower than all the others are an error. An empty pack matches every element pattern, so the narrowest wins |
+| Pack variable | A pack parameter of the `@template`, of the same kind (types or constants) as the pack it takes, used once, written `Ts...` or `<pattern of Ts>...` as the last item of a list |
+| Element pattern | Type packs only. It names the pack variable, and any other variable in it must also be deduced by a leading item |
+| Errors | `a pack in a pattern is written alone as the last item, 'Ts...'`, `the pattern before '...' names no pack variable`, `pack 'Ts' appears twice in the pattern`, `cannot expand pack 'Ts' into template 'Pair', which is not variadic`, `a partial specialization must be more specific than the primary template` |
 
 ## Instance names
 
@@ -130,7 +140,6 @@ An instance is `Name__Arg` for each argument, as for any template[^names].
 | A partial specialization's pack variable over a float or pointer pack | Compile error |
 | A pack parameter in the middle of the list, or two packs | Compile error |
 | Defaults in a template with a pack | Compile error |
-| A pattern on each pack element (`Ts *...`) | Compile error |
 | A pack variable used twice in one pattern | Compile error |
 | A pack expansion inside another pack's pattern | Compile error |
 | Expanding another instance's members (`t.v0...`) | Compile error |

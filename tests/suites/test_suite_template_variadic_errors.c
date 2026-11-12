@@ -132,4 +132,19 @@ void test_partial_tail_over_float_pack_is_rejected(void) {
     dep @(double, 1.0)();
 }
 
+@template(Ts...) struct Amb {
+    int v;
+};
+@template(Ts...) @specialize(Ts *...) struct Amb {
+    int v;
+};
+@template(Ts...) @specialize(int *, Ts...) struct Amb {
+    int v;
+};
+
+[[cccc::test(error = "ambiguous partial specializations")]]
+void test_element_pattern_ambiguity(void) {
+    @inst(int *, char *) Amb a;
+}
+
 #pragma cccc suite end

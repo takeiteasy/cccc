@@ -2174,7 +2174,8 @@ static bool pattern_has_var(const Template *pt, Type *ty) {
     }
 }
 
-static void pattern_mark_vars(const Template *pt, Type *ty, bool *used) {
+static void pattern_mark_vars(const Template *pt, Type *ty, bool *used,
+                              bool tails) {
     if (!ty)
         return;
     int k = pattern_var(pt, ty);
@@ -2186,11 +2187,11 @@ static void pattern_mark_vars(const Template *pt, Type *ty, bool *used) {
     if (ip) {
         for (int i = 0; i < ip->pl.n; i++) {
             if (!ip->tmpl->params[param_at(ip->tmpl, i)].type_start)
-                pattern_mark_vars(pt, ip->pl.pat[i].ty, used);
+                pattern_mark_vars(pt, ip->pl.pat[i].ty, used, tails);
             else if (ip->pl.pat_var[i] >= 0)
                 used[ip->pl.pat_var[i]] = true;
         }
-        if (ip->pl.tail >= 0)
+        if (tails && ip->pl.tail >= 0)
             used[ip->pl.tail] = true;
         return;
     }
@@ -2202,12 +2203,12 @@ static void pattern_mark_vars(const Template *pt, Type *ty, bool *used) {
         }
             // fallthrough
         case TY_PTR:
-            return pattern_mark_vars(pt, ty->base, used);
+            return pattern_mark_vars(pt, ty->base, used, tails);
         case TY_FUNC:
         case TY_BLOCK:
-            pattern_mark_vars(pt, ty->return_ty, used);
+            pattern_mark_vars(pt, ty->return_ty, used, tails);
             for (Type *p = ty->params; p; p = p->next)
-                pattern_mark_vars(pt, p, used);
+                pattern_mark_vars(pt, p, used, tails);
             return;
         default:
             return;
@@ -2260,19 +2261,44 @@ static bool bind_const(Matcher *m, int k, ConstArg c) {
 
 static bool match_type(Matcher *m, Type *pat, Type *arg);
 
-// Binds pack variable `k` to the arguments `[from, nargs)`. A constant pack's
-// elements must fit its type; when `apl` is the argument pattern, an element
-// that is one of its variables fits any.
-static bool bind_tail(Matcher *m, int k, const TemplateArg *args, int from,
+// Binds `pl`'s pack variable to the arguments `[pl->n, nargs)`. A constant
+// pack's elements must fit its type; when `apl` is the argument pattern, an
+// element that is one of its variables fits any. With an element pattern, the
+// variable is bound to what each argument matched.
+static bool bind_tail(Matcher *m, const PatList *pl, const TemplateArg *args,
                       int nargs, const PatList *apl) {
+    int k = pl->tail, from = pl->n;
     if (m->pt->params[k].type_start)
         for (int i = from; i < nargs; i++)
             if (!(apl && apl->pat_var[i] >= 0) &&
                 !const_fits(param_type(m->vm, m->pt, k), args[i].val,
                             args[i].val_unsigned))
                 return false;
+    const TemplateArg *els = args + from;
+    if (pl->tail_pat) {
+        Deduced     *d = m->d;
+        TemplateArg *own =
+            arena_alloc(&m->vm->compiler.parser_arena,
+                        sizeof(TemplateArg) * (nargs - from + 1));
+        for (int i = from; i < nargs; i++) {
+            d->ty[k] = NULL;
+            if (!match_type(m, pl->tail_pat, args[i].ty))
+                return false;
+            own[i - from].ty = d->ty[k];
+        }
+        // Another pattern's open tail stands for arguments of its own.
+        if (apl && apl->tail >= 0) {
+            d->ty[k] = NULL;
+            Type *other =
+                apl->tail_pat ? apl->tail_pat : m->arg_pt->vars[apl->tail];
+            if (!match_type(m, pl->tail_pat, other))
+                return false;
+        }
+        d->ty[k] = NULL;
+        els      = own;
+    }
     m->d->set[k]  = true;
-    m->d->pk[k]   = args + from;
+    m->d->pk[k]   = els;
     m->d->pk_n[k] = nargs - from;
     return true;
 }
@@ -2301,7 +2327,7 @@ static bool match_args(Matcher *m, const Template *t, const PatList *pl,
             return false;
         }
     }
-    return pl->tail < 0 || bind_tail(m, pl->tail, args, pl->n, nargs, apl);
+    return pl->tail < 0 || bind_tail(m, pl, args, nargs, apl);
 }
 
 // Matches `arg` against the instance pattern `ip`: another pattern naming the
@@ -2949,43 +2975,73 @@ static bool pack_var_taken(const Template *pt, int k) {
     return false;
 }
 
+// The pack variable that `ty` names, or -1. A template has one pack.
+static int pattern_pack_var(const Template *pt, Type *ty) {
+    bool used[TMPL_MAX_ARGS] = {};
+    pattern_mark_vars(pt, ty, used, false);
+    for (int k = 0; k < pt->nparams; k++)
+        if (used[k] && pt->params[k].is_pack)
+            return k;
+    return -1;
+}
+
 // The pack variable that the item `[a, e)` of a pattern list is, written
-// `Ts...`, or -1. Any other use of a pack variable is an error.
+// `Ts...` or, with `*elem` set to the pattern each element must match,
+// `Ts *...`; -1 for any other item. A pack variable used any other way is an
+// error.
 static int pattern_tail(VirtualMachine *vm, Template *pt, Template *t, Token *a,
-                        Token *e) {
+                        Token *e, Type **elem) {
+    *elem = NULL;
     if (a == e)
         return -1;
     int k = a->kind == TK_IDENT ? pack_var_index(pt, a) : -1;
-    if (k >= 0 && a->next == e)
-        error_tok(vm, a, "parameter pack '%.*s' must be expanded with '...'",
-                  (int)a->len, a->loc);
     Token *last = a;
     while (last->next != e)
         last = last->next;
-    if (!equal(last, "..."))
+    if (!equal(last, "...")) {
+        if (k >= 0 && a->next == e && !pt->pat_elem)
+            error_tok(vm, a,
+                      "parameter pack '%.*s' must be expanded with '...'",
+                      (int)a->len, a->loc);
         return -1;
-    if (k < 0 || a->next != last || !equal(e, ")"))
+    }
+    if (pt->pat_elem)
+        error_tok(vm, last, "a pack expansion cannot be nested in another");
+    if (!equal(e, ")"))
         error_tok(vm, last,
                   "a pack in a pattern is written alone as the last item, "
                   "'Ts...'");
+    if (k < 0 || a->next != last) {
+        Token *rest;
+        pt->pat_elem = true;
+        Type *ty     = typename(vm, &rest, a);
+        pt->pat_elem = false;
+        if (rest != last)
+            error_tok(vm, rest, "unexpected token in the pattern");
+        k = pattern_pack_var(pt, ty);
+        if (k < 0)
+            error_tok(vm, a, "the pattern before '...' names no pack variable");
+        *elem = ty;
+    }
     if (!tmpl_has_pack(t))
         error_tok(vm, a,
                   "cannot expand pack '%.*s' into template '%s', which is "
                   "not variadic",
-                  (int)a->len, a->loc, t->name);
+                  (int)pt->params[k].name->len, pt->params[k].name->loc,
+                  t->name);
     if (!t->params[t->nparams - 1].type_start != !pt->params[k].type_start)
         error_tok(vm, a, "pack '%.*s' is a %s pack, but '%s' takes %s there",
-                  (int)a->len, a->loc,
+                  (int)pt->params[k].name->len, pt->params[k].name->loc,
                   pt->params[k].type_start ? "constant" : "type", t->name,
                   pt->params[k].type_start ? "types" : "constants");
     const TemplateParam *tp = &t->params[t->nparams - 1];
     if (tp->type_start && !tp->dependent &&
         !is_integer(param_type(vm, t, t->nparams - 1)))
         error_tok(vm, a, "pack '%.*s' cannot take float or pointer constants",
-                  (int)a->len, a->loc);
+                  (int)pt->params[k].name->len, pt->params[k].name->loc);
     if (pack_var_taken(pt, k))
         error_tok(vm, a, "pack '%.*s' appears twice in the pattern",
-                  (int)a->len, a->loc);
+                  (int)pt->params[k].name->len, pt->params[k].name->loc);
     return k;
 }
 
@@ -3003,6 +3059,7 @@ static Token *parse_pattern_args(VirtualMachine *vm, Template *pt, Template *t,
     for (int i = 0; i < cap; i++)
         pl->pat_var[i] = -1;
     pl->tail             = -1;
+    pl->tail_pat         = NULL;
 
     TemplateArg *pat     = pl->pat;
     int         *pat_var = pl->pat_var;
@@ -3011,7 +3068,7 @@ static Token *parse_pattern_args(VirtualMachine *vm, Template *pt, Template *t,
         Token *e = pattern_arg_end(a);
         if (e->kind == TK_EOF)
             error_tok(vm, a, "unterminated @specialize");
-        pl->tail = pattern_tail(vm, pt, t, a, e);
+        pl->tail = pattern_tail(vm, pt, t, a, e, &pl->tail_pat);
         if (pl->tail >= 0) {
             a = e;
             break;
@@ -3045,6 +3102,11 @@ static Token *parse_pattern_args(VirtualMachine *vm, Template *pt, Template *t,
             parse_inst_arg(vm, t, given, &rest, a, &pat[given]);
             if (rest != e)
                 error_tok(vm, rest, "unexpected token in the pattern");
+            int pk = pt->pat_elem ? -1 : pattern_pack_var(pt, pat[given].ty);
+            if (pk >= 0)
+                error_tok(
+                    vm, a, "parameter pack '%.*s' must be expanded with '...'",
+                    (int)pt->params[pk].name->len, pt->params[pk].name->loc);
         }
         given++;
         a = equal(e, ",") ? e->next : e;
@@ -3201,8 +3263,6 @@ static void register_partial(VirtualMachine *vm, Template *pt) {
     vm->compiler.tmpl_bindings = bindings;
 
     for (int k = 0; k < pt->nparams; k++) {
-        if (pt->params[k].is_pack && !pt->params[k].type_start)
-            continue;
         if (pt->params[k].type_start) {
             Type *ty = param_type(vm, pt, k);
             if (!is_integer(ty))
@@ -3226,8 +3286,8 @@ static void register_partial(VirtualMachine *vm, Template *pt) {
 
     // Generic: variables standing alone, as the primary's own parameters do.
     bool used[TMPL_MAX_ARGS] = {};
-    bool generic =
-        !tmpl_has_pack(t) || (pl->tail >= 0 && pl->n == t->nparams - 1);
+    bool generic = !tmpl_has_pack(t) ||
+                   (pl->tail >= 0 && !pl->tail_pat && pl->n == t->nparams - 1);
     if (pl->tail >= 0)
         used[pl->tail] = true;
     for (int i = 0; i < pl->n; i++) {
@@ -3238,10 +3298,21 @@ static void register_partial(VirtualMachine *vm, Template *pt) {
                 used[pl->pat_var[i]] = true;
             continue;
         }
-        pattern_mark_vars(pt, pl->pat[i].ty, used);
+        pattern_mark_vars(pt, pl->pat[i].ty, used, true);
         int k = pattern_var(pt, pl->pat[i].ty);
         if (k < 0 || pt->vars[k] != pl->pat[i].ty)
             generic = false;
+    }
+    if (pl->tail_pat) {
+        bool elem[TMPL_MAX_ARGS] = {};
+        pattern_mark_vars(pt, pl->tail_pat, elem, true);
+        for (int k = 0; k < pt->nparams; k++)
+            if (elem[k] && !used[k])
+                error_tok(vm, pt->params[k].name,
+                          "partial specialization parameter '%.*s' is not "
+                          "deduced by the pattern",
+                          (int)pt->params[k].name->len,
+                          pt->params[k].name->loc);
     }
     for (int k = 0; k < pt->nparams; k++)
         if (!used[k])
