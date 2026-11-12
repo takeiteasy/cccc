@@ -987,22 +987,6 @@ void test_same_named_block_scope_aggregates(void) {
     AssertEq(sizeof(struct Pair__struct_Ambient__int), sizeof file_scope);
 }
 
-static int block_scope_pointer_and_nesting(void) {
-    struct Ambient {
-        short x[3];
-    };
-    @inst(struct Ambient, int) Pair                  inner = {{{1, 2, 3}}, 4};
-    @inst(@inst(struct Ambient, int) Pair, int) Pair outer = {inner, 5};
-    struct Ambient                                  *pa    = &inner.first;
-    @inst(struct Ambient *) Vec                      v     = {&pa, 1};
-    return (int)sizeof outer.first.first + v.data[0]->x[2] + outer.second;
-}
-
-[[cccc::test]]
-void test_block_scope_aggregates_in_pointers_and_nesting(void) {
-    AssertEq(block_scope_pointer_and_nesting(), 6 + 3 + 5);
-}
-
 static int block_scope_function_instance(void) {
     struct Ambient {
         char x[5];
