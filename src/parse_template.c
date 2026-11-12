@@ -265,7 +265,9 @@ static int scan_params(VirtualMachine *vm, Token *p, Token *close, Template *t,
                 dd++;
             else if (equal(q, ")"))
                 dd--;
-            else if (dd == 0 && equal(q, "..."))
+            else if (equal(q, "...") &&
+                     (dd == 0 || (dd == 1 && q->next->kind == TK_IDENT &&
+                                  equal(q->next->next, ")"))))
                 dots = q;
         }
         if (dots) {
@@ -310,6 +312,8 @@ static int scan_params(VirtualMachine *vm, Token *p, Token *close, Template *t,
                 Token *n = q->next->next;
                 while (equal(n, "const") || equal(n, "volatile") ||
                        equal(n, "restrict"))
+                    n = n->next;
+                if (equal(n, "..."))
                     n = n->next;
                 if (n->kind == TK_IDENT && equal(n->next, ")"))
                     found = n;
@@ -1784,10 +1788,6 @@ static Type *param_type(VirtualMachine *vm, Template *t, int i) {
                   "integer, float, double or pointer type",
                   (int)p->name->len, p->name->loc);
     }
-    if (p->is_pack && !is_integer(ty))
-        error_tok(vm, p->name,
-                  "constant parameter pack '%.*s' must have an integer type",
-                  (int)p->name->len, p->name->loc);
     if (!p->dependent)
         p->ty = ty;
     return ty;
@@ -2050,19 +2050,20 @@ static void bind_state(VirtualMachine *vm, Template *t, int i,
 }
 
 // Binds `n` elements of `pack` as `__cccc_pk_<name>_<k>`. A constant pack's
-// elements have type `const_ty`.
+// elements have type `const_ty`; with `hidden`, element k's float or pointer
+// object is stored in `hidden[k]`.
 static void bind_pack_elems(VirtualMachine *vm, TemplateParam *pack,
                             const TemplateArg *els, int n, Type *const_ty,
-                            Scope *bindings) {
+                            Scope *bindings, Obj **hidden) {
     for (int k = 0; k < n; k++) {
         TemplateParam element = *pack;
         element.name    = synth_token(vm, arena_format(vm, "__cccc_pk_%.*s_%d",
                                                        (int)pack->name->len,
                                                        pack->name->loc, k));
-        TemplateArg arg = els[k];
+        TemplateArg arg    = els[k];
         Obj        *unused = NULL;
         bind_param_as(vm, &element, pack->type_start ? const_ty : arg.ty, &arg,
-                      bindings, &unused);
+                      bindings, hidden ? &hidden[k] : &unused);
     }
 }
 
@@ -2072,8 +2073,12 @@ static void bind_pack(VirtualMachine *vm, Template *t, int fixed, int total,
     if (total == fixed)
         return;
     ensure_bindings(vm, bindings);
+    Obj *hidden[total - fixed];
+    memset(hidden, 0, sizeof hidden);
     bind_pack_elems(vm, &t->params[fixed], args + fixed, total - fixed,
-                    state[fixed].ty, *bindings);
+                    state[fixed].ty, *bindings, hidden);
+    for (int k = 0; k < total - fixed; k++)
+        state[fixed + k].hidden = hidden[k];
 }
 
 // ---- partial specialization -----------------------------------------------
@@ -2597,6 +2602,15 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         t                          = found->spec;
     } else {
         Deduced deduced;
+        if (pack && total > fixed && t->params[fixed].type_start &&
+            !is_integer(state[fixed].ty))
+            for (Template *c = t->partials; c; c = c->next_partial)
+                if (c->pl.tail >= 0)
+                    error_tok(vm, site,
+                              "pack '%.*s' cannot take float or pointer "
+                              "constants in a partial specialization",
+                              (int)t->params[fixed].name->len,
+                              t->params[fixed].name->loc);
         impl = t->partials
                    ? select_partial(vm, t, args, total, &deduced, site, mb.p)
                    : NULL;
@@ -2612,7 +2626,7 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                                     impl->params[k].type_start
                                         ? param_type(vm, impl, k)
                                         : NULL,
-                                    bindings);
+                                    bindings, NULL);
                     continue;
                 }
                 TemplateArg var    = {};
@@ -2653,11 +2667,15 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         impl = t;
     vm->compiler.tmpl_depth++;
 
-    for (int i = 0; i < fixed && !from_spec && impl == t; i++)
+    for (int i = 0; i < total && !from_spec && impl == t; i++)
         if (state[i].hidden) {
-            state[i].hidden->name = arena_format(
-                vm, "__cccc_tp_%s__%.*s", mangled, (int)t->params[i].name->len,
-                t->params[i].name->loc);
+            const TemplateParam *p = &t->params[param_at(t, i)];
+            state[i].hidden->name =
+                i < fixed
+                    ? arena_format(vm, "__cccc_tp_%s__%.*s", mangled,
+                                   (int)p->name->len, p->name->loc)
+                    : arena_format(vm, "__cccc_tp_%s__%.*s_%d", mangled,
+                                   (int)p->name->len, p->name->loc, i - fixed);
             link_gvar(vm, state[i].hidden);
         }
 
@@ -2960,6 +2978,11 @@ static int pattern_tail(VirtualMachine *vm, Template *pt, Template *t, Token *a,
                   (int)a->len, a->loc,
                   pt->params[k].type_start ? "constant" : "type", t->name,
                   pt->params[k].type_start ? "types" : "constants");
+    const TemplateParam *tp = &t->params[t->nparams - 1];
+    if (tp->type_start && !tp->dependent &&
+        !is_integer(param_type(vm, t, t->nparams - 1)))
+        error_tok(vm, a, "pack '%.*s' cannot take float or pointer constants",
+                  (int)a->len, a->loc);
     if (pack_var_taken(pt, k))
         error_tok(vm, a, "pack '%.*s' appears twice in the pattern",
                   (int)a->len, a->loc);

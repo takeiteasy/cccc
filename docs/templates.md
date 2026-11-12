@@ -18,7 +18,7 @@ int main(void) {
 
 | Rule | Detail |
 |---|---|
-| Parameters | One or more type names (`@template(K, V)`) or constants (`@template(T, int N)`, `@template(double D)`, `@template(int (*F)(int))`), optionally with defaults, and a last [parameter pack](templates-variadic.md) (`Ts...`, `int... Ns`) |
+| Parameters | One or more type names (`@template(K, V)`) or constants (`@template(T, int N)`, `@template(double D)`, `@template(int (*F)(int))`), optionally with defaults, and a last [parameter pack](templates-variadic.md) (`Ts...`, `int... Ns`, `double... Ds`) |
 | Allowed on | A struct, union, enum, typedef or function definition at file scope |
 | Not allowed on | Prototypes, `extern`, a struct or enum that declares variables, a typedef that declares more than one name, anything inside a function |
 | Attributes | Other attributes on the declaration stay with it and apply to every instance: `@template(T) @equals struct Cell { T a; T b; };`. A struct, union or enum may also carry them between the keyword and the tag or after the closing brace: `@template(T) struct [[gnu::aligned(16)]] Slot { T v; };` |

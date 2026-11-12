@@ -255,6 +255,54 @@ void test_constant_pack(void) {
     AssertTrue(sizeof(((@inst(char) Nd *)0)->data) == 1);
 }
 
+static int pk_a = 5, pk_b = 7;
+int pk_dbl(int x) {
+    return x * 2;
+}
+int pk_inc(int x) {
+    return x + 1;
+}
+
+@template(double... Ds) double sum_d(void) {
+    return (Ds + ... + 0.0);
+}
+@template(float... Fs) float sum_f(void) {
+    return (Fs + ... + 0.0f);
+}
+@template(double... Ds) double second_d(void) {
+    return Ds...[1];
+}
+@template(int (*...Fs)(int)) int chain(int x) {
+    ((x = Fs(x)), ...);
+    return x;
+}
+@template(int *...Ps) int total_p(void) {
+    return (*Ps + ... + 0);
+}
+@template(int *...Ps) int count_p(void) {
+    return sizeof...(Ps);
+}
+
+[[cccc::test]]
+void test_float_and_pointer_constant_packs(void) {
+    AssertTrue(sum_d @(1.5, 2.5)() == 4.0);
+    AssertTrue(sum_d @()() == 0.0);
+    AssertTrue(sum_f @(0.5f, 0.25f)() == 0.75f);
+    AssertTrue(second_d @(1.0, 9.5)() == 9.5);
+    AssertTrue(chain @(pk_dbl, pk_inc)(10) == 21);
+    AssertTrue(chain @(pk_inc, pk_dbl)(10) == 22);
+    AssertTrue(total_p @(&pk_a, &pk_b)() == 12);
+    AssertTrue(total_p @(&pk_a)() == 5);
+    AssertTrue(count_p @(&pk_a, NULL, &pk_b)() == 3);
+}
+
+[[cccc::test]]
+void test_float_pack_instances_do_not_clash(void) {
+    AssertTrue(sum_d @(1.0, 2.0)() == 3.0);
+    AssertTrue(sum_d @(10.0, 20.0)() == 30.0);
+    AssertTrue(sum_d @(1.0, 2.0)() == 3.0);
+}
+
 [[cccc::test]]
 void test_more_than_sixteen_arguments(void) {
     AssertTrue(add_all @(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
