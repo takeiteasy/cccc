@@ -349,6 +349,8 @@ error: not a struct nor a union
   note: in instantiation of template 'bad' (bad__int) at main.c:7:13
 ```
 
+Using an instance whose body had an error again reports the first error: `instantiation of 'bad__int' failed earlier: not a struct nor a union`.
+
 [^linkage]: A shared instance is a weak symbol named by its mangled name in objects written with `-c=object`, so separately compiled files merge when linked. A whole program built with `-c=native` keeps it `static`, which lets the host compiler inline it.
 
 [^blockscope]: A type declared inside a function is named after that function (`struct_S__in_f`), and numbered in declaration order from the second same-spelled type in it (`__2`). A type inside a block literal or an OpenMP region takes the enclosing function's name, and one in a GNU nested function `g` of `f` takes `f_g`. A type declared in a parameter list cannot be a template argument. Types declared at file scope are never suffixed and have the same name in every file.

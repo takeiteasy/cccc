@@ -4216,6 +4216,7 @@ typedef struct TemplateInstance {
     TemplateArg      *args; // resolved arguments, to detect name clashes
     int               nargs; // length of `args`; a parameter pack varies it
     Template         *spec; // TI_SPECIALIZED: the hand-written definition
+    char             *failure; // TI_FAILED: the first error its body reported
     struct TemplateInstance *next_inst; // the template's other instances
 } TemplateInstance;
 
@@ -4223,7 +4224,8 @@ typedef struct Compiler {
     // Preprocessor state
     bool         skip_preprocess; // Skip preprocessing step
     bool         saw_templates;   // `@template`/`@inst` appeared in the input
-    bool         saw_variadic_aggregate; // a variadic struct was instantiated
+    bool         saw_variadic_aggregate; // a variadic struct was defined
+    HashMap      member_pack_names;      // `Ts... name;` in a variadic struct
     HashMap      templates;       // name -> Template *
     HashMap      template_insts;  // mangled name -> TemplateInstance *
     HashMap      template_aggs; // block-scope aggregate spelling -> root Type *
@@ -4232,6 +4234,8 @@ typedef struct Compiler {
     Scope       *tmpl_bindings;   // detached scope holding the type parameters
     Scope       *tmpl_anchor;     // scope in which tmpl_bindings is consulted
     struct Template *tmpl_pattern;    // partial whose pattern is being parsed
+    struct TmplPackSet *tmpl_packs; // template packs of the function instance
+                                    // being parsed
     int          tmpl_depth;
     HashMap      macros;          // Macro definitions
     MemberAlias *member_aliases;  // see note_member_alias_macro(); survives TUs

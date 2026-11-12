@@ -1325,6 +1325,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         vm->collect_errors = old_collect;
 
         obj_fn_mut(vm, fn)->body = NULL; // suppress codegen — test result is precomputed
+        cc_drop_nested_bodies(vm, fn);
     } else {
         obj_fn_mut(vm, fn)->body = compound_stmt(vm, &tok, tok, &close_brace);
         prepend_stmts(obj_fn(fn)->body, param_vla_inits);
@@ -1377,6 +1378,16 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                           fn, fn->tok);
 
     return tok;
+}
+
+// A rolled-back error window leaves `fn`'s nested functions holding error
+// nodes; without a body they are not generated.
+void cc_drop_nested_bodies(VirtualMachine *vm, Obj *fn) {
+    for (Obj *c = obj_fn(fn)->nested_children; c;
+         c      = obj_fn(c)->next_nested_sibling) {
+        obj_fn_mut(vm, c)->body = NULL;
+        cc_drop_nested_bodies(vm, c);
+    }
 }
 
 // Every declaration of an object must agree on its type (C17 6.7p4). A clash

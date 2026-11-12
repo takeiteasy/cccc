@@ -56,6 +56,9 @@ struct Plain {
 static int pair(int a, int b) {
     return a + b;
 }
+@template(Ts...) int mixed(Tup @(long, long) t, Ts... xs) {
+    return pair(xs + t.v...);
+}
 
 #pragma cccc suite begin "template_variadic_errors"
 
@@ -200,9 +203,12 @@ void test_member_pack_without_dots(void) {
     int x               = a.v;
 }
 
-// TODO: a template pattern mixing a template pack and a member pack (#2032)
-// has no negative test: the error inside the instance body crashes codegen
-// under --testing (#2031).
+[[cccc::test(
+    error = "the packs in one pattern have different lengths (3 and 2)")]]
+void test_template_pack_and_member_pack_of_different_lengths(void) {
+    Tup @(long, long) t = {1, 2};
+    mixed @(long, long, long)(t, 1, 2, 3);
+}
 
 [[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
 void test_object_declared_in_the_same_statement(void) {

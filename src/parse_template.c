@@ -576,6 +576,22 @@ static void register_partial(VirtualMachine *vm, Template *pt);
 
 // Capture arm of parse_file_scope_decls: records a `@template` definition and
 // returns the token after it, or NULL when `tok` starts something else.
+// Records the `Ts... name;` members a variadic struct or union template (or a
+// partial specialization of one) declares, so a function template's pattern
+// that names one is left for the parser (cc_expand_member_packs).
+static void note_member_packs(VirtualMachine *vm, const Template *t) {
+    if (t->kind != TMPL_STRUCT && t->kind != TMPL_UNION)
+        return;
+    for (Token *p = t->start, *prev = NULL; p != t->end && p->kind != TK_EOF;
+         prev = p, p = p->next)
+        if (equal(p, "...") && p->next->kind == TK_IDENT &&
+            !(prev && equal(prev, "sizeof"))) {
+            hashmap_put2(&vm->compiler.member_pack_names, p->next->loc,
+                         p->next->len, p);
+            vm->compiler.saw_variadic_aggregate = true;
+        }
+}
+
 Token *cc_template_capture(VirtualMachine *vm, Token *tok) {
     Template    scan;
     const char *err     = NULL;
@@ -593,6 +609,7 @@ Token *cc_template_capture(VirtualMachine *vm, Token *tok) {
     *t          = scan;
     t->name     = arena_strndup(vm, t->name_tok->loc, t->name_tok->len);
     t->name_len = t->name_tok->len;
+    note_member_packs(vm, t);
     if (t->pattern) {
         register_partial(vm, t);
         return t->end;
@@ -987,6 +1004,12 @@ typedef struct {
     const char *key;      // member: the object's spelling and the name
 } Pack;
 
+// The packs of a function instance, kept for the statements it parses.
+struct TmplPackSet {
+    int   n;
+    Pack *p;
+};
+
 typedef struct {
     int  op;     // the operator token
     int  a, b;   // the pattern, [a, b)
@@ -999,7 +1022,12 @@ typedef struct {
     Token         **toks;
     int             ntoks, n;      // n: elements of a template pack
     bool            defer_members; // leave `t.v...` for the parser
+    bool                defer_mixed; // ... also when it shares a pattern with a
+                                     // template pack
     bool            copy_all;      // never relink the input tokens
+    int                 deferring;     // inside a pattern left for the parser
+    int                *defer_end;  // by item start: end of a deferred pattern
+    struct TmplPackSet *seed;       // packs known before the chain is scanned
     int            *mpack;      // by token: the member pack it names, else -1
     int            *match, *encl;
     DotsKind       *kind;
@@ -1353,6 +1381,16 @@ static void ex_range(Expander *ex, int lo, int hi, int k) {
     VirtualMachine *vm = ex->vm;
     for (int i = lo; i < hi;) {
         Token *tok = ex->toks[i];
+        if (ex->defer_end[i] >= 0) {
+            int end          = ex->defer_end[i];
+            ex->defer_end[i] = -1;
+            ex->deferring++;
+            ex_range(ex, i, end, k);
+            ex->deferring--;
+            ex->defer_end[i] = end;
+            i                = end;
+            continue;
+        }
         if (ex->item_dots[i] >= 0) {
             i = ex_item(ex, i);
             continue;
@@ -1380,13 +1418,16 @@ static void ex_range(Expander *ex, int lo, int hi, int k) {
                 i = close + 1;
                 continue;
             }
-            if (k < 0)
-                error_tok(vm, tok,
-                          "parameter pack '%.*s' must be expanded with '...'",
-                          (int)tok->len, tok->loc);
-            ex_put(ex, ex_elem(ex, pk, k, tok));
-            i++;
-            continue;
+            if (k >= 0 || !ex->deferring) {
+                if (k < 0)
+                    error_tok(
+                        vm, tok,
+                        "parameter pack '%.*s' must be expanded with '...'",
+                        (int)tok->len, tok->loc);
+                ex_put(ex, ex_elem(ex, pk, k, tok));
+                i++;
+                continue;
+            }
         }
         ex_put(ex, k < 0 && !ex->copy_all ? tok : copy_tok(vm, tok));
         i++;
@@ -1414,10 +1455,15 @@ static Token *ex_setup(Expander *ex, VirtualMachine *vm, Token *from,
     ex->item_dots  = arena_alloc(a, sizeof(int) * (count + 1));
     ex->fold_close = arena_alloc(a, sizeof(int) * (count + 1));
     ex->fold_dots  = arena_alloc(a, sizeof(int) * (count + 1));
-    ex->packs      = arena_alloc(a, sizeof(Pack) * (count + 1));
+    ex->defer_end  = arena_alloc(a, sizeof(int) * (count + 1));
+    int seeded     = ex->seed ? ex->seed->n : 0;
+    ex->packs      = arena_alloc(a, sizeof(Pack) * (count + 1 + seeded));
     memset(ex->kind, 0, sizeof(DotsKind) * (count + 1));
     for (int i = 0; i < count; i++)
-        ex->match[i] = ex->item_dots[i] = ex->fold_close[i] = -1;
+        ex->match[i] = ex->item_dots[i] = ex->fold_close[i] = ex->defer_end[i] =
+            -1;
+    for (int i = 0; i < seeded; i++)
+        ex->packs[ex->npacks++] = ex->seed->p[i];
 
     int *stack = arena_alloc(a, sizeof(int) * (count + 1));
     int  sp    = 0;
@@ -1441,6 +1487,25 @@ static Token *ex_setup(Expander *ex, VirtualMachine *vm, Token *from,
             vm, ex->toks[stack[sp - 1]], "unbalanced '%.*s' in a template body",
             (int)ex->toks[stack[sp - 1]]->len, ex->toks[stack[sp - 1]]->loc);
     return stop;
+}
+
+static int ex_object_start(Expander *ex, int dot);
+
+// True when `[from, to)` names a member pack of an instance (`t.v`), which only
+// the parser can expand.
+static bool ex_known_member(Expander *ex, int from, int to) {
+    HashMap *names = &ex->vm->compiler.member_pack_names;
+    for (int i = from + 1; i < to; i++) {
+        Token *t = ex->toks[i];
+        if (t->kind != TK_IDENT ||
+            !(equal(ex->toks[i - 1], ".") || equal(ex->toks[i - 1], "->")) ||
+            !hashmap_get2(names, t->loc, t->len))
+            continue;
+        int start = ex_object_start(ex, i - 1);
+        if (start >= 0 && ex_pack_at(ex, start) < 0)
+            return true;
+    }
+    return false;
 }
 
 // What each `...` is, once the packs are known.
@@ -1484,6 +1549,11 @@ static void ex_classify(Expander *ex) {
         FoldShape f;
         if (o >= 0 && equal(ex->toks[o], "(") && cnt[o] == 1 &&
             ex_fold_shape(ex, o, d, ex->match[o], &f)) {
+            if (ex->defer_mixed && ex_known_member(ex, o, ex->match[o])) {
+                ex->kind[d]      = DOTS_OTHER;
+                ex->defer_end[o] = ex->match[o] + 1;
+                continue;
+            }
             ex->kind[d]       = DOTS_FOLD;
             ex->fold_close[o] = ex->match[o];
             ex->fold_dots[o]  = d;
@@ -1506,6 +1576,14 @@ static void ex_classify(Expander *ex) {
                           "the pattern before '...' contains no parameter "
                           "pack");
             ex->kind[d] = DOTS_OTHER;
+            continue;
+        }
+        if (ex->defer_mixed && ex_known_member(ex, s, d)) {
+            if (ex->defer_end[s] >= 0)
+                error_tok(vm, ex->toks[d],
+                          "a list item can hold only one pack expansion");
+            ex->kind[d]      = DOTS_OTHER;
+            ex->defer_end[s] = ex_item_end(ex, d);
             continue;
         }
         ex->kind[d]      = DOTS_ITEM;
@@ -1539,6 +1617,7 @@ static Token *expand_packs(VirtualMachine *vm, Template *t, Token *chain, int n,
     if (!ex.ntoks)
         return chain;
     ex.defer_members        = true;
+    ex.defer_mixed          = t->kind == TMPL_FUNC;
 
     const TemplateParam *pp = &t->params[t->nparams - 1];
     ex.packs[ex.npacks++]   = (Pack){pp->name->loc, (int)pp->name->len, false};
@@ -1568,6 +1647,13 @@ static Token *expand_packs(VirtualMachine *vm, Template *t, Token *chain, int n,
 
     ex_classify(&ex);
     ex_range(&ex, 0, ex.ntoks, -1);
+    if (ex.defer_mixed) {
+        struct TmplPackSet *set =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(*set));
+        set->n                  = ex.npacks;
+        set->p                  = ex.packs;
+        vm->compiler.tmpl_packs = set;
+    }
     return ex_finish(&ex, eof);
 }
 
@@ -1707,6 +1793,7 @@ Token *cc_expand_member_packs(VirtualMachine *vm, Token *tok) {
         return tok;
 
     Expander ex = {};
+    ex.seed     = vm->compiler.tmpl_packs;
     ex_setup(&ex, vm, tok, end);
     ex.copy_all = true;
     ex.mpack =
@@ -1840,6 +1927,7 @@ typedef struct {
     PendingParamAttrs  *ppa;
     Scope              *bindings, *anchor;
     Template           *pattern;
+    struct TmplPackSet *packs;
 } TmplSnapshot;
 
 #define TMPL_FIELDS(X)                                                         \
@@ -1877,7 +1965,8 @@ typedef struct {
     X(ppa, pending_param_attrs)                                                \
     X(bindings, tmpl_bindings)                                                 \
     X(anchor, tmpl_anchor)                                                     \
-    X(pattern, tmpl_pattern)
+    X(pattern, tmpl_pattern)                                                   \
+    X(packs, tmpl_packs)
 
 static void snapshot_save(VirtualMachine *vm, TmplSnapshot *s) {
     Compiler *c = &vm->compiler;
@@ -2843,6 +2932,23 @@ static Template *select_partial(VirtualMachine *vm, Template *t,
 
 // With `def`, registers it as the hand-written definition of the argument list
 // instead of instantiating; the first `@inst` of that list parses it.
+// The text of the first error reported after `pre_count` errors, copied
+// because a negative test discards the error list.
+static char *first_error_since(VirtualMachine *vm, CompileError *pre_tail,
+                               int pre_count) {
+    if (vm->error_count <= pre_count)
+        return NULL;
+    for (CompileError *e = pre_tail ? pre_tail->next : vm->errors; e;
+         e               = e->next) {
+        if (e->severity != 0 || !e->message)
+            continue;
+        const char *text = strstr(e->message, "error: ");
+        text             = text ? text + 7 : e->message;
+        return arena_strndup(vm, text, (int)strcspn(text, "\n"));
+    }
+    return NULL;
+}
+
 static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                                      TemplateArg *args, int nargs, Token *site,
                                      Template *def) {
@@ -2886,15 +2992,18 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
 
     TmplSnapshot snap;
     snapshot_save(vm, &snap);
-    jmp_buf  jb;
-    jmp_buf *saved_jb = vm->error_jmp_buf;
-    vm->error_jmp_buf = &jb;
+    int           pre_count = vm->error_count;
+    CompileError *pre_tail  = vm->errors_tail;
+    jmp_buf       jb;
+    jmp_buf      *saved_jb = vm->error_jmp_buf;
+    vm->error_jmp_buf      = &jb;
     if (setjmp(jb)) {
         snapshot_restore(vm, &snap);
         vm->error_jmp_buf = saved_jb;
         if (inst) {
             vm->compiler.tmpl_depth--;
-            inst->state = TI_FAILED;
+            inst->state   = TI_FAILED;
+            inst->failure = first_error_since(vm, pre_tail, pre_count);
         }
         longjmp(*saved_jb, 1);
     }
@@ -2968,8 +3077,9 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
             snapshot_restore(vm, &snap);
             vm->error_jmp_buf = saved_jb;
             if (found->state == TI_FAILED)
-                error_tok(vm, site, "instantiation of '%s' failed earlier",
-                          mb.p);
+                error_tok(vm, site, "instantiation of '%s' failed earlier%s%s",
+                          mb.p, found->failure ? ": " : "",
+                          found->failure ? found->failure : "");
             return found;
         }
     }
@@ -3111,7 +3221,12 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     vm->compiler.tmpl_depth--;
     snapshot_restore(vm, &snap);
     vm->error_jmp_buf = saved_jb;
-    inst->state       = TI_DONE;
+    inst->failure     = first_error_since(vm, pre_tail, pre_count);
+    inst->state       = inst->failure ? TI_FAILED : TI_DONE;
+    if (inst->failure && inst->fn) {
+        obj_fn_mut(vm, inst->fn)->body = NULL;
+        cc_drop_nested_bodies(vm, inst->fn);
+    }
     return inst;
 }
 

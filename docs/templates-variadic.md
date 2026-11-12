@@ -113,6 +113,14 @@ int c = t.v...[1];              // t.v1
 
 A pattern may name several instances (`a.v + b.v ...`) when their packs have the same length: `the packs in one pattern have different lengths (2 and 3)`.
 
+A function template's pattern may also hold its own pack: `xs + t.v ...` adds each element of `xs` to the matching member of `t`, in a call, an initializer list or a fold. The two packs must have the same length.
+
+```c
+@template(Ts...) int weigh(Tuple@(Ts...) t, Ts... xs) {
+    return add2(xs + t.v ...);  // add2(xs0 + t.v0, xs1 + t.v1)
+}
+```
+
 The object must be declared before the statement that expands it, so a `for (Tuple t = ...; ...; f(t.v...))` header cannot expand its own `t`. The condition of a `do ... while (f(t.v...));` is not expanded.
 
 ### Empty packs
@@ -190,6 +198,6 @@ An instance is `Name__Arg` for each argument, as for any template[^names].
 | Not supported | Result |
 |---|---|
 | A pack parameter in the middle of the list, or two packs | Compile error |
-| A template pack and an instance member pack in one pattern (`xs + t.v ...`) | Compile error |
+| A template pack and an instance member pack in one pattern inside a struct or union template body | Compile error |
 
 [^names]: Two argument lists can mangle to one name, for example when an argument's own name contains `__`. The instance clash check compares the argument count and each argument, so such a pair is an error (`cannot name the instance`), not a silent merge.

@@ -61,6 +61,20 @@ struct a {
     int y;
 };
 
+struct Member2031 {
+    int a;
+};
+static int sum2031(int a, int b) {
+    return a + b;
+}
+@template(T) int bad_member(T x) {
+    struct Member2031 s = {1};
+    return sum2031(x, s.nosuch);
+}
+@template(T) T good_member(T x) {
+    return x + 1;
+}
+
 #pragma cccc suite begin "templates_errors"
 
 [[cccc::test(error = "takes 2 arguments, 1 given")]]
@@ -256,6 +270,30 @@ void test_constant_for_type_slot(void) {
 [[cccc::test(error = "enumerator 'n3' clashes with the number n3")]]
 void test_enumerator_clashes_with_negative_number(void) {
     @inst((enum Odd) - 3) odd();
+}
+
+[[cccc::test(error = "no such member 'nosuch'")]]
+void test_recoverable_error_in_instance_body(void) {
+    bad_member @(int)(1);
+}
+
+[[cccc::test(error = "failed earlier: no such member 'nosuch'")]]
+void test_failed_instance_reports_first_error(void) {
+    bad_member @(int)(2);
+}
+
+[[cccc::test(error = "no such member 'nosuch'")]]
+void test_recoverable_error_in_nested_function(void) {
+    int inner(void) {
+        struct Member2031 s = {1};
+        return s.nosuch;
+    }
+    inner();
+}
+
+[[cccc::test]]
+void test_codegen_continues_after_failed_instance(void) {
+    AssertEq(good_member @(int)(41), 42);
 }
 
 #pragma cccc suite end

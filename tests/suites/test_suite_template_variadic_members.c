@@ -44,6 +44,45 @@ static Tuple @(long, long) * count_calls(Tuple @(long, long) * p) {
     return (t.v + ... + 0) * 10 + sizeof...(t.v);
 }
 
+@template(Ts...) int weigh(Tuple @(Ts...) t, Ts... xs) {
+    return add2(xs + t.v...);
+}
+@template(Ts...) int scale(Tuple @(Ts...) t, Ts... xs) {
+    return add3(xs * t.v...);
+}
+@template(Ts...) int dot(Tuple @(Ts...) t, Ts... xs) {
+    return (xs * t.v + ...);
+}
+@template(Ts...) int dot_from(Tuple @(Ts...) t, Ts... xs) {
+    return (100 + ... + xs * t.v);
+}
+@template(Ts...) int nested_mix(Tuple @(Ts...) t, Ts... xs) {
+    return add2(add2(xs...) + t.v...);
+}
+@template(Ts...) int sizes(Tuple @(Ts...) t, Ts... xs) {
+    return sizeof...(xs) * 10 + sizeof...(t.v) + (xs...[0] + t.v...[0]);
+}
+@template(Ts...) int init_list(Tuple @(Ts...) t, Ts... xs) {
+    int a[] = {xs * t.v...};
+    return a[0] * 10 + a[1];
+}
+@template(Ts...) int local_instance(Ts... xs) {
+    Tuple @(Ts...) t = {xs...};
+    return add2(xs + t.v...);
+}
+@template(Ts...) int plain_member(Ts... xs) {
+    struct {
+        int k;
+    } s = {3};
+    return add2(xs * s.k...);
+}
+@template(Ts...) int pairs(Tuple @(Ts...) a, Tuple @(Ts...) b, Ts... xs) {
+    return add2(xs + a.v + b.v...);
+}
+@template(Ts...) int none(Tuple @(Ts...) t, Ts... xs) {
+    return (xs * t.v + ... + 7);
+}
+
 [[cccc::test]]
 void test_call_arguments(void) {
     Tuple @(long, long) a       = {4, 2};
@@ -173,4 +212,60 @@ void test_inside_templates(void) {
 void test_a_partial_can_drop_the_pack(void) {
     Tuple @(int, char) t = {42};
     AssertEq(t.first, 42);
+}
+
+[[cccc::test]]
+void test_template_pack_with_member_pack(void) {
+    Tuple @(long, long) t = {4, 2};
+    AssertEq(weigh @(long, long)(t, 1, 3), 55);
+    Tuple @(long, long, long) u = {1, 2, 3};
+    AssertEq(scale @(long, long, long)(u, 4, 5, 6), 4 * 100 + 10 * 10 + 18);
+}
+
+[[cccc::test]]
+void test_template_pack_with_member_pack_in_a_fold(void) {
+    Tuple @(long, long) t = {4, 2};
+    AssertEq(dot @(long, long)(t, 10, 100), 240);
+    AssertEq(dot_from @(long, long)(t, 10, 100), 340);
+}
+
+[[cccc::test]]
+void test_template_pack_with_member_pack_in_an_initializer(void) {
+    Tuple @(long, long) t = {4, 2};
+    AssertEq(init_list @(long, long)(t, 3, 5), 130);
+}
+
+[[cccc::test]]
+void test_nested_expansion_beside_a_member_pack(void) {
+    Tuple @(long, long) t = {4, 2};
+    AssertEq(nested_mix @(long, long)(t, 1, 3), 185);
+}
+
+[[cccc::test]]
+void test_sizeof_and_index_in_a_mixed_template(void) {
+    Tuple @(long, long) t = {4, 2};
+    AssertEq(sizes @(long, long)(t, 1, 3), 20 + 2 + 5);
+}
+
+[[cccc::test]]
+void test_mixed_pattern_over_a_local_instance(void) {
+    AssertEq(local_instance @(long, long)(1, 3), 26);
+}
+
+[[cccc::test]]
+void test_a_pattern_over_two_instances(void) {
+    Tuple @(long, long) a = {1, 2};
+    Tuple @(long, long) b = {10, 20};
+    AssertEq(pairs @(long, long)(a, b, 100, 200), 111 * 10 + 222);
+}
+
+[[cccc::test]]
+void test_an_ordinary_member_in_a_pack_pattern(void) {
+    AssertEq(plain_member @(long, long)(1, 2), 36);
+}
+
+[[cccc::test]]
+void test_empty_mixed_packs(void) {
+    Tuple @() t;
+    AssertEq(none @()(t), 7);
 }
