@@ -54,8 +54,12 @@ enum Odd { n3 = 5, below = -1 };
     return O;
 }
 
-struct Tagged { int a; };
-typedef struct { int a; } Tagged;
+struct a_ptr {
+    int x;
+};
+struct a {
+    int y;
+};
 
 #pragma cccc suite begin "templates_errors"
 
@@ -97,9 +101,9 @@ void test_function_template_as_type(void) {
 }
 
 [[cccc::test(error = "is also the name of a different instance")]]
-void test_typedef_name_clashes_with_tag(void) {
-    @inst(struct Tagged) Vec a;
-    @inst(Tagged) Vec b;
+void test_pointer_spelling_clashes_with_tag(void) {
+    @inst(struct a_ptr) Vec a;
+    @inst(struct a *) Vec   b;
 }
 
 [[cccc::test(error = "give the struct a tag or a typedef name")]]

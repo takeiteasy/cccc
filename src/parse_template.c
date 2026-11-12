@@ -570,12 +570,14 @@ typedef struct {
     VirtualMachine *vm;
     char           *p;
     size_t          len, cap;
+    bool local; // an argument is, or is built from, a block-scope type
     char            init[256];
 } MangleBuf;
 
 static void mb_init(MangleBuf *mb, VirtualMachine *vm) {
     mb->vm      = vm;
     mb->p       = mb->init;
+    mb->local   = false;
     mb->len     = 0;
     mb->cap     = sizeof mb->init;
     mb->init[0] = 0;
@@ -608,9 +610,12 @@ static void mb_putu(MangleBuf *mb, unsigned long long v) {
 
 static void mangle_type(MangleBuf *mb, Type *ty, Token *site);
 
-// An aggregate is named by its tag, else by the typedef that names it.
+// An aggregate is named by its tag (`struct_S`), else by the typedef that names
+// it (`typedef_P`). A block-scope aggregate also takes `__N`, counted per
+// spelling in order of first use, so two of them never share a name.
 static void mangle_tag(MangleBuf *mb, Type *ty, Token *tag, const char *kw,
                        Token *site) {
+    bool tagged = tag;
     for (Type *t = ty; !tag && t; t = t->origin)
         tag = type_agg(t)->typedef_name;
     if (!tag)
@@ -618,9 +623,31 @@ static void mangle_tag(MangleBuf *mb, Type *ty, Token *tag, const char *kw,
                   "template argument must be a named type; give the %s a tag "
                   "or a typedef name",
                   kw);
-    mb_puts(mb, kw);
+    size_t start = mb->len;
+    mb_puts(mb, tagged ? kw : "typedef");
     mb_puts(mb, "_");
     mb_putn(mb, tag->loc, tag->len);
+
+    Type *root = ty;
+    while (root->origin)
+        root = root->origin;
+    const TypeAgg *agg  = type_agg(root);
+    mb->local          |= agg->block_scope || agg->local_inst;
+    if (!agg->block_scope)
+        return;
+    size_t base = mb->len;
+    for (unsigned n = 1;; n++) {
+        mb->len     = base;
+        mb->p[base] = 0;
+        mb_puts(mb, "__");
+        mb_putu(mb, n);
+        HashMap *owners = &mb->vm->compiler.template_aggs;
+        Type    *owner  = hashmap_get2(owners, mb->p + start, mb->len - start);
+        if (!owner)
+            hashmap_put2(owners, mb->p + start, mb->len - start, root);
+        if (!owner || owner == root)
+            return;
+    }
 }
 
 static const char *addr_space_spelling(AddrSpace space) {
@@ -845,14 +872,25 @@ static bool is_enumerator(Token **names, int count, Token *p) {
     return false;
 }
 
+static bool has_linkage_static(Template *t) {
+    for (Token *p = t->start; p != t->name_tok && p->kind != TK_EOF;
+         p        = p->next)
+        if (equal(p, "static"))
+            return true;
+    return false;
+}
+
 // The template's tokens up to `limit` (NULL: all of them) under `mangled`,
 // the `@template(...)` marker removed and the chain ended by `tail` (a
-// synthesised ";" for a prototype) and an EOF.
+// synthesised ";" for a prototype) and an EOF. With `internal`, a function
+// instance is `static`.
 static Token *clone_template(VirtualMachine *vm, Template *t,
                              const char *mangled, Token *limit, bool prototype,
-                             ExpansionFrame *frame) {
+                             bool internal, ExpansionFrame *frame) {
     Token  head = {};
     Token *cur  = &head;
+    if (internal && t->kind == TMPL_FUNC && !has_linkage_static(t))
+        cur = cur->next = synth_token(vm, "static");
     int     nenum = 0;
     Token **enums =
         t->kind == TMPL_ENUM ? enumerator_names(vm, t, &nenum) : NULL;
@@ -1509,6 +1547,9 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         error_tok(vm, site, "template instantiation depth exceeds %d",
                   TMPL_MAX_DEPTH);
 
+    // The instance is private to this file when a block-scope type is among
+    // its arguments, so the linker never merges it with another file's.
+    bool  local = mb.local && !from_spec;
     char *mangled;
     if (from_spec) {
         // The definition is plain C: the parameter names are not visible.
@@ -1556,7 +1597,8 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     // the instance (recursion, `struct M *next`). Enums and typedefs have none.
     Token *forward = NULL;
     if (t->kind == TMPL_FUNC) {
-        forward = clone_template(vm, t, mangled, t->body_open, true, frame);
+        forward =
+            clone_template(vm, t, mangled, t->body_open, true, local, frame);
     } else if (t->kind == TMPL_STRUCT || t->kind == TMPL_UNION) {
         forward = tokenize_string(
             vm, "<template>",
@@ -1564,7 +1606,7 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                          t->kind == TMPL_UNION ? "union" : "struct", mangled));
         convert_pp_tokens(vm, forward);
     }
-    Token *whole = clone_template(vm, t, mangled, NULL, false, frame);
+    Token *whole = clone_template(vm, t, mangled, NULL, false, local, frame);
 
     Token *name_probe = synth_token(vm, mangled);
     if (forward) {
@@ -1576,6 +1618,12 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     if (!inst->fn && !inst->ty)
         inst_lookup(vm, inst, name_probe);
     mark_instance(vm, inst, t);
+    if (local && inst->ty && t->kind != TMPL_TYPEDEF) {
+        Type *root = inst->ty;
+        while (root->origin)
+            root = root->origin;
+        type_agg_mut(vm, root)->local_inst = true;
+    }
 
     vm->compiler.tmpl_depth--;
     snapshot_restore(vm, &snap);

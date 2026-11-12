@@ -7,6 +7,9 @@
 @template(T) struct Vec { T *data; size_t len, cap; };
 @template(T) T max(T a, T b) { return a > b ? a : b; }
 @template(A, B) struct Pair { A first; B second; };
+@template(T) int max_size(void) {
+    return sizeof(T);
+}
 @template(T) struct Node { T val; struct Node *next; };
 @template(T) T fact(T n) {
     return n <= 1 ? 1 : n * @inst(T) fact(n - 1);
@@ -877,14 +880,14 @@ void test_packed_enum_template(void) {
 [[cccc::test]]
 void test_anonymous_typedef_arguments(void) {
     @inst(AnonPoint, int) Pair p = {{1}, 2};
-    struct Pair__struct_AnonPoint__int q = p;
+    struct Pair__typedef_AnonPoint__int q  = p;
     @inst(AnonBits, int) Pair b  = {{.i = 7}, 3};
     @inst(AnonColor, int) Pair c = {AN_GREEN, 4};
     AssertEq(q.first.x, 1);
     AssertEq(b.first.i, 7);
     AssertEq(c.first, AN_GREEN);
-    AssertEq(sizeof(struct Pair__union_AnonBits__int), sizeof(b));
-    AssertEq(sizeof(struct Pair__enum_AnonColor__int), sizeof(c));
+    AssertEq(sizeof(struct Pair__typedef_AnonBits__int), sizeof(b));
+    AssertEq(sizeof(struct Pair__typedef_AnonColor__int), sizeof(c));
 }
 
 [[cccc::test]]
@@ -935,4 +938,88 @@ void test_block_argument(void) {
     @inst(int (^)(int), int) Pair a = {twice_it, 1};
     struct Pair__fn_int_of_int_end_block__int b = a;
     AssertEq(b.first(21), 42);
+}
+
+struct Tagged {
+    char c[3];
+};
+typedef struct {
+    int q[5];
+} Tagged;
+struct Ambient {
+    int x;
+};
+
+[[cccc::test]]
+void test_tag_and_anonymous_typedef_are_different_instances(void) {
+    @inst(struct Tagged) Vec    a;
+    @inst(Tagged) Vec           b;
+    struct Vec__struct_Tagged  *ap = &a;
+    struct Vec__typedef_Tagged *bp = &b;
+    AssertEq(sizeof *a.data, 3);
+    AssertEq(sizeof *b.data, 20);
+    (void)ap;
+    (void)bp;
+}
+
+static int block_scope_int(void) {
+    struct Ambient {
+        int x;
+    };
+    @inst(struct Ambient, int) Pair p = {{1}, 2};
+    return p.first.x + p.second + (int)sizeof p.first * 100;
+}
+
+static int block_scope_wide(void) {
+    struct Ambient {
+        char x[8];
+    };
+    @inst(struct Ambient, int) Pair p = {{{0}}, 3};
+    return p.second + (int)sizeof p.first * 100;
+}
+
+[[cccc::test]]
+void test_same_named_block_scope_aggregates(void) {
+    AssertEq(block_scope_int(), 403);
+    AssertEq(block_scope_wide(), 803);
+    @inst(struct Ambient, int) Pair file_scope = {{7}, 1};
+    AssertEq(file_scope.first.x, 7);
+    AssertEq(sizeof(struct Pair__struct_Ambient__int), sizeof file_scope);
+}
+
+static int block_scope_pointer_and_nesting(void) {
+    struct Ambient {
+        short x[3];
+    };
+    @inst(struct Ambient, int) Pair                  inner = {{{1, 2, 3}}, 4};
+    @inst(@inst(struct Ambient, int) Pair, int) Pair outer = {inner, 5};
+    struct Ambient                                  *pa    = &inner.first;
+    @inst(struct Ambient *) Vec                      v     = {&pa, 1};
+    return (int)sizeof outer.first.first + v.data[0]->x[2] + outer.second;
+}
+
+[[cccc::test]]
+void test_block_scope_aggregates_in_pointers_and_nesting(void) {
+    AssertEq(block_scope_pointer_and_nesting(), 6 + 3 + 5);
+}
+
+static int block_scope_function_instance(void) {
+    struct Ambient {
+        char x[5];
+    };
+    return @inst(struct Ambient) max_size();
+}
+
+static int block_scope_function_instance_wide(void) {
+    struct Ambient {
+        char x[9];
+    };
+    return @inst(struct Ambient) max_size();
+}
+
+[[cccc::test]]
+void test_block_scope_function_instances_are_distinct(void) {
+    AssertEq(block_scope_function_instance(), 5);
+    AssertEq(block_scope_function_instance_wide(), 9);
+    AssertEq(@inst(struct Ambient) max_size(), 4);
 }

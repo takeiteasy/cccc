@@ -1661,6 +1661,8 @@ typedef struct TypeAgg {
     struct Type  *enum_base_type; // C23: underlying type (NULL = default int)
     Token *enum_tag; // tag name token (survives declarator name-overwrite)
     Token *typedef_name; // first typedef naming an untagged aggregate
+    bool   block_scope;  // declared inside a function
+    bool   local_inst;   // template instance over a block_scope type
 } TypeAgg;
 
 // Declaration attributes carrying a payload.
@@ -4164,6 +4166,7 @@ typedef struct Compiler {
     bool         saw_templates;   // `@template`/`@inst` appeared in the input
     HashMap      templates;       // name -> Template *
     HashMap      template_insts;  // mangled name -> TemplateInstance *
+    HashMap      template_aggs; // block-scope aggregate spelling -> root Type *
     Scope       *runtime_file_scope;
     Scope       *tmpl_bindings;   // detached scope holding the type parameters
     Scope       *tmpl_anchor;     // scope in which tmpl_bindings is consulted

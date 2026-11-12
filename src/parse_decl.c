@@ -2753,6 +2753,9 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
         hashmap_deinit(&vm->compiler.template_insts);
         memset(&vm->compiler.template_insts, 0,
                sizeof(vm->compiler.template_insts));
+        hashmap_deinit(&vm->compiler.template_aggs);
+        memset(&vm->compiler.template_aggs, 0,
+               sizeof(vm->compiler.template_aggs));
     }
 
     tok = parse_file_scope_decls(vm, tok);

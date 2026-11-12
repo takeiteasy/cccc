@@ -230,7 +230,8 @@ An instance is named `Name__Arg` for each argument, built from the argument's re
 | `int *`, `const char *`, `int * const` | `int_ptr`, `const_char_ptr`, `int_ptr_const` |
 | `int[4]` | `int_arr4` |
 | `struct Point`, `union U`, `enum E` | `struct_Point`, `union_U`, `enum_E` |
-| `typedef struct {...} P;` (no tag) | `struct_P` (`union_P`, `enum_P`) |
+| `typedef struct {...} P;` (no tag) | `typedef_P` |
+| `struct S` declared inside a function | `struct_S__1`, then `struct_S__2` for the next one used |
 | `int *[[cccc::single]]`, `[[cccc::array]]`, `[[cccc::ntarray]]` | `int_ptr_single`, `int_ptr_array`, `int_ptr_ntarray` |
 | `int _Checked[4]`, `char _Nt_checked[6]` | `int_arr4_checked`, `char_arr6_ntchecked` |
 | `[[cccc::global]] int *` | `global_int_ptr` |
@@ -246,7 +247,7 @@ struct Pair__int__float b;     // the same type
 struct Vec__unsigned_long d;   // the same type
 ```
 
-A checked pointer's bounds (`count(n)`) are not part of the argument, so pointers that differ only in bounds share an instance. Arguments that mangle alike but name different types (a `struct P` and an untagged `typedef struct {...} P`) are an error.
+A checked pointer's bounds (`count(n)`) are not part of the argument, so pointers that differ only in bounds share an instance. A tagged `struct P` and an untagged `typedef struct {...} P` are different instances (`struct_P`, `typedef_P`), and so are two `struct S` declared in different functions.[^blockscope] Arguments that still mangle alike but name different types (`struct a_ptr` and `struct a *`) are an error.
 
 ## Inside a template
 
@@ -270,6 +271,8 @@ A function instance is shared: the program has one copy, and a pointer to it com
 | `@template(T) static T max(...)` | A private copy per translation unit |
 
 Two translation units whose templates of the same name produce the same instance are an error (`conflicting definitions of template instance 'max__int'`), as is an ordinary function with the instance's mangled name.
+
+A function instance whose arguments include a type declared inside a function is private to its translation unit, like a `static` template: two files that each declare their own local `struct S` get two instances.
 
 ## Derive attributes
 
@@ -303,5 +306,7 @@ error: not a struct nor a union
 ```
 
 [^linkage]: A shared instance is a weak symbol named by its mangled name in objects written with `-c=object`, so separately compiled files merge when linked. A whole program built with `-c=native` keeps it `static`, which lets the host compiler inline it.
+
+[^blockscope]: A type declared inside a function is numbered in the order the translation unit first uses it (`struct_S__1`, `struct_S__2`), so a hand-written name for such an instance depends on that order. Types declared at file scope are never numbered and have the same name in every file.
 
 [^enumname]: Enumerators sharing a value name one instance, by the first enumerator declared with it. When a value without an enumerator would be spelled like an existing enumerator (`n3` for `-3`), the instantiation is an error.

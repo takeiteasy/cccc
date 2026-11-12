@@ -1780,6 +1780,13 @@ static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
 //
 // C23: optional ": integer-type" specifies the underlying type.
 // C23: "enum tag : underlying-type ;" is a forward declaration (complete type).
+// Template instance names tell a function's own aggregates from file-scope
+// ones.
+static void mark_block_scope(VirtualMachine *vm, Type *ty) {
+    if (vm->compiler.scope->next)
+        type_agg_mut(vm, ty)->block_scope = true;
+}
+
 static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,
                             bool *defined) {
     Type *ty = enum_type(vm);
@@ -1859,6 +1866,7 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,
         if (!type_agg(ty)->enum_base_type)
             error_tok(vm, tag,
                       "enum forward declaration requires an underlying type");
+        mark_block_scope(vm, ty);
         push_tag_scope(vm, tag, ty);
         *rest = tok;
         return ty;
@@ -1870,6 +1878,7 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,
 
     tok      = skip(vm, tok, "{");
     *defined = true;
+    mark_block_scope(vm, ty);
 
     // Read an enum-list.
     int                  i         = 0;
@@ -3786,6 +3795,7 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
         }
 
         ty->size = -1;
+        mark_block_scope(vm, ty);
         push_tag_scope(vm, tag, ty);
         return ty;
     }
@@ -3793,6 +3803,7 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
     tok = skip(vm, tok, "{");
 
     // Construct a struct object.
+    mark_block_scope(vm, ty);
     struct_members(vm, &tok, tok, ty);
     tok = attribute_list(vm, tok, ty, NULL);
     // #1160: unlike the GNU spelling (still handled above), gcc does not
