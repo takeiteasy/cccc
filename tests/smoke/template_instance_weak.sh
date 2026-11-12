@@ -32,7 +32,7 @@ EOS
 # `nm -m` spells it on macOS, a W/w type letter elsewhere.
 { nm -m a.o 2>/dev/null; nm a.o; } | grep -q 'weak external _max__int\| [Ww] max__int$' ||
     fail "max__int is not weak in a.o"
-{ nm -m a.o 2>/dev/null; nm a.o; } | grep 'size_of__struct_S__1' | grep -q 'weak\| [Ww] ' &&
-    fail "size_of__struct_S__1 is weak in a.o"
+{ nm -m a.o 2>/dev/null; nm a.o; } | grep 'size_of__struct_S__in_local_size' | grep -q 'weak\| [Ww] ' &&
+    fail "size_of__struct_S__in_local_size is weak in a.o"
 expect_exit 0 cc a.o b.o -o prog
 expect_exit 42 ./prog

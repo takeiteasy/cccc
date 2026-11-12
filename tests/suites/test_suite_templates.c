@@ -1023,3 +1023,50 @@ void test_block_scope_function_instances_are_distinct(void) {
     AssertEq(block_scope_function_instance_wide(), 9);
     AssertEq(@inst(struct Ambient) max_size(), 4);
 }
+
+static int local_name_first(void) {
+    struct Named {
+        int x;
+    };
+    @inst(struct Named, int) Pair                        p    = {{4}, 1};
+    struct Pair__struct_Named__in_local_name_first__int *same = &p;
+    return same->first.x + same->second;
+}
+
+static int local_name_second(void) {
+    struct Named {
+        long x;
+    };
+    @inst(struct Named, int) Pair                         p    = {{5}, 2};
+    struct Pair__struct_Named__in_local_name_second__int *same = &p;
+    return (int)same->first.x + same->second;
+}
+
+[[cccc::test]]
+void test_local_type_names_follow_the_function(void) {
+    AssertEq(local_name_second(), 7);
+    AssertEq(local_name_first(), 5);
+}
+
+static int local_name_nested_blocks(void) {
+    struct Named {
+        int x;
+    };
+    @inst(struct Named, int) Pair outer = {{1}, 1};
+    int                           sum   = outer.first.x;
+    {
+        struct Named {
+            char c[3];
+        };
+        @inst(struct Named, int) Pair inner = {{{1, 2, 3}}, 1};
+        struct Pair__struct_Named__in_local_name_nested_blocks__2__int *same =
+            &inner;
+        sum += (int)sizeof same->first;
+    }
+    return sum;
+}
+
+[[cccc::test]]
+void test_same_tag_local_types_are_numbered_in_declaration_order(void) {
+    AssertEq(local_name_nested_blocks(), 1 + 3);
+}

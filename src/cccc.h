@@ -1663,6 +1663,8 @@ typedef struct TypeAgg {
     Token *typedef_name; // first typedef naming an untagged aggregate
     bool   block_scope;  // declared inside a function
     bool   local_inst;   // template instance over a block_scope type
+    struct Obj *scope_fn; // block_scope: the named function it is declared in
+    unsigned scope_ord;   // block_scope: 1-based among same-spelled types there
 } TypeAgg;
 
 // Declaration attributes carrying a payload.
@@ -4167,6 +4169,7 @@ typedef struct Compiler {
     HashMap      templates;       // name -> Template *
     HashMap      template_insts;  // mangled name -> TemplateInstance *
     HashMap      template_aggs; // block-scope aggregate spelling -> root Type *
+    HashMap      scope_ords;    // owner function + spelling -> types numbered
     Scope       *runtime_file_scope;
     Scope       *tmpl_bindings;   // detached scope holding the type parameters
     Scope       *tmpl_anchor;     // scope in which tmpl_bindings is consulted

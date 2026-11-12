@@ -1023,6 +1023,7 @@ bool is_compatible_fn_redecl(Type *old_ty, bool old_def, Type *new_ty,
 bool token_is_from_include(VirtualMachine *vm, Token *tok);
 bool types_same_layout(Type *a, Type *b);
 Type *copy_type(VirtualMachine *vm, Type *ty);
+void assign_scope_ord(VirtualMachine *vm, Type *ty);
 void type_assign(VirtualMachine *vm, Type *dst, const Type *src);
 void node_assign(VirtualMachine *vm, Node *dst, const Node *src);
 Node *node_clone(VirtualMachine *vm, const Node *src);

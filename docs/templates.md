@@ -231,7 +231,7 @@ An instance is named `Name__Arg` for each argument, built from the argument's re
 | `int[4]` | `int_arr4` |
 | `struct Point`, `union U`, `enum E` | `struct_Point`, `union_U`, `enum_E` |
 | `typedef struct {...} P;` (no tag) | `typedef_P` |
-| `struct S` declared inside a function | `struct_S__1`, then `struct_S__2` for the next one used |
+| `struct S` declared inside function `f` | `struct_S__in_f`; a second `struct S` in `f` is `struct_S__in_f__2` |
 | `int *[[cccc::single]]`, `[[cccc::array]]`, `[[cccc::ntarray]]` | `int_ptr_single`, `int_ptr_array`, `int_ptr_ntarray` |
 | `int _Checked[4]`, `char _Nt_checked[6]` | `int_arr4_checked`, `char_arr6_ntchecked` |
 | `[[cccc::global]] int *` | `global_int_ptr` |
@@ -307,6 +307,6 @@ error: not a struct nor a union
 
 [^linkage]: A shared instance is a weak symbol named by its mangled name in objects written with `-c=object`, so separately compiled files merge when linked. A whole program built with `-c=native` keeps it `static`, which lets the host compiler inline it.
 
-[^blockscope]: A type declared inside a function is numbered in the order the translation unit first uses it (`struct_S__1`, `struct_S__2`), so a hand-written name for such an instance depends on that order. Types declared at file scope are never numbered and have the same name in every file.
+[^blockscope]: A type declared inside a function is named after that function (`struct_S__in_f`), and numbered in declaration order from the second same-spelled type in it (`__2`). A type inside a block literal or an OpenMP region takes the enclosing function's name, and one in a GNU nested function `g` of `f` takes `f_g`. A type declared in a parameter list cannot be a template argument. Types declared at file scope are never suffixed and have the same name in every file.
 
 [^enumname]: Enumerators sharing a value name one instance, by the first enumerator declared with it. When a value without an enumerator would be spelled like an existing enumerator (`n3` for `-3`), the instantiation is an error.

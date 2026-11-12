@@ -1783,8 +1783,45 @@ static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
 // Template instance names tell a function's own aggregates from file-scope
 // ones.
 static void mark_block_scope(VirtualMachine *vm, Type *ty) {
-    if (vm->compiler.scope->next)
-        type_agg_mut(vm, ty)->block_scope = true;
+    if (!vm->compiler.scope->next)
+        return;
+    TypeAgg *agg     = type_agg_mut(vm, ty);
+    agg->block_scope = true;
+    if (!agg->scope_fn) {
+        Obj *fn = vm->compiler.current_fn;
+        while (fn && (fn->is_block || fn->is_omp_region || fn->is_omp_task))
+            fn = obj_fn(fn)->parent_fn;
+        agg->scope_fn = fn;
+    }
+    assign_scope_ord(vm, ty);
+}
+
+// Numbers a block-scope aggregate among the same-spelled ones of its function
+// in declaration order. An untagged one is spelled by its typedef name, so it
+// is numbered when that is attached.
+void assign_scope_ord(VirtualMachine *vm, Type *ty) {
+    if (!vm->compiler.saw_templates ||
+        (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM))
+        return;
+    const TypeAgg *agg = type_agg(ty);
+    if (!agg->block_scope || agg->scope_ord || !agg->scope_fn)
+        return;
+    Token *tag    = ty->kind == TY_ENUM ? agg->enum_tag : agg->struct_tag;
+    bool   tagged = tag;
+    if (!tag)
+        tag = agg->typedef_name;
+    if (!tag)
+        return;
+    const char *kw  = !tagged                ? "typedef"
+                      : ty->kind == TY_ENUM  ? "enum"
+                      : ty->kind == TY_UNION ? "union"
+                                             : "struct";
+    char       *key = arena_format(vm, "%p/%s_%.*s", (void *)agg->scope_fn, kw,
+                                   (int)tag->len, tag->loc);
+    size_t      len = strlen(key);
+    uintptr_t   n = (uintptr_t)hashmap_get2(&vm->compiler.scope_ords, key, len);
+    hashmap_put2(&vm->compiler.scope_ords, key, len, (void *)(n + 1));
+    type_agg_mut(vm, ty)->scope_ord = (unsigned)(n + 1);
 }
 
 static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,

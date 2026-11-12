@@ -610,9 +610,25 @@ static void mb_putu(MangleBuf *mb, unsigned long long v) {
 
 static void mangle_type(MangleBuf *mb, Type *ty, Token *site);
 
+// The names of the functions around `fn`, outermost first (`f_g` for a GNU
+// nested `g` in `f`).
+static void mb_put_fn_chain(MangleBuf *mb, Obj *fn) {
+    Obj *chain[16];
+    int  n = 0;
+    for (Obj *o = fn; o && n < 16; o = obj_fn(o)->parent_fn)
+        if (!o->is_block && !o->is_omp_region && !o->is_omp_task)
+            chain[n++] = o;
+    while (n--) {
+        mb_puts(mb, chain[n]->name);
+        if (n)
+            mb_puts(mb, "_");
+    }
+}
+
 // An aggregate is named by its tag (`struct_S`), else by the typedef that names
-// it (`typedef_P`). A block-scope aggregate also takes `__N`, counted per
-// spelling in order of first use, so two of them never share a name.
+// it (`typedef_P`). A block-scope aggregate also takes `__in_<function>`, and
+// `__N` from the second same-spelled one in that function, in declaration
+// order.
 static void mangle_tag(MangleBuf *mb, Type *ty, Token *tag, const char *kw,
                        Token *site) {
     bool tagged = tag;
@@ -635,19 +651,26 @@ static void mangle_tag(MangleBuf *mb, Type *ty, Token *tag, const char *kw,
     mb->local          |= agg->block_scope || agg->local_inst;
     if (!agg->block_scope)
         return;
-    size_t base = mb->len;
-    for (unsigned n = 1;; n++) {
-        mb->len     = base;
-        mb->p[base] = 0;
+    if (!agg->scope_fn || !agg->scope_ord)
+        error_tok(mb->vm, site,
+                  "a %s declared outside a function body cannot be a template "
+                  "argument",
+                  kw);
+    mb_puts(mb, "__in_");
+    mb_put_fn_chain(mb, agg->scope_fn);
+    if (agg->scope_ord > 1) {
         mb_puts(mb, "__");
-        mb_putu(mb, n);
-        HashMap *owners = &mb->vm->compiler.template_aggs;
-        Type    *owner  = hashmap_get2(owners, mb->p + start, mb->len - start);
-        if (!owner)
-            hashmap_put2(owners, mb->p + start, mb->len - start, root);
-        if (!owner || owner == root)
-            return;
+        mb_putu(mb, agg->scope_ord);
     }
+    HashMap *owners = &mb->vm->compiler.template_aggs;
+    Type    *owner  = hashmap_get2(owners, mb->p + start, mb->len - start);
+    if (!owner)
+        hashmap_put2(owners, mb->p + start, mb->len - start, root);
+    else if (owner != root)
+        error_tok(mb->vm, site,
+                  "cannot name the instance: '%s' is also the name of a "
+                  "different instance",
+                  mb->p);
 }
 
 static const char *addr_space_spelling(AddrSpace space) {

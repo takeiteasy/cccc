@@ -128,6 +128,7 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
         else if (ty->kind == TY_ENUM && !type_agg(ty)->enum_tag &&
                  !type_agg(ty)->typedef_name)
             type_agg_mut(vm, ty)->typedef_name = ty->name;
+        assign_scope_ord(vm, ty);
         char *name = get_ident(vm, ty->name);
         check_typedef_redefinition(vm, ty, name);
         VarScope *sc       = push_scope(vm, name, ty->name->len);
@@ -2756,6 +2757,8 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
         hashmap_deinit(&vm->compiler.template_aggs);
         memset(&vm->compiler.template_aggs, 0,
                sizeof(vm->compiler.template_aggs));
+        hashmap_deinit(&vm->compiler.scope_ords);
+        memset(&vm->compiler.scope_ords, 0, sizeof(vm->compiler.scope_ords));
     }
 
     tok = parse_file_scope_decls(vm, tok);
