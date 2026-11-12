@@ -38,6 +38,10 @@
     return xs...[1.5];
 }
 
+@template(T, U, V = T, Ts...) struct Needs2 {
+    T x;
+};
+
 #pragma cccc suite begin "template_variadic_errors"
 
 [[cccc::test(error = "takes at least 1 argument, 0 given")]]
@@ -137,3 +141,8 @@ void test_element_pattern_ambiguity(void) {
 }
 
 #pragma cccc suite end
+
+[[cccc::test(error = "takes at least 2 arguments, 1 given")]]
+void test_too_few_arguments_before_defaults(void) {
+    @inst(int) Needs2 n;
+}

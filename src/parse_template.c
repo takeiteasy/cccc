@@ -281,13 +281,6 @@ static int scan_params(VirtualMachine *vm, Token *p, Token *close, Template *t,
                 *err_tok = dots;
                 return -1;
             }
-            for (int j = 0; j < t->nparams; j++)
-                if (t->params[j].def) {
-                    *err     = "a template with a parameter pack cannot have "
-                               "default arguments";
-                    *err_tok = t->params[j].name;
-                    return -1;
-                }
             if (dots->next == decl_end) {
                 // `Ts...`: the name is the one token before the dots.
                 if (a->next != dots || a->kind != TK_IDENT) {
@@ -2584,20 +2577,21 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     bool pack     = tmpl_has_pack(t);
     int  fixed    = t->nparams - pack; // parameters before the pack
     int  required = fixed;
-    while (!pack && required > 0 && t->params[required - 1].def)
+    while (required > 0 && t->params[required - 1].def)
         required--;
     if (nargs < required || (!pack && nargs > t->nparams)) {
         if (pack)
             error_tok(vm, site,
                       "template '%s' takes at least %d argument%s, %d given",
-                      t->name, fixed, fixed == 1 ? "" : "s", nargs);
+                      t->name, required, required == 1 ? "" : "s", nargs);
         if (required == t->nparams)
             error_tok(vm, site, "template '%s' takes %d argument%s, %d given",
                       t->name, t->nparams, t->nparams == 1 ? "" : "s", nargs);
         error_tok(vm, site, "template '%s' takes %d to %d arguments, %d given",
                   t->name, required, t->nparams, nargs);
     }
-    int total = pack ? nargs : t->nparams; // arguments after the defaults
+    int total = pack ? (nargs > fixed ? nargs : fixed)
+                     : t->nparams; // arguments after the defaults
     // A repeat @inst keeps its state on the stack; only a new instance moves
     // its arguments to the arena.
     TemplateArg  stack_args[TMPL_STACK_PARAMS];
@@ -3128,7 +3122,7 @@ static int pattern_tail(VirtualMachine *vm, Template *pt, Template *t, Token *a,
 static Token *parse_pattern_args(VirtualMachine *vm, Template *pt, Template *t,
                                  Token *a, Token *site, PatList *pl) {
     int cap = count_inst_args(a) + 1;
-    if (!tmpl_has_pack(t) && cap < t->nparams)
+    if (cap < t->nparams)
         cap = t->nparams;
     pl->pat =
         arena_alloc(&vm->compiler.parser_arena, sizeof(TemplateArg) * cap);
@@ -3198,16 +3192,31 @@ static Token *parse_pattern_args(VirtualMachine *vm, Template *pt, Template *t,
         given++;
         a = equal(e, ",") ? e->next : e;
     }
-    pl->n = given;
-    if (tmpl_has_pack(t)) {
-        int fixed = t->nparams - 1;
-        if (given < fixed)
-            error_tok(vm, site,
-                      "template '%s' takes at least %d argument%s, %d given",
-                      t->name, fixed, fixed == 1 ? "" : "s", given);
+    pl->n     = given;
+    bool pack = tmpl_has_pack(t);
+    int  fixed = t->nparams - pack;
+    int  required = fixed;
+    while (pack && required > 0 && t->params[required - 1].def)
+        required--;
+    if (pack && given < required)
+        error_tok(vm, site,
+                  "template '%s' takes at least %d argument%s, %d given",
+                  t->name, required, required == 1 ? "" : "s", given);
+    if (pack && pl->tail >= 0) {
+        // The pack variable also takes the defaulted parameters it stands at.
+        for (int i = given; i < fixed; i++)
+            if (!t->params[i].type_start != !t->params[fixed].type_start)
+                error_tok(vm, site,
+                          "pack variable '%.*s' cannot stand for '%.*s', %s "
+                          "parameter",
+                          (int)pt->params[pl->tail].name->len,
+                          pt->params[pl->tail].name->loc,
+                          (int)t->params[i].name->len, t->params[i].name->loc,
+                          t->params[i].type_start ? "a constant" : "a type");
         return a;
     }
-    for (int i = given; i < t->nparams; i++) {
+    int end = pack ? fixed : t->nparams;
+    for (int i = given; i < end; i++) {
         TemplateParam *p = &t->params[i];
         if (!p->def)
             error_tok(vm, site, "template '%s' takes %d argument%s, %d given",
@@ -3221,7 +3230,8 @@ static Token *parse_pattern_args(VirtualMachine *vm, Template *pt, Template *t,
         if (p->type_start)
             pattern_const(vm, t, i, &pat[i], site);
     }
-    pl->n = t->nparams;
+    if (end > given)
+        pl->n = end;
     return a;
 }
 
@@ -3375,7 +3385,7 @@ static void register_partial(VirtualMachine *vm, Template *pt) {
     // Generic: variables standing alone, as the primary's own parameters do.
     bool used[TMPL_MAX_ARGS] = {};
     bool generic = !tmpl_has_pack(t) ||
-                   (pl->tail >= 0 && !pl->tail_pat && pl->n == t->nparams - 1);
+                   (pl->tail >= 0 && !pl->tail_pat && pl->n <= t->nparams - 1);
     if (pl->tail >= 0)
         used[pl->tail] = true;
     for (int i = 0; i < pl->n; i++) {

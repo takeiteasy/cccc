@@ -97,7 +97,7 @@ A parameter may end in `= value`, and the instantiation then leaves its argument
 
 | Rule | Detail |
 |---|---|
-| Order | Defaulted parameters come last; a parameter after a default needs a default |
+| Order | Defaulted parameters come last, before any [parameter pack](templates-variadic.md#defaults-before-a-pack); a parameter after a default needs a default |
 | Value | May name earlier parameters (`T N = 0`, `int N = sizeof(T)`); naming itself or a later parameter is an error |
 | Evaluated | Per instance, after the earlier arguments are bound |
 | Name | Every argument is in the instance name, so `@inst(int) Arr` and `@inst(int, 8) Arr` are one instance |

@@ -317,3 +317,42 @@ void test_marker_spellings(void) {
     AssertTrue(attribute @(int, int)(3, 4) == 7);
     AssertTrue(__inst(int, int) keyword(5, 6) == 11);
 }
+
+@template(T, U = T, Ts...) struct Defd {
+    T a;
+    U b;
+    int n[sizeof...(Ts) + 1];
+};
+@template(T, int N = sizeof(T), int... Ns) int widths(void) {
+    return N * 100 + (int)sizeof...(Ns);
+}
+@template(T, U = T, Ts...) int defd_count(void) {
+    return (int)sizeof(U) * 10 + (int)sizeof...(Ts);
+}
+
+[[cccc::test]]
+void test_defaults_before_pack(void) {
+    @inst(char) Defd a;
+    @inst(char, char) Defd b;
+    @inst(char, long) Defd c;
+    @inst(char, long, int, int) Defd d;
+    AssertEq(sizeof(a), sizeof(b));
+    AssertEq(sizeof(c.b), sizeof(long));
+    AssertEq(sizeof(d.n), 3 * sizeof(int));
+    AssertEq(sizeof(a.n), sizeof(int));
+}
+
+[[cccc::test]]
+void test_default_and_given_share_an_instance(void) {
+    AssertTrue(__builtin_types_compatible_p(@inst(char) Defd,
+                                            @inst(char, char) Defd));
+}
+
+[[cccc::test]]
+void test_defaulted_constant_before_pack(void) {
+    AssertEq(widths @(int)(), 400);
+    AssertEq(widths @(int, 2)(), 200);
+    AssertEq(widths @(int, 2, 3, 4)(), 202);
+    AssertEq(defd_count @(int)(), 40);
+    AssertEq(defd_count @(int, char, long, long)(), 12);
+}

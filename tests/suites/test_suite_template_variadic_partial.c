@@ -617,3 +617,48 @@ void test_pack_variable_shared_by_two_instance_patterns(void) {
     AssertEq(sizeof(b.kind), 1);
     AssertEq(sizeof(c.kind), 1);
 }
+
+@template(T, U = T, Ts...) struct Dp {
+    char kind[1];
+};
+@template(Ts...) @specialize(int, Ts...) struct Dp {
+    char kind[2];
+};
+@template(Ts...) @specialize(int, char, Ts...) struct Dp {
+    char kind[3];
+};
+@template(T, U = T, Ts...) struct Dq {
+    char kind[1];
+};
+@template(T) @specialize(T, T) struct Dq {
+    char kind[2];
+};
+@template(T, Ts...) @specialize(T, Ts *...) struct Dq {
+    char kind[3];
+};
+
+[[cccc::test]]
+void test_pack_variable_spans_a_defaulted_parameter(void) {
+    @inst(int) Dp a;
+    @inst(int, long) Dp b;
+    @inst(long) Dp c;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 2);
+    AssertEq(sizeof(c.kind), 1);
+}
+
+[[cccc::test]]
+void test_narrower_partial_wins_across_the_default(void) {
+    @inst(int, char) Dp a;
+    @inst(int, char, long) Dp b;
+    AssertEq(sizeof(a.kind), 3);
+    AssertEq(sizeof(b.kind), 3);
+}
+
+[[cccc::test]]
+void test_pattern_without_pack_variable_stops_early(void) {
+    @inst(int, int) Dq  a;
+    @inst(int, int, long) Dq b;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 1);
+}
