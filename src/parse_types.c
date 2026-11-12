@@ -988,6 +988,16 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
         return arr;
     }
 
+    if (vm->compiler.tmpl_pattern) {
+        int var = cc_template_pattern_length_var(vm, tok);
+        if (var >= 0) {
+            ty        = type_suffix(vm, rest, tok->next->next, ty);
+            Type *arr = array_of(vm, ty, -1);
+            cc_template_pattern_array(vm, arr, var);
+            return arr;
+        }
+    }
+
     Token *expr_tok = tok;
     Node  *expr     = conditional(vm, &tok, tok);
     // File-scope lengths must be constant; a block-scope call may be a VLA

@@ -4132,6 +4132,24 @@ typedef struct TemplateArg {
     Obj    *sym;  // pointer parameters; NULL is a null pointer
 } TemplateArg;
 
+// In a partial specialization's pattern, a template instance that names a
+// variable (`Pair@(T, U)`): the placeholder type standing for it and its
+// argument patterns.
+typedef struct InstPat {
+    struct InstPat  *next;
+    struct Type     *ty;
+    struct Template *tmpl;
+    TemplateArg     *pat;
+    int             *pat_var; // constant variable a position binds, else -1
+} InstPat;
+
+// In a pattern, an array whose length is a constant variable (`T[N]`).
+typedef struct ArrPat {
+    struct ArrPat *next;
+    struct Type   *ty;
+    int            var;
+} ArrPat;
+
 // A `@template(P...)` definition, kept as unparsed tokens until `@inst`.
 typedef struct Template {
     char          *name;
@@ -4152,6 +4170,8 @@ typedef struct Template {
     TemplateArg     *pat; // partial: the pattern argument per primary parameter
     int *pat_var;       // partial: constant variable a position binds, else -1
     struct Type **vars; // partial: the placeholder type of each type variable
+    InstPat      *inst_pats; // partial: instances its pattern names
+    ArrPat       *arr_pats;  // partial: arrays its pattern binds a length of
     struct TemplateInstance *insts; // primary: the instances made from it
 } Template;
 
@@ -4184,6 +4204,7 @@ typedef struct Compiler {
     Scope       *runtime_file_scope;
     Scope       *tmpl_bindings;   // detached scope holding the type parameters
     Scope       *tmpl_anchor;     // scope in which tmpl_bindings is consulted
+    struct Template *tmpl_pattern;    // partial whose pattern is being parsed
     int          tmpl_depth;
     HashMap      macros;          // Macro definitions
     MemberAlias *member_aliases;  // see note_member_alias_macro(); survives TUs

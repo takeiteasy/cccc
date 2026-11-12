@@ -233,11 +233,26 @@ A specialization in a header applies in every file that includes it.
 @inst(const char *) Vec q;  // the const T * partial
 ```
 
+A pattern may name an instance of a struct, union or enum template, and an array length may be a variable:
+
+```c
+@template(A, B) struct Pair { A a; B b; };
+@template(T, U) @specialize(Pair@(T, U)) struct Vec { T first; U second; };  // any Pair
+@template(T) @specialize(Pair@(T, T)) struct Vec { T both[2]; };            // a Pair of one type
+
+@template(T, int N) @specialize(T[N]) struct Box { T items[N]; };           // any array length
+@template(T, int N) @specialize(T[N], N) struct Arr { T v[N]; };            // length and N agree
+
+Vec@(Pair@(int, float)) a;   // the first partial
+Vec@(Pair@(int, int)) b;     // the second: it is the more specialised
+Box@(int[3]) c;              // N is 3
+```
+
 | Rule | Detail |
 |---|---|
-| Pattern | A type pattern may use pointers, qualifiers, arrays with a constant length (`T[4]`), function types and blocks around a variable. A constant position is a value (`4`) or a bare variable (`N`) |
+| Pattern | A type pattern may use pointers, qualifiers, arrays (`T[4]`, `T[N]`), function types, blocks and template instances (`Pair@(T, U)`) around a variable. A constant position is a value (`4`) or a bare variable (`N`); an array length is a value or a bare variable, not an expression (`T[N + 1]`) |
 | Selection | An exact `@specialize` wins; otherwise the most specialised matching partial; otherwise the template. Matching partials where none is narrower than all the others are an error |
-| Variables | Every variable appears in the pattern, once per constant; no defaults. A pattern leaves an argument out only when its default names no earlier parameter |
+| Variables | Every variable appears in the pattern; no defaults. A variable that appears twice stands for one type or one value (`T, T`, `N, N`, `T[N], N`). A pattern leaves an argument out only when its default names no earlier parameter |
 | Order | After the template, before the first `@inst` the pattern covers |
 | Name | The instance keeps its argument-list name (`Vec__char_ptr`), and its linkage follows the template |
 | Errors | `ambiguous partial specializations of 'Two' for 'Two__int_ptr__int_ptr'`, `redefinition of partial specialization of 'Vec'`, `a partial specialization must be more specific than the primary template`, `partial specialization parameter 'U' is not deduced by the pattern` |
@@ -317,7 +332,7 @@ _Bool same = Cell__int_equals(&x, &y);
 | Not supported | Result |
 |---|---|
 | `long double` or `_BitInt` over 64 bits constant parameter, a NaN argument | Compile error |
-| Pattern over a template instance (`@specialize(@inst(T) Pair)`), or a constant bound inside an array length (`T[N]`) | Compile error |
+| Pattern naming an instance of a function or typedef template, or a variable inside an array-length expression (`T[N + 1]`) | Compile error |
 | Argument that is a variable-length array | Compile error |
 | Argument that is an unnamed struct, union or enum with no typedef name | Compile error asking for a tag or typedef name |
 | `@template`, `@inst` or `@specialize` in comptime code | Compile error |

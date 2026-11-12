@@ -434,6 +434,8 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
                                          Token *tok);
 void cc_parse_file_scope_chain(VirtualMachine *vm, Token *tok);
 Type *cc_template_inst_type(VirtualMachine *vm, Token **rest, Token *tok);
+int cc_template_pattern_length_var(VirtualMachine *vm, Token *tok);
+void cc_template_pattern_array(VirtualMachine *vm, Type *arr, int var);
 Node *kernel_local_ref(VirtualMachine *vm, Obj *var, Token *tok);
 int64_t classify_type_code(Type *ty);
 Node *clone_bounds_node(VirtualMachine *vm, Node *n);
