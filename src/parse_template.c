@@ -608,14 +608,72 @@ static void mb_putu(MangleBuf *mb, unsigned long long v) {
 
 static void mangle_type(MangleBuf *mb, Type *ty, Token *site);
 
-static void mangle_tag(MangleBuf *mb, Token *tag, const char *kw, Token *site) {
+// An aggregate is named by its tag, else by the typedef that names it.
+static void mangle_tag(MangleBuf *mb, Type *ty, Token *tag, const char *kw,
+                       Token *site) {
+    for (Type *t = ty; !tag && t; t = t->origin)
+        tag = type_agg(t)->typedef_name;
     if (!tag)
         error_tok(mb->vm, site,
-                  "template argument must be a named type; give the %s a tag",
+                  "template argument must be a named type; give the %s a tag "
+                  "or a typedef name",
                   kw);
     mb_puts(mb, kw);
     mb_puts(mb, "_");
     mb_putn(mb, tag->loc, tag->len);
+}
+
+static const char *addr_space_spelling(AddrSpace space) {
+    switch (space) {
+        case AS_GLOBAL:
+            return "global";
+        case AS_LOCAL:
+            return "local";
+        case AS_CONSTANT:
+            return "constant";
+        case AS_GENERIC:
+            return "generic";
+        default:
+            return "private";
+    }
+}
+
+static const char *checked_spelling(CheckedKind kind) {
+    switch (kind) {
+        case CHECKED_SINGLE:
+            return "_single";
+        case CHECKED_ARRAY:
+            return "_array";
+        case CHECKED_NTARRAY:
+            return "_ntarray";
+        default:
+            return "";
+    }
+}
+
+static Type *root_aggregate(Type *ty) {
+    while (ty && (ty->kind == TY_PTR || ty->kind == TY_ARRAY))
+        ty = ty->base;
+    if (!ty || (ty->kind != TY_STRUCT && ty->kind != TY_UNION &&
+                ty->kind != TY_ENUM))
+        return NULL;
+    while (ty->origin)
+        ty = ty->origin;
+    return ty;
+}
+
+static void mangle_signature(MangleBuf *mb, Type *ty, Token *site) {
+    mb_puts(mb, "fn_");
+    mangle_type(mb, ty->return_ty, site);
+    mb_puts(mb, "_of");
+    int n = 0;
+    for (Type *p = ty->params; p; p = p->next, n++) {
+        mb_puts(mb, "_");
+        mangle_type(mb, p, site);
+    }
+    if (!n && !ty->is_variadic)
+        mb_puts(mb, "_void");
+    mb_puts(mb, ty->is_variadic ? "_va_end" : "_end");
 }
 
 static void mangle_base(MangleBuf *mb, Type *ty, Token *site) {
@@ -666,55 +724,45 @@ static void mangle_base(MangleBuf *mb, Type *ty, Token *site) {
             mb_puts(mb, "_");
             return mangle_type(mb, ty->base, site);
         case TY_ENUM:
-            return mangle_tag(mb, type_agg(ty)->enum_tag, "enum", site);
+            return mangle_tag(mb, ty, type_agg(ty)->enum_tag, "enum", site);
         case TY_STRUCT:
-            return mangle_tag(mb, type_agg(ty)->struct_tag, "struct", site);
+            return mangle_tag(mb, ty, type_agg(ty)->struct_tag, "struct", site);
         case TY_UNION:
-            return mangle_tag(mb, type_agg(ty)->struct_tag, "union", site);
+            return mangle_tag(mb, ty, type_agg(ty)->struct_tag, "union", site);
         case TY_PTR:
             mangle_type(mb, ty->base, site);
             return mb_puts(mb, "_ptr");
         case TY_ARRAY:
             mangle_type(mb, ty->base, site);
-            if (ty->array_len < 0 || ty->is_flexible)
-                return mb_puts(mb, "_arr");
             mb_puts(mb, "_arr");
-            return mb_putu(mb, ty->array_len);
-        case TY_FUNC: {
-            mb_puts(mb, "fn_");
-            mangle_type(mb, ty->return_ty, site);
-            mb_puts(mb, "_of");
-            int n = 0;
-            for (Type *p = ty->params; p; p = p->next, n++) {
-                mb_puts(mb, "_");
-                mangle_type(mb, p, site);
-            }
-            if (!n && !ty->is_variadic)
-                mb_puts(mb, "_void");
-            mb_puts(mb, ty->is_variadic ? "_va_end" : "_end");
+            if (ty->array_len >= 0 && !ty->is_flexible)
+                mb_putu(mb, ty->array_len);
+            if (ty->checked_kind == CHECKED_ARRAY)
+                return mb_puts(mb, "_checked");
+            if (ty->checked_kind == CHECKED_NTARRAY)
+                return mb_puts(mb, "_ntchecked");
             return;
-        }
+        case TY_FUNC:
+            return mangle_signature(mb, ty, site);
+        case TY_BLOCK:
+            mangle_signature(mb, ty, site);
+            return mb_puts(mb, "_block");
         case TY_VLA:
             error_tok(mb->vm, site,
                       "a variable-length array cannot be a template argument");
-        case TY_BLOCK:
-            error_tok(mb->vm, site,
-                      "a block type cannot be a template argument");
         default:
             error_tok(mb->vm, site, "this type cannot be a template argument");
     }
 }
 
 static void mangle_type(MangleBuf *mb, Type *ty, Token *site) {
-    if (ty->checked_kind != CHECKED_NONE)
-        error_tok(mb->vm, site,
-                  "a checked-pointer type cannot be a template argument");
-    if (ty->addr_space != AS_NONE)
-        error_tok(mb->vm, site,
-                  "an address-space type cannot be a template argument");
-
     if (ty->kind == TY_PTR) {
         mangle_base(mb, ty, site);
+        mb_puts(mb, checked_spelling(ty->checked_kind));
+        if (ty->addr_space != AS_NONE) {
+            mb_puts(mb, "_");
+            mb_puts(mb, addr_space_spelling(ty->addr_space));
+        }
         if (ty->is_const)
             mb_puts(mb, "_const");
         if (ty->is_volatile)
@@ -724,6 +772,10 @@ static void mangle_type(MangleBuf *mb, Type *ty, Token *site) {
         if (ty->is_atomic)
             mb_puts(mb, "_atomic");
         return;
+    }
+    if (ty->addr_space != AS_NONE) {
+        mb_puts(mb, addr_space_spelling(ty->addr_space));
+        mb_puts(mb, "_");
     }
     if (ty->is_const)
         mb_puts(mb, "const_");
@@ -1248,6 +1300,26 @@ static void parse_const_arg(VirtualMachine *vm, Token **rest, Token *tok,
 
 // Fills argument `i` from its default. Earlier parameters are already bound,
 // so the default may name them.
+//
+// A checked pointer's count()/bounds() may name locals of the `@inst` site, so
+// an argument carries only the checked kind: bounds stay per declaration.
+static Type *strip_arg_bounds(VirtualMachine *vm, Type *ty) {
+    if (!ty || (ty->kind != TY_PTR && ty->kind != TY_ARRAY))
+        return ty;
+    Type *base = strip_arg_bounds(vm, ty->base);
+    if (base == ty->base && type_chk(ty)->form == CB_NONE)
+        return ty;
+    Type *copy = copy_type(vm, ty);
+    copy->base = base;
+    if (type_chk(ty)->form != CB_NONE) {
+        TypeChecked *chk = type_chk_mut(vm, copy);
+        chk->form        = CB_NONE;
+        chk->arg1        = NULL;
+        chk->arg2        = NULL;
+    }
+    return copy;
+}
+
 static void default_arg(VirtualMachine *vm, Template *t, int i,
                         TemplateArg *out) {
     TemplateParam *p    = &t->params[i];
@@ -1257,7 +1329,7 @@ static void default_arg(VirtualMachine *vm, Template *t, int i,
     if (p->type_start)
         parse_const_arg(vm, &rest, toks, out);
     else
-        out->ty = typename(vm, &rest, toks);
+        out->ty = strip_arg_bounds(vm, typename(vm, &rest, toks));
     if (rest->kind != TK_EOF)
         error_tok(vm, rest, "unexpected token in the default of '%.*s'",
                   (int)p->name->len, p->name->loc);
@@ -1414,7 +1486,11 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     if (found) {
         for (int i = 0; i < t->nparams; i++) {
             const Obj *x = found->args[i].sym, *y = args[i].sym;
-            if (t->params[i].type_start && (!x != !y || (x && strcmp(x->name, y->name))))
+            Type      *xa = root_aggregate(found->args[i].ty);
+            Type      *ya = root_aggregate(args[i].ty);
+            if ((t->params[i].type_start &&
+                 (!x != !y || (x && strcmp(x->name, y->name)))) ||
+                xa != ya)
                 error_tok(vm, site,
                           "cannot name the instance: '%s' is also the name of "
                           "a different instance",
@@ -1524,7 +1600,7 @@ static void parse_inst_arg(VirtualMachine *vm, Template *t, int n, Token **rest,
     if (n < t->nparams && t->params[n].type_start)
         parse_const_arg(vm, rest, tok, out);
     else
-        out->ty = typename(vm, rest, tok);
+        out->ty = strip_arg_bounds(vm, typename(vm, rest, tok));
 }
 
 // Parses the rewritten `( Name {, Arg} )` after the `__cccc_inst` marker at

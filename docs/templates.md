@@ -230,6 +230,11 @@ An instance is named `Name__Arg` for each argument, built from the argument's re
 | `int *`, `const char *`, `int * const` | `int_ptr`, `const_char_ptr`, `int_ptr_const` |
 | `int[4]` | `int_arr4` |
 | `struct Point`, `union U`, `enum E` | `struct_Point`, `union_U`, `enum_E` |
+| `typedef struct {...} P;` (no tag) | `struct_P` (`union_P`, `enum_P`) |
+| `int *[[cccc::single]]`, `[[cccc::array]]`, `[[cccc::ntarray]]` | `int_ptr_single`, `int_ptr_array`, `int_ptr_ntarray` |
+| `int _Checked[4]`, `char _Nt_checked[6]` | `int_arr4_checked`, `char_arr6_ntchecked` |
+| `[[cccc::global]] int *` | `global_int_ptr` |
+| `int (^)(int)` | `fn_int_of_int_end_block` |
 | Enumerator of an enum template `Level`, with `char` | `Level__char__HIGH` |
 | `void (*)(int)` | `fn_void_of_int_end_ptr` |
 
@@ -240,6 +245,8 @@ struct Pair__int__float b;     // the same type
 @inst(size_t) Vec c;
 struct Vec__unsigned_long d;   // the same type
 ```
+
+A checked pointer's bounds (`count(n)`) are not part of the argument, so pointers that differ only in bounds share an instance. Arguments that mangle alike but name different types (a `struct P` and an untagged `typedef struct {...} P`) are an error.
 
 ## Inside a template
 
@@ -281,8 +288,8 @@ _Bool same = Cell__int_equals(&x, &y);
 |---|---|
 | `long double` or `_BitInt` over 64 bits constant parameter, a NaN argument | Compile error |
 | Partial specialization | `@specialize` names every argument |
-| Argument that is a checked pointer, address-space type, block, or variable-length array | Compile error naming the kind |
-| Argument that is an unnamed struct, union or enum | Compile error asking for a tag |
+| Argument that is a variable-length array | Compile error |
+| Argument that is an unnamed struct, union or enum with no typedef name | Compile error asking for a tag or typedef name |
 | `@template`, `@inst` or `@specialize` in comptime code | Compile error |
 | Defining a template after its first `@inst` | The template must come first |
 

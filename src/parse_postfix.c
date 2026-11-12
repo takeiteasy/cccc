@@ -4739,6 +4739,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         if (inst->tmpl->kind != TMPL_FUNC)
             error_tok(vm, tok, "template '%s' is a type, not a function",
                       inst->tmpl->name);
+        if ((*rest)->kind == TK_IDENT)
+            error_tok(vm, tok, "template '%s' is a function, not a type",
+                      inst->tmpl->name);
         mark_function_referenced(vm, inst->fn);
         return new_var_node(vm, inst->fn, tok);
     }

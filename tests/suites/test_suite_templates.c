@@ -23,6 +23,14 @@
 @template(T) enum __attribute__((unused)) AttrEnum : T { AE_A, AE_B };
 @template(T) enum AttrEnumTrail : T { AET_A } __attribute__((unused));
 @template(int N) enum __attribute__((packed)) PackedCap { PC_A = N };
+typedef struct {
+    int x;
+} AnonPoint;
+typedef union {
+    int   i;
+    float f;
+} AnonBits;
+typedef enum { AN_RED, AN_GREEN } AnonColor;
 @template(T) T first_of(T *p) { T v = *p; return v; }
 @template(T) T(grouped_name)(T x) {
     return x + 1;
@@ -864,4 +872,67 @@ void test_enum_attributes_around_tag(void) {
 void test_packed_enum_template(void) {
     AssertEq(sizeof(@inst(5) PackedCap), 1);
     AssertEq(sizeof(@inst(70000) PackedCap), 4);
+}
+
+[[cccc::test]]
+void test_anonymous_typedef_arguments(void) {
+    @inst(AnonPoint, int) Pair p = {{1}, 2};
+    struct Pair__struct_AnonPoint__int q = p;
+    @inst(AnonBits, int) Pair b  = {{.i = 7}, 3};
+    @inst(AnonColor, int) Pair c = {AN_GREEN, 4};
+    AssertEq(q.first.x, 1);
+    AssertEq(b.first.i, 7);
+    AssertEq(c.first, AN_GREEN);
+    AssertEq(sizeof(struct Pair__union_AnonBits__int), sizeof(b));
+    AssertEq(sizeof(struct Pair__enum_AnonColor__int), sizeof(c));
+}
+
+[[cccc::test]]
+void test_checked_pointer_arguments(void) {
+    int n = 3, m = 5;
+    int *[[cccc::single]] one          = &n;
+    int *[[cccc::array, cccc::count(n)]] many  = &n;
+    int *[[cccc::array, cccc::count(m)]] other = &m;
+    int *[[cccc::ntarray]] text        = nullptr;
+    @inst(typeof(one), int) Pair a = {one, 1};
+    struct Pair__int_ptr_single__int b = a;
+    @inst(typeof(many), int) Pair c = {many, 2};
+    @inst(typeof(other), int) Pair d = {other, 3};
+    struct Pair__int_ptr_array__int e = c;
+    @inst(typeof(text), int) Pair f = {text, 4};
+    struct Pair__int_ptr_ntarray__int g = f;
+    AssertEq(*b.first, 3);
+    AssertEq(*e.first, 3);
+    AssertEq(*d.first, 5);
+    AssertEq(g.second, 4);
+    AssertEq(sizeof(struct Pair__int_ptr_array__int), sizeof(d));
+}
+
+[[cccc::test]]
+void test_checked_array_arguments(void) {
+    int  a _Checked[4]  = {1, 2, 3, 4};
+    char s _Nt_checked[6] = "hello";
+    @inst(typeof(a), int) Pair *pa = nullptr;
+    @inst(typeof(s), int) Pair *ps = nullptr;
+    struct Pair__int_arr4_checked__int *qa = pa;
+    struct Pair__char_arr6_ntchecked__int *qs = ps;
+    AssertEq(qa == nullptr, 1);
+    AssertEq(qs == nullptr, 1);
+}
+
+[[cccc::test]]
+void test_address_space_arguments(void) {
+    int n = 9;
+    [[cccc::global]] int *g = &n;
+    @inst(typeof(g), int) Pair a = {g, 1};
+    struct Pair__global_int_ptr__int b = a;
+    AssertEq(*b.first, 9);
+}
+
+[[cccc::test]]
+void test_block_argument(void) {
+    int (^twice_it)(int) = ^(int x) { return x * 2; };
+    @inst(int (^)(int), int) Pair a = {twice_it, 1};
+    struct Pair__fn_int_of_int_end_block__int b = a;
+    AssertEq(b.first(21), 42);
 }

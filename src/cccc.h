@@ -1660,6 +1660,7 @@ typedef struct TypeAgg {
     EnumConstant *enum_constants;
     struct Type  *enum_base_type; // C23: underlying type (NULL = default int)
     Token *enum_tag; // tag name token (survives declarator name-overwrite)
+    Token *typedef_name; // first typedef naming an untagged aggregate
 } TypeAgg;
 
 // Declaration attributes carrying a payload.

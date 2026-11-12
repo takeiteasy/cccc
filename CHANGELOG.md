@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: a template argument may be a checked pointer (`Vec__int_ptr_single`, `_array`, `_ntarray`; bounds are dropped), a checked array (`int_arr4_checked`, `_ntchecked`), an address-space type (`global_int_ptr`), a block (`fn_int_of_int_end_block`) or an unnamed struct, union or enum known by its typedef (`struct_P`). Two arguments that mangle alike but name different types are an error. `@inst(int) f v;` for a function template reports `template 'f' is a function, not a type`.
 - Changed: the first built-in derive attribute (`@equals`, `@ctor`, `@to_string`, ...) in a source file loads `<cccc/derive.h>`, and `@to_json`, `@from_json` and `@json` also load `<cccc/json.h>`, and `@from_string` and `@text` load `<cccc/text.h>`, so the includes are optional. `--no-implicit-derive` restores the explicit-include requirement.
 - Changed: a function template instance is shared across translation units: one copy per program, and a pointer to it compares equal everywhere. `static` on the template keeps a private copy per file. Files that define different templates producing the same instance are an error. This also fixes multi-file `-c=native` builds that redefined an instance. Objects from `-c=object` carry the instance as a weak symbol.
 - Fixed: `-E` keeps `int * @single q;` on one line instead of breaking after `*`.

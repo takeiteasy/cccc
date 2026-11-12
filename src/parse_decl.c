@@ -122,6 +122,12 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
             ty->header_array_typedef = true;
         drop_cleanup_attr(vm, ty, attr, ty->name);
         resolve_type_checked_bounds(vm, ty);
+        if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
+            !type_agg(ty)->struct_tag && !type_agg(ty)->typedef_name)
+            type_agg_mut(vm, ty)->typedef_name = ty->name;
+        else if (ty->kind == TY_ENUM && !type_agg(ty)->enum_tag &&
+                 !type_agg(ty)->typedef_name)
+            type_agg_mut(vm, ty)->typedef_name = ty->name;
         char *name = get_ident(vm, ty->name);
         check_typedef_redefinition(vm, ty, name);
         VarScope *sc       = push_scope(vm, name, ty->name->len);

@@ -54,6 +54,9 @@ enum Odd { n3 = 5, below = -1 };
     return O;
 }
 
+struct Tagged { int a; };
+typedef struct { int a; } Tagged;
+
 #pragma cccc suite begin "templates_errors"
 
 [[cccc::test(error = "takes 2 arguments, 1 given")]]
@@ -88,10 +91,20 @@ void test_specialize_inside_function(void) {
     };
 }
 
-[[cccc::test(error = "checked-pointer type cannot be a template argument")]]
-void test_checked_pointer_argument(void) {
-    int * [[cccc::single]] p = 0;
-    @inst(typeof(p)) Vec v;
+[[cccc::test(error = "template 'ident' is a function, not a type")]]
+void test_function_template_as_type(void) {
+    @inst(int) ident v;
+}
+
+[[cccc::test(error = "is also the name of a different instance")]]
+void test_typedef_name_clashes_with_tag(void) {
+    @inst(struct Tagged) Vec a;
+    @inst(Tagged) Vec b;
+}
+
+[[cccc::test(error = "give the struct a tag or a typedef name")]]
+void test_untagged_struct_argument(void) {
+    @inst(typeof(((struct { int x; }){0}))) Vec v;
 }
 
 [[cccc::test(error = "variable-length array cannot be a template argument")]]
