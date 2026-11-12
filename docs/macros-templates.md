@@ -109,4 +109,18 @@ WithLoop(loop) {
 
 A function label whose only `goto` comes from a spliced template counts as used, so `-Wunused` decides after expansion. An unresolved label reaching code generation is an internal error, never silently wrong code.
 
+## Template instances in `Quote`
+
+A `Quote` or `QuoteLazy` template can name [template](templates.md) instances with `@inst`. The instance is created when the template is parsed and emitted with the program, whether it is a function, struct, union, enum or typedef.
+
+```c
+@template(T) T max(T a, T b) { return a > b ? a : b; }
+
+@comptime Node *biggest(Node *a, Node *b) {
+    return Quote("@inst(int) max($1, $2)", a, b);   // calls max__int
+}
+
+int main(void) { return biggest(40, 42); }
+```
+
 [^with]: Without the wrapper, the generated function's locals would be built while the caller is the active function context.

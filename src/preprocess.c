@@ -6486,6 +6486,23 @@ static Token *splice_omp_pragma(VirtualMachine *vm, Token *omp, Token **tail) {
     return head;
 }
 
+// Rewrites the `@inst` spellings in a Quote() template to the parser's form.
+Token *cc_rewrite_template_markers(VirtualMachine *vm, Token *toks) {
+    Token *prev = NULL;
+    for (Token *tok = toks; tok && tok->kind != TK_EOF; tok = tok->next) {
+        Token *cur = tok;
+        if (try_rewrite_template_marker(vm, &cur)) {
+            if (prev)
+                prev->next = cur;
+            else
+                toks = cur;
+            tok = cur;
+        }
+        prev = tok;
+    }
+    return toks;
+}
+
 // Rewrites each `_Pragma("omp ...")` in a Quote() template into the token
 // sequence `#pragma omp` produces, or drops it without -fopenmp.
 Token *cc_rewrite_pragma_operators(VirtualMachine *vm, Token *toks) {

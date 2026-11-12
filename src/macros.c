@@ -4729,6 +4729,26 @@ Node *cc_expand_const_macro_calls(VirtualMachine *vm, Node *node) {
     return node;
 }
 
+// Moves the definitions a macro created while its call was expanded (template
+// instances from a Quote(), for one) from in front of `prog` onto its end, so
+// codegen reaches them and the expansion walk below visits them too.
+static void adopt_generated_globals(VirtualMachine *vm, Obj *prog) {
+    Obj *head = vm->compiler.globals;
+    if (head == prog)
+        return;
+    Obj *last_new = head;
+    while (last_new && last_new->next != prog)
+        last_new = last_new->next;
+    if (!last_new)
+        return;
+    Obj *tail = prog;
+    while (tail->next)
+        tail = tail->next;
+    last_new->next       = NULL;
+    tail->next           = head;
+    vm->compiler.globals = prog;
+}
+
 // Expand all macro calls in the program
 void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
     if (!vm || !prog)
@@ -4778,6 +4798,7 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
 
         // Flush new locals (created by quote templates) back into fn->locals.
         obj_fn_mut(vm, fn)->locals = vm->compiler.locals;
+        adopt_generated_globals(vm, prog);
     }
 
     // #1255: every template-spliced `goto host_label` is bound now, so the

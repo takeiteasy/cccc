@@ -5972,6 +5972,7 @@ char *find_cccc_bundled_header_path(VirtualMachine *vm,
 bool cc_file_is_command_line_input(VirtualMachine *vm,
                                    const char     *name);  // #1006
 Token *cc_rewrite_pragma_operators(VirtualMachine *vm, Token *toks);
+Token *cc_rewrite_template_markers(VirtualMachine *vm, Token *toks);
 // #1292: realpath()-canonicalizes a path key (falls back to the literal
 // string when realpath() can't resolve it, e.g. a synthetic "<embedded>/..."
 // path). Originally private to preprocess.c's `#pragma once`/include-guard
