@@ -19,6 +19,7 @@ CCCC re-emits the source's top-level `#include` lines into the generated C and f
 | Header reached through a chain of ordinary `#include`s | Treated as captured however long the chain |
 | `extern inline __attribute__((gnu_inline))` function called from a user header | Also gets a weak out-of-line definition |
 | Function an input declares before a replayed `#include`, called by that header's bodies | Prototyped ahead of the `#include` |
+| Header that uses the `@attribute` spelling, or includes `<cccc/derive.h>` or another CCCC-only header | Not replayed; its types and functions come from the generated C |
 
 A comptime-generated declaration must use a type from a header that is captured into the output. `#include @shared` qualifies; `@comptime`, `@build` and `@test` do not, and `-c=generated` reports an error rather than write C nothing declares the type in. See [macros-global.md](macros-emit.md#what--cgenerated-captures).
 

@@ -99,11 +99,12 @@ grep -q "comptime variable 'cv' is already defined differently at w1.c:1" err.tx
     fail "no conflicting-variable error: $(cat err.txt)"
 
 # A struct derived in a shared header is one definition per program.
-cat >derived.h <<'EOS2'
+cat >derived.h <<'EOS'
 #pragma once
 struct M { int a; char *name; } @equals @hash @getters @setters @ctor @to_string;
 EOS
-cat >m_p.c <<'EOS2'
+cat >m_p.c <<'EOS'
+#include <stdio.h>
 #include <cccc/derive.h>
 #include "derived.h"
 int from_q(void);
@@ -113,7 +114,8 @@ int main(void) {
     return 39 + get_a(&m) + from_q();
 }
 EOS
-cat >m_q.c <<'EOS2'
+cat >m_q.c <<'EOS'
+#include <stdio.h>
 #include <cccc/derive.h>
 #include "derived.h"
 int from_q(void) {
@@ -121,7 +123,7 @@ int from_q(void) {
     return M_equals(&m, &m) * 0;
 }
 EOS
-cp m_q.c m_r.c
+printf '#include <stdio.h>\n#include <cccc/derive.h>\n#include "derived.h"\nint unused_r;\n' >m_r.c
 expect_exit 42 "$CCCC" m_p.c m_q.c
 expect_exit 42 "$CCCC" m_p.c m_q.c m_r.c
 
@@ -131,3 +133,37 @@ printf '#include <cccc/derive.h>\nstruct P { long y; } @equals;\nint other;\n' >
 expect_fail "$CCCC" o_p.c o_q.c
 grep -q "redefinition of 'P_equals'" err.txt ||
     fail "no duplicate-derive error: $(cat err.txt)"
+
+# -c=native does not replay a header that holds a derive attribute or includes
+# <cccc/derive.h>; the struct and its functions come from the generated C.
+expect_exit 0 "$CCCC" -c=native -o derived_out m_p.c m_q.c m_r.c
+expect_exit 42 ./derived_out
+cat >own.h <<'EOS'
+#pragma once
+#include <cccc/derive.h>
+struct Own { int v; } @equals;
+EOS
+cat >n_p.c <<'EOS'
+#include "own.h"
+int from_q(void);
+int main(void) {
+    struct Own a = {1}, b = {1};
+    return 41 + Own_equals(&a, &b) * 0 + from_q();
+}
+EOS
+cat >n_q.c <<'EOS'
+#include "own.h"
+int from_q(void) { return 1; }
+EOS
+expect_exit 42 "$CCCC" n_p.c n_q.c
+expect_exit 0 "$CCCC" -c=native -o own_one n_p.c n_q.c
+expect_exit 42 ./own_one
+cat >n_s.c <<'EOS'
+#include "own.h"
+int main(void) {
+    struct Own a = {1}, b = {1};
+    return 41 + Own_equals(&a, &b);
+}
+EOS
+expect_exit 0 "$CCCC" -c=native -o own_solo n_s.c
+expect_exit 42 ./own_solo

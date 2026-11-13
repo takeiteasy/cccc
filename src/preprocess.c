@@ -4648,6 +4648,8 @@ static bool try_rewrite_at_attr(VirtualMachine *vm, Token **tok_ptr) {
     Token *name_tok = tok->next;
     char  *name     = arena_strndup(vm, name_tok->loc, name_tok->len);
     Token *after    = name_tok->next;
+    // The host compiler cannot read the @ spelling in a replayed file.
+    mark_cccc_only_file(vm, tok->file->name);
 
     // Build the args text "(arg1, arg2, ...)" by re-emitting raw source text
     // for each token inside the parens, separated by spaces.
@@ -7726,9 +7728,15 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         // so serialize_program.c's #include-replay loop
                         // suppresses it and this header's own content is
                         // re-derived instead of relied upon.
-                        if (is_cccc_supplied_only_header(filename))
+                        if (is_cccc_supplied_only_header(filename)) {
                             mark_cccc_only_file(
                                 vm, embedded_header_key(vm, filename));
+                            // The includer cannot be replayed either: the
+                            // host would open it and fail on this include.
+                            record_include_edge(
+                                vm, start->file ? start->file->name : NULL,
+                                embedded_header_key(vm, filename));
+                        }
                         // #1096: this whole branch is CCCC's own embedded
                         // header table (try_embedded_std_header, above) --
                         // unconditionally mark it bundled so a bodiless
