@@ -1027,6 +1027,25 @@ static Token *new_eof(VirtualMachine *vm, Token *tok) {
     return t;
 }
 
+// A comptime function or variable captured again, as when a header reaches two
+// inputs: true when an identical copy is already registered. A different copy
+// is an error, except under a reload or REPL redefinition, which replace it.
+static bool comptime_capture_is_duplicate(VirtualMachine *vm, Token *at,
+                                          const char *kind, const char *name,
+                                          const Token *tokens,
+                                          const Token *seen, bool same_name) {
+    if (!same_name)
+        return false;
+    if (cc_tokens_same(tokens, seen))
+        return true;
+    if (!vm->compiler.allow_fn_redefinition)
+        error_tok(vm, at,
+                  "comptime %s '%s' is already defined differently at %s:%d",
+                  kind, name, seen->file ? seen->file->name : "<unknown>",
+                  seen->line_no);
+    return false;
+}
+
 // Extract a [[cccc::comptime]] / __attribute__((comptime)) function definition
 // and store it. Returns the token after the function definition (or original
 // token on failure).
@@ -1227,6 +1246,13 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
         }
     }
 
+    for (MacroFn *e = vm->compiler.macro_fns; e != vm->compiler.macro_fns_floor;
+         e          = e->next)
+        if (comptime_capture_is_duplicate(vm, func_name_tok, "function", name,
+                                          head.next, e->body_tokens,
+                                          !strcmp(e->name, name)))
+            return body_end ? body_end : tok;
+
     // Create MacroFn entry
     MacroFn *pm = arena_alloc(&vm->compiler.parser_arena, sizeof(MacroFn));
     memset(pm, 0, sizeof(MacroFn));
@@ -1347,6 +1373,13 @@ static Token *extract_comptime_var(VirtualMachine *vm, Token *tok) {
     }
     cur->next = new_eof(vm, body_end);
     convert_pp_tokens(vm, head.next);
+
+    for (ComptimeVar *e                           = vm->compiler.comptime_vars;
+         e != vm->compiler.comptime_vars_floor; e = e->next)
+        if (comptime_capture_is_duplicate(vm, start, "variable", name,
+                                          head.next, e->decl_tokens,
+                                          !strcmp(e->name, name)))
+            return body_end;
 
     ComptimeVar *cv =
         arena_alloc(&vm->compiler.parser_arena, sizeof(ComptimeVar));

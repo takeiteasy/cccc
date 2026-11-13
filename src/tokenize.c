@@ -812,6 +812,18 @@ static const char *digraph_canonical(char *loc, int len) {
     return NULL;
 }
 
+// True when two token lists spell the same text, ignoring where they sit.
+bool cc_tokens_same(const Token *a, const Token *b) {
+    for (; a && b; a = a->next, b = b->next) {
+        if (a->kind != b->kind || a->len != b->len ||
+            memcmp(a->loc, b->loc, (size_t)a->len))
+            return false;
+        if (a->kind == TK_EOF)
+            return true;
+    }
+    return false;
+}
+
 // Consumes the current token if it matches `op`.
 bool equal(Token *tok, const char *op) {
     if (!tok)

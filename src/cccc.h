@@ -4293,6 +4293,8 @@ typedef struct Compiler {
 
     // Compile-time macro state
     MacroFn            *macro_fns; // Linked list of captured macro functions
+    MacroFn *macro_fns_floor; // A reload compares captures only against the
+                              // entries newer than this (NULL: all)
     ComptimeDeclRecord *comptime_decls; // Linked list of bodyless
                                         // [[cccc::comptime]] decls (#884)
     StaticAssertRecord *static_asserts; // #1098: file-scope _Static_assert
@@ -4301,6 +4303,7 @@ typedef struct Compiler {
     FileAsmRecord      *file_asms_tail; // append point for file_asms
     ComptimeVar
         *comptime_vars;     // Linked list of [[cccc::comptime]] variable decls
+    ComptimeVar  *comptime_vars_floor; // as macro_fns_floor
     TestFnRecord *test_fns; // Linked list of [[cccc::test]] function names
     CcTestFormat  test_format; // --testing=native harness output format
     TestSetupRecord

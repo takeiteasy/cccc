@@ -359,7 +359,11 @@ static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
     vm->error_jmp_buf                = &jb;
 
     if (setjmp(jb) == 0) {
+        vm->compiler.macro_fns_floor     = old_fns;
+        vm->compiler.comptime_vars_floor = old_vars;
         Token *tok   = cc_preprocess_ex(vm, resolved, false);
+        vm->compiler.macro_fns_floor     = NULL;
+        vm->compiler.comptime_vars_floor = NULL;
         deps_changed = true;
         if (!tok)
             error("failed to preprocess %s", path);
@@ -422,6 +426,8 @@ static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
         fputs(vm->error_message, stderr);
         vm->error_message = NULL;
     }
+    vm->compiler.macro_fns_floor     = NULL;
+    vm->compiler.comptime_vars_floor = NULL;
     if (pp_active)
         cc_preprocessor_end_reload(vm, pp);
     if (mark.started)

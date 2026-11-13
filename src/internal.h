@@ -633,6 +633,7 @@ bool node_is_stmt_kind(Node *n);
 // is about to link; errors on one another list already holds.
 void cc_claim_spliced_chain(VirtualMachine *vm, Node *head);
 bool equal(Token *tok, const char *op);
+bool cc_tokens_same(const Token *a, const Token *b);
 Token *skip(VirtualMachine *vm, Token *tok, char *op);
 bool consume(VirtualMachine *vm, Token **rest, Token *tok, char *str);
 void convert_pp_tokens(VirtualMachine *vm, Token *tok);

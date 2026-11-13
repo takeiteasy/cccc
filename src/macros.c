@@ -2930,17 +2930,6 @@ bool cc_session_expand_macros(VirtualMachine *vm, Obj *old_head) {
     longjmp(*saved_jb, 1);
 }
 
-static bool tokens_same(const Token *a, const Token *b) {
-    for (; a && b; a = a->next, b = b->next) {
-        if (a->kind != b->kind || a->len != b->len ||
-            memcmp(a->loc, b->loc, (size_t)a->len))
-            return false;
-        if (a->kind == TK_EOF)
-            return true;
-    }
-    return false;
-}
-
 // Re-preprocessing a file queues its comptime includes again.
 static void dedupe_pending_includes(VirtualMachine *vm, int from) {
     StringArray *p   = &vm->compiler.comptime_pending_includes;
@@ -3005,7 +2994,7 @@ bool cc_comptime_reload(VirtualMachine *vm, MacroFn *old_fns,
         for (MacroFn *m = old_fns; m && !old; m = m->next)
             if (!strcmp(m->name, nw->name))
                 old = m;
-        if (old && tokens_same(old->body_tokens, nw->body_tokens)) {
+        if (old && cc_tokens_same(old->body_tokens, nw->body_tokens)) {
             *link = nw->next;
             continue;
         }
@@ -3031,7 +3020,7 @@ bool cc_comptime_reload(VirtualMachine *vm, MacroFn *old_fns,
         for (ComptimeVar *c = old_vars; c && !old; c = c->next)
             if (!strcmp(c->name, nw->name))
                 old = c;
-        if (old && tokens_same(old->decl_tokens, nw->decl_tokens)) {
+        if (old && cc_tokens_same(old->decl_tokens, nw->decl_tokens)) {
             *link = nw->next;
             continue;
         }

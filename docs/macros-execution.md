@@ -46,6 +46,8 @@ What a file-scope call declares belongs to its own input file: the types and typ
 
 Generated names follow C linkage. A generated `static` function or variable (`FunctionSetStatic()`, `GlobalVarSetStatic()`) is private to its input, so each input generates its own `helper` and calls reach their own. Two inputs that each generate an external name stop at link time with `redefinition of 'helper'`. One input cannot generate a name twice: `MakeFunction()` and `GlobalVar()` report `expected unique generated function name` (or `global name`).
 
+A header's `@comptime` functions and variables are shared by every input that includes it. Two inputs may define the same name only with identical text; a different definition stops with `comptime function 'k' is already defined differently at a.c:1` (`comptime variable` for a variable).
+
 ### Sharing `#define` macros
 
 ```c
