@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `-c=native` and `-m` write a block-scope struct, union or enum that a template instance uses as an argument once, at file scope, and the declaring function uses that definition. Before, the instance held an anonymous copy, so `@inst(struct S *) Vec` assigned `struct S **` to a different type (an error under gcc 14 and later) and a function template taking `T *` failed with `conflicting types` on its prototype and definition.
+
 ## [0.34.1] - 2026-11-13
 
 - Added: a function template with `[[cccc::operator(sym)]]` is instantiated from the operand types, so one `operator+` serves every `Vec2@(T)`. An operator written in a struct template's body binds for each instance.

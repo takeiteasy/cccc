@@ -412,6 +412,8 @@ void format_double_literal(char *buf, size_t cap, double v);
 void format_ldouble_literal(char *buf, size_t cap, long double v);
 void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
                                     SerializeContext *ctx, Type *ty);
+void promote_local_type_to_file_scope(VirtualMachine *vm, SerializeContext *ctx,
+                                      Type *ty);
 void obj_vec_push(ObjVec *vec, Obj *obj);
 void print_indent_level(FILE *f, int indent);
 void reorder_defs_by_byval_deps(SerializeContext *ctx);

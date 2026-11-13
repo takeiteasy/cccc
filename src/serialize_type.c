@@ -3434,20 +3434,24 @@ static bool type_has_file_scope_name(SerializeContext *ctx, Type *ty) {
 // types and a hard clang error at the env-struct assignment. This
 // synthesizes a tag for that case too, not just hoisting an already-named
 // one.
-void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
-                                    SerializeContext *ctx, Type *ty) {
+//
+// With `emit` false only the records are rewritten, so the file-scope pass
+// prints the type in dependency order (a template instance's members are
+// printed there, ahead of any hoist that emits).
+static void promote_local_type(FILE *f, VirtualMachine *vm,
+                               SerializeContext *ctx, Type *ty, bool emit) {
     if (!ty)
         return;
 
     if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA) {
-        hoist_local_type_to_file_scope(f, vm, ctx, ty->base);
+        promote_local_type(f, vm, ctx, ty->base, emit);
         return;
     }
 
     if (ty->kind == TY_FUNC) {
-        hoist_local_type_to_file_scope(f, vm, ctx, ty->return_ty);
+        promote_local_type(f, vm, ctx, ty->return_ty, emit);
         for (Type *p = ty->params; p; p = p->next)
-            hoist_local_type_to_file_scope(f, vm, ctx, p);
+            promote_local_type(f, vm, ctx, p, emit);
         return;
     }
 
@@ -3463,9 +3467,10 @@ void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
 
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
         for (Member *m = type_agg(ty)->members; m; m = m->next)
-            hoist_local_type_to_file_scope(f, vm, ctx, m->ty);
+            promote_local_type(f, vm, ctx, m->ty, emit);
 
-    type_vec_push(&ctx->hoisted, ty);
+    if (emit)
+        type_vec_push(&ctx->hoisted, ty);
 
     // Find the first existing tag record (if any) so a collision-free tag
     // keeps its original spelling -- this leaves existing -m output and
@@ -3536,6 +3541,8 @@ void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
         ctx->tags[ctx->tags_len - 1].synth_tag = true;
     }
 
+    if (!emit)
+        return;
     Obj *saved_fn   = ctx->current_fn;
     ctx->current_fn = NULL;
     if (ty->kind == TY_ENUM)
@@ -3543,6 +3550,16 @@ void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
     else
         serialize_struct_def(f, ctx, ty);
     ctx->current_fn = saved_fn;
+}
+
+void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
+                                    SerializeContext *ctx, Type *ty) {
+    promote_local_type(f, vm, ctx, ty, true);
+}
+
+void promote_local_type_to_file_scope(VirtualMachine *vm, SerializeContext *ctx,
+                                      Type *ty) {
+    promote_local_type(NULL, vm, ctx, ty, false);
 }
 
 // The function whose local type `ty` depends on (NULL when it only needs file
