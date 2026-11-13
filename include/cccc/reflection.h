@@ -3506,7 +3506,7 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
  * @brief Build a positional compound literal; element count is inferred from
  * the argument list.
  * @param ty The compound literal's type.
- * @param ... Node* initializer values, assigned positionally.
+ * @param ... Node* initializer values, assigned positionally; none may be NULL.
  * @details Requires function scope (file-scope is not supported). */
 #define CompoundLiteral(ty, ...)                                               \
     __builtin_ast_compound_literal(                                            \
@@ -3517,7 +3517,8 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
 /*! @def InitArray
  * @brief Build an array compound literal with an explicit element type.
  * @param elem_ty The array element type.
- * @param ... Node* element values; count is inferred from the argument list. */
+ * @param ... Node* element values, none NULL; count is inferred from the
+ * argument list. */
 #define InitArray(elem_ty, ...)                                                \
     __builtin_ast_init_array(                                                  \
         elem_ty, (Node *[]){__VA_ARGS__},                                      \

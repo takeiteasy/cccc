@@ -167,7 +167,8 @@ Node *second_of_three(Node *a, Node *b, Node *c) {
 
 Designated struct or union init. `fields` is a `const char **` naming the
 members; `values` is the corresponding `Node **` array; `n` is the count.
-Unspecified members are zero-initialized.
+Unspecified members are zero-initialized. A NULL value, a NULL field name or a
+name the type lacks is an error.
 
 ```c
 [[cccc::comptime]]

@@ -2651,8 +2651,6 @@ static Node *make_gvar_compound_literal(VirtualMachine *vm, Type *ty,
     if (ty->kind == TY_ARRAY) {
         int elem_sz = ty->base->size;
         for (int i = 0; i < n && i < ty->array_len; i++) {
-            if (!inits[i])
-                continue;
             reflect_write_constexpr(vm, buf + i * elem_sz, ty->base, inits[i]);
         }
     } else if (ty->kind == TY_STRUCT) {
@@ -2662,14 +2660,10 @@ static Node *make_gvar_compound_literal(VirtualMachine *vm, Type *ty,
                 i++;
                 continue;
             }
-            if (!inits[i]) {
-                i++;
-                continue;
-            }
             reflect_write_constexpr(vm, buf + m->offset, m->ty, inits[i]);
             i++;
         }
-    } else if (n > 0 && inits[0]) {
+    } else if (n > 0) {
         reflect_write_constexpr(vm, buf, ty, inits[0]);
     }
 
@@ -2689,6 +2683,7 @@ Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !ty)
         return NULL;
+    reflect_check_no_null(vm, inits, n, "CompoundLiteral: initializer");
     Token *tok = vm->compiler.macro_call_tok;
     Obj   *fn  = vm->compiler.current_fn;
     if (!fn)
@@ -2707,16 +2702,13 @@ Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n) {
 
     Node *chain         = NULL;
     reflect_check_unique(vm, inits, n);
-    if (n > 0 && inits) {
+    if (n > 0) {
         for (int i = 0; i < n; i++)
-            if (inits[i])
-                reflect_link(vm, inits[i]);
+            reflect_link(vm, inits[i]);
         for (int i = 0; i < n - 1; i++)
-            if (inits[i])
-                inits[i]->next = inits[i + 1];
-        if (inits[n - 1])
-            inits[n - 1]->next = NULL;
-        chain = inits[0];
+            inits[i]->next = inits[i + 1];
+        inits[n - 1]->next = NULL;
+        chain              = inits[0];
     }
 
     Node *splice             = alloc_node(vm, ND_INIT_SPLICE);
@@ -2761,6 +2753,13 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
         return NULL;
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
         return NULL;
+    reflect_check_no_null(vm, values, n, "InitStruct: value");
+    for (int i = 0; i < n; i++) {
+        if (!fields[i])
+            reflect_null_entry_error(vm, "InitStruct: field name", i);
+        if (!__builtin_ast_struct_member_find(ty, fields[i]))
+            reflect_link_error(vm, "InitStruct: no such member");
+    }
     Obj *fn = vm->compiler.current_fn;
     if (!fn) {
         // File scope: static anon gvar with constant init_data
@@ -2774,12 +2773,8 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
         memset(buf, 0, ty->size);
         var->init_data = buf;
         for (int i = 0; i < n; i++) {
-            if (!fields[i] || !values[i])
-                continue;
             Member *mem =
                 (Member *)__builtin_ast_struct_member_find(ty, fields[i]);
-            if (!mem)
-                return NULL;
             reflect_write_constexpr(vm, buf + mem->offset, mem->ty, values[i]);
         }
         Node *node = alloc_node(vm, ND_VAR);
@@ -2801,11 +2796,7 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
     // rest.
     Node *assignments = alloc_node(vm, ND_NULL_EXPR);
     for (int i = 0; i < n; i++) {
-        if (!fields[i] || !values[i])
-            continue;
         Member *mem = (Member *)__builtin_ast_struct_member_find(ty, fields[i]);
-        if (!mem)
-            return NULL;
 
         Node *var_ref    = alloc_node(vm, ND_VAR);
         var_ref->var     = var;
