@@ -164,8 +164,48 @@ int ct_answer(void) { return @inst(int) twice(21); }
 |---|---|
 | `InstantiateType` on a function template, or `InstantiateFunction` on any other | Error naming the other builtin |
 | Trailing text after the arguments (`"int) junk ("`) | Error |
-| A call at file scope (`gen();`) | `'Box' is not a template`: it runs before the file is parsed, so no template exists yet. Handlers that run while a function body or attribute is expanded can instantiate[^filescope] |
+| An unknown template name | `'nothing' is not a template` |
 
-[^filescope]: `Quote` with `@inst` has the same limit.
+### From Type handles
+
+`InstantiateTypeWith(name, args, n)` and `InstantiateFunctionWith(name, args, n)` take an array of `TemplateArgument` instead of text, so a computed `Type *` needs no spelling. `TypeArg(t)` makes a type argument and `ValueArg(node)` a constant one.
+
+```c
+@template(T, int N) struct Arr { T v[N]; };
+
+@comptime Node *bytes(Type *elem) {
+    TemplateArgument a[] = {TypeArg(elem), ValueArg(MakeIntLiteral(5))};
+    return MakeIntLiteral(TypeSize(InstantiateTypeWith("Arr", a, 2)));
+}
+```
+
+Arguments are matched to parameters in order, and a pack takes the rest. A type where the parameter is a constant (or the reverse), or an argument with neither or both fields set, is an error.
+
+### At file scope
+
+A file-scope call (`gen();`) sees the templates of its own input file, including those from the headers it includes. The instances it makes are the ones the file's own code names afterwards, so `Box @(int)` after `gen()` reuses `Box__int`. `Quote("@inst(...)")` works there too.[^filescope]
+
+```c
+@template(T) struct Box { T value; };
+
+@comptime void gen(void) {
+    Type *box = InstantiateType("Box", "int");
+    Obj *fn = MakeFunction("box_size", GetType("int"));
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(TypeSize(box))));
+}
+gen();
+
+int main(void) { Box @(int) b = {1}; return box_size() + b.value; }
+```
+
+| Case | Result |
+|---|---|
+| Template argument is a builtin or library type | The instance is shared with the file's own code |
+| Template argument is a type the file declares, and the file's own code names the same instance | Error: the call made the instance over its own copy of the type[^filetype] |
+| Template argument is a type the file declares, and only generated code uses the instance | Works |
+
+[^filescope]: `Quote` with `@inst` follows the same rules.
+
+[^filetype]: A file-scope call runs before the file is parsed, so it works on its own copy of the file's types. Instantiate such a template only from generated code, or from a handler that runs during the parse.
 
 [^with]: Without the wrapper, the generated function's locals would be built while the caller is the active function context.

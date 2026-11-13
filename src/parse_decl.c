@@ -2780,6 +2780,17 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
         hashmap_deinit(registry[i]);
         memset(registry[i], 0, sizeof *registry[i]);
     }
+    // The file-scope calls that ran before this parse left their templates and
+    // instances behind.
+    if (vm->compiler.parse_seed && !vm->compiler.in_macro_mode) {
+        TemplateSeed *seed = vm->compiler.parse_seed;
+        *registry[0]       = seed->templates;
+        *registry[1]       = seed->insts;
+        *registry[2]       = seed->aggs;
+        *registry[3]       = seed->scope_ords;
+        memset(seed, 0, sizeof *seed);
+    }
+    vm->compiler.parse_seed = NULL;
 
     tok = parse_file_scope_decls(vm, tok);
 

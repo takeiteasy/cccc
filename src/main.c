@@ -3411,8 +3411,9 @@ int main(int argc, const char *argv[]) {
         // (parse.c) for the full reasoning.
         if (i > 0)
             cc_leave_top_file_scope(&vm);
-        vm.compiler.opencl = input_opencl[i];
-        input_progs[i]     = cc_parse(&vm, input_tokens[i]);
+        vm.compiler.opencl     = input_opencl[i];
+        vm.compiler.parse_seed = cc_template_seed(&vm, i);
+        input_progs[i]         = cc_parse(&vm, input_tokens[i]);
         // #999: parse() returning NULL is not on its own a failure -- its
         // own comment says outright it "returns NULL when no new globals
         // were created", which is the ordinary, successful outcome for a

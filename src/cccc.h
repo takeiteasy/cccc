@@ -4147,6 +4147,13 @@ typedef struct TemplateArg {
     Obj    *sym;  // pointer parameters; NULL is a null pointer
 } TemplateArg;
 
+// The comptime builtins' argument (include/cccc/reflection.h): a type or a
+// constant expression, exactly one set.
+typedef struct TemplateArgument {
+    Type *type;
+    Node *value;
+} TemplateArgument;
+
 // The argument patterns of a partial specialization or of an instance in its
 // pattern: `n` leading entries, then, with `tail >= 0`, the pack variable that
 // takes every argument after them (`Ts...`). Entry `i` of a variadic template
@@ -4201,7 +4208,24 @@ typedef struct Template {
     ArrPat       *arr_pats;  // partial: arrays its pattern binds a length of
     bool             pat_elem; // partial: parsing the element pattern of a pack
     struct TemplateInstance *insts; // primary: the instances made from it
+    struct Template         *specs; // primary: its full specializations
+    struct Template         *next_spec;
 } Template;
+
+// A template definition found by the comptime index, kept so a file-scope call
+// that runs before the parse can register the input's templates.
+typedef struct PreparseTemplate {
+    Token                   *start;
+    int                      file; // index into the input token streams
+    struct Template         *tmpl; // what registering it made
+    struct PreparseTemplate *next;
+} PreparseTemplate;
+
+// The runtime template registry a file-scope call left behind. The parse of
+// the same input adopts it, so the instances those calls made are kept.
+typedef struct TemplateSeed {
+    HashMap templates, insts, aggs, scope_ords;
+} TemplateSeed;
 
 typedef enum {
     TI_SPECIALIZED, // hand-written, parsed on first use
@@ -4221,6 +4245,7 @@ typedef struct TemplateInstance {
     Template         *spec; // TI_SPECIALIZED: the hand-written definition
     char             *failure; // TI_FAILED: the first error its body reported
     struct TemplateInstance *next_inst; // the template's other instances
+    bool from_preparse; // made by a file-scope call, before the parse
 } TemplateInstance;
 
 typedef struct Compiler {
@@ -4236,6 +4261,11 @@ typedef struct Compiler {
     // The comptime program's own template registry (the four maps above are
     // the runtime program's); template_registry() picks one by in_macro_mode.
     HashMap ct_templates, ct_template_insts, ct_template_aggs, ct_scope_ords;
+    PreparseTemplate *preparse_templates, **preparse_templates_tail;
+    Template         *captured; // the template the last capture registered
+    bool              in_preparse_calls; // file-scope calls are running
+    TemplateSeed     *template_seeds;    // one per input; NULL before any call
+    TemplateSeed     *parse_seed;     // for the next runtime parse(), or NULL
     Scope       *runtime_file_scope;
     Scope       *tmpl_bindings;   // detached scope holding the type parameters
     Scope       *tmpl_anchor;     // scope in which tmpl_bindings is consulted
@@ -5987,6 +6017,12 @@ Type *cc_instantiate_type_text(VirtualMachine *vm, const char *name,
                                const char *args);
 Obj *cc_instantiate_function_text(VirtualMachine *vm, const char *name,
                                   const char *args);
+// macros.c: the registry seed for input `fi`, or NULL when none was made.
+TemplateSeed *cc_template_seed(VirtualMachine *vm, int fi);
+Type *cc_instantiate_type_args(VirtualMachine *vm, const char *name,
+                               const TemplateArgument *args, int n);
+Obj *cc_instantiate_function_args(VirtualMachine *vm, const char *name,
+                                  const TemplateArgument *args, int n);
 // #1292: realpath()-canonicalizes a path key (falls back to the literal
 // string when realpath() can't resolve it, e.g. a synthetic "<embedded>/..."
 // path). Originally private to preprocess.c's `#pragma once`/include-guard

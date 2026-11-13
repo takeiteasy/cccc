@@ -793,6 +793,16 @@ static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
     }
 }
 
+static void note_preparse_template(VirtualMachine *vm, int fi, Token *start) {
+    PreparseTemplate *n =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(PreparseTemplate));
+    *n = (PreparseTemplate){.start = start, .file = fi};
+    if (!vm->compiler.preparse_templates_tail)
+        vm->compiler.preparse_templates_tail = &vm->compiler.preparse_templates;
+    *vm->compiler.preparse_templates_tail = n;
+    vm->compiler.preparse_templates_tail  = &n->next;
+}
+
 // Build the comptime declaration index over all input streams. Idempotent
 // per compile (has_comptime_decl_index guards re-entry). The
 // declaration-boundary scan (file-scope call skip, function-body skip via
@@ -816,6 +826,7 @@ static void cc_comptime_index_build(VirtualMachine *vm, Token **input_tokens,
                 Token      *err_tok;
                 if (cc_template_scan(vm, tok, &tmpl, &err, &err_tok) > 0 ||
                     cc_specialize_scan(vm, tok, &tmpl, &err, &err_tok) > 0) {
+                    note_preparse_template(vm, fi, tok);
                     tok = tmpl.end;
                     continue;
                 }
@@ -4101,6 +4112,9 @@ Token *cc_find_comptime_call(VirtualMachine *vm, Token *from, Token *to) {
     return NULL;
 }
 
+static void preparse_tokens_replaced(VirtualMachine *vm, Token *removed,
+                                     Token *replacement);
+
 // Scan a single token stream for file-scope calls to non-inline macros,
 // execute them, collect generated definitions, and remove the call tokens.
 // Newly generated Obj definitions are drained into vm->compiler.macro_globals
@@ -4140,6 +4154,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
             equal(tok->next->next->next->next, ";")) {
             Token *next_tok = tok->next->next->next->next->next;
             cc_record_emit_source(vm, tok_lit(tok->next->next)->str);
+            preparse_tokens_replaced(vm, tok, next_tok);
             if (prev)
                 prev->next = next_tok;
             else
@@ -4378,6 +4393,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
                             if (body_last) {
                                 vm->compiler.globals = globals_before;
                                 body_last->next      = next_tok;
+                                preparse_tokens_replaced(vm, tok, body_first);
                                 if (prev)
                                     prev->next = body_first;
                                 else
@@ -4403,6 +4419,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
                         vm->compiler.globals = globals_before;
 
                         // Remove the call tokens from the stream
+                        preparse_tokens_replaced(vm, tok, next_tok);
                         if (prev) {
                             prev->next = next_tok;
                         } else {
@@ -4531,6 +4548,45 @@ Obj *cc_run_file_scope_calls(VirtualMachine *vm, Token **tok) {
     longjmp(*saved_jb, 1);
 }
 
+static void register_input_templates(VirtualMachine *vm, int fi) {
+    bool saved_splice                   = vm->compiler.comptime_splice_active;
+    vm->compiler.comptime_splice_active = true;
+    for (PreparseTemplate *p = vm->compiler.preparse_templates; p; p = p->next)
+        if (p->file == fi) {
+            vm->compiler.captured = NULL;
+            if (!cc_template_capture(vm, p->start))
+                cc_specialize_capture(vm, p->start);
+            p->tmpl = vm->compiler.captured;
+        }
+    vm->compiler.comptime_splice_active = saved_splice;
+}
+
+// A template registered before the calls ran may end at a call that is now
+// gone from the stream.
+static void preparse_tokens_replaced(VirtualMachine *vm, Token *removed,
+                                     Token *replacement) {
+    for (PreparseTemplate *p = vm->compiler.preparse_templates; p; p = p->next)
+        if (p->tmpl && p->tmpl->end == removed)
+            p->tmpl->end = replacement;
+}
+
+static void stash_input_templates(VirtualMachine *vm, int fi) {
+    TemplateSeed *seed   = &vm->compiler.template_seeds[fi];
+    HashMap      *maps[] = {&seed->templates, &seed->insts, &seed->aggs,
+                            &seed->scope_ords};
+    HashMap      *live[] = {tmpl_templates(vm), tmpl_insts(vm), tmpl_aggs(vm),
+                            tmpl_scope_ords(vm)};
+    for (size_t i = 0; i < sizeof maps / sizeof *maps; i++) {
+        *maps[i] = *live[i];
+        memset(live[i], 0, sizeof *live[i]);
+    }
+}
+
+TemplateSeed *cc_template_seed(VirtualMachine *vm, int fi) {
+    return vm->compiler.template_seeds ? &vm->compiler.template_seeds[fi]
+                                       : NULL;
+}
+
 // Execute file-scope calls to non-inline macros before the main parse.
 // For each file-scope call:
 //   1. Scan the preprocessed token stream for zero-arg calls to non-inline
@@ -4652,11 +4708,31 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens,
     // scan_and_execute_global_calls drains generated objects into
     // macro_globals directly and restores globals after each call,
     // so no bulk-move is needed here.
+    //
+    // The runtime templates of an input are registered for its calls, so
+    // InstantiateType() and `@inst` in a generator find them. The registry
+    // is kept for the parse of that input (cc_template_seed).
+    if (vm->compiler.saw_templates) {
+        vm->compiler.template_seeds =
+            arena_alloc(&vm->compiler.parser_arena,
+                        sizeof(TemplateSeed) * (count ? count : 1));
+        memset(vm->compiler.template_seeds, 0, sizeof(TemplateSeed) * count);
+        // TODO: every input's instances land in this one scope; give each
+        // input its own under a common root (#2048)
+        vm->compiler.runtime_file_scope = vm->compiler.scope;
+    }
+    vm->compiler.in_preparse_calls = true;
     for (int fi = 0; fi < count; fi++) {
         if (!input_tokens[fi])
             continue;
+        if (vm->compiler.template_seeds)
+            register_input_templates(vm, fi);
         scan_and_execute_global_calls(vm, &input_tokens[fi]);
+        if (vm->compiler.template_seeds)
+            stash_input_templates(vm, fi);
     }
+    vm->compiler.in_preparse_calls  = false;
+    vm->compiler.runtime_file_scope = NULL;
 
     prepend_generated_decls(vm, vm->compiler.macro_globals, input_tokens,
                             count);

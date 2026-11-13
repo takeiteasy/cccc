@@ -280,6 +280,15 @@ typedef enum {
     ATTR_TARGET_MEMBER   = 5,
     ATTR_TARGET_PARAM    = 6,
 } AttrTargetKind;
+
+/*! @brief One argument of a template instantiation: a type or a constant.
+ * @details Exactly one field is set. Build one with @c TypeArg or
+ *          @c ValueArg and pass an array to @c InstantiateTypeWith or
+ *          @c InstantiateFunctionWith. */
+typedef struct TemplateArgument {
+    Type *type;  /*!< A type argument. */
+    Node *value; /*!< A constant argument, such as @c MakeIntLiteral(4). */
+} TemplateArgument;
 #endif // CCCC_REFLECTION_PROTOTYPES_ONLY
 
 /*! @brief Generate a unique identifier string for macro-created symbols.
@@ -673,6 +682,31 @@ Type *__builtin_ast_instantiate_type(const char *name, const char *args);
  * @details Convenience wrapper: InstantiateFunction(name, args).
  */
 Obj *__builtin_ast_instantiate_function(const char *name, const char *args);
+
+/*! @brief Instantiate a struct, union, enum or typedef template from handles.
+ * @param name The template name.
+ * @param args The arguments in order, one per template parameter (a pack
+ *             takes the rest).
+ * @param n The number of arguments.
+ * @return The instance's type. An error if `name` is not such a template, or
+ *         an argument is a type where the parameter is a constant (or the
+ *         reverse).
+ * @details Convenience wrapper: InstantiateTypeWith(name, args, n).
+ */
+Type *__builtin_ast_instantiate_type_with(const char             *name,
+                                          const TemplateArgument *args, int n);
+
+/*! @brief Instantiate a function template from handles.
+ * @param name The template name.
+ * @param args The arguments in order.
+ * @param n The number of arguments.
+ * @return The instance's function. An error if `name` is not a function
+ *         template.
+ * @details Convenience wrapper: InstantiateFunctionWith(name, args, n).
+ */
+Obj *__builtin_ast_instantiate_function_with(const char             *name,
+                                             const TemplateArgument *args,
+                                             int                     n);
 
 /*! @brief Build a fixed-length array type.
  * @param base The element type.
@@ -2626,6 +2660,29 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param args The argument list as written inside `@inst(...)`. */
 #define InstantiateFunction(name, args)                                        \
     __builtin_ast_instantiate_function(name, args)
+/*! @def TypeArg
+ * @brief A type argument for InstantiateTypeWith / InstantiateFunctionWith.
+ * @param t The type. */
+#define TypeArg(t) ((TemplateArgument){.type = (t)})
+/*! @def ValueArg
+ * @brief A constant argument for InstantiateTypeWith /
+ *        InstantiateFunctionWith.
+ * @param node A constant expression node, such as MakeIntLiteral(4). */
+#define ValueArg(node) ((TemplateArgument){.value = (node)})
+/*! @def InstantiateTypeWith
+ * @brief Instantiate a struct, union, enum or typedef template from handles.
+ * @param name The template name.
+ * @param args An array of TemplateArgument (TypeArg / ValueArg).
+ * @param n The number of arguments. */
+#define InstantiateTypeWith(name, args, n)                                     \
+    __builtin_ast_instantiate_type_with(name, args, n)
+/*! @def InstantiateFunctionWith
+ * @brief Instantiate a function template from handles.
+ * @param name The template name.
+ * @param args An array of TemplateArgument (TypeArg / ValueArg).
+ * @param n The number of arguments. */
+#define InstantiateFunctionWith(name, args, n)                                 \
+    __builtin_ast_instantiate_function_with(name, args, n)
 /*! @def MakeArray
  * @brief Build a fixed-length array type.
  * @param base The element type.

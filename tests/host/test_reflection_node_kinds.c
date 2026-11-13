@@ -24,6 +24,7 @@
 #define NodeKind             PublicNodeKind
 #define TypeKind             PublicTypeKind
 #define AttrTargetKind       PublicAttrTargetKind
+#define TemplateArgument     PublicTemplateArgument
 #define ATTR_TARGET_TYPEDEF  PUBLIC_ATTR_TARGET_TYPEDEF
 #define ATTR_TARGET_TYPE     PUBLIC_ATTR_TARGET_TYPE
 #define ATTR_TARGET_FUNCTION PUBLIC_ATTR_TARGET_FUNCTION
@@ -40,6 +41,7 @@
 #undef NodeKind
 #undef TypeKind
 #undef AttrTargetKind
+#undef TemplateArgument
 
 #include "internal.h"
 

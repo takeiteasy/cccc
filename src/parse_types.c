@@ -1799,7 +1799,7 @@ static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
 // Template instance names tell a function's own aggregates from file-scope
 // ones.
 static void mark_block_scope(VirtualMachine *vm, Type *ty) {
-    if (!vm->compiler.scope->next)
+    if (!vm->compiler.scope->next || vm->compiler.scope == tmpl_file_scope(vm))
         return;
     TypeAgg *agg     = type_agg_mut(vm, ty);
     agg->block_scope = true;

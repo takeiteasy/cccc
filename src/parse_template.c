@@ -607,13 +607,28 @@ Token *cc_template_capture(VirtualMachine *vm, Token *tok) {
     t->name     = arena_strndup(vm, t->name_tok->loc, t->name_tok->len);
     t->name_len = t->name_tok->len;
     note_member_packs(vm, t);
+    // A file-scope call that ran before the parse registered it already.
     if (t->pattern) {
+        Template *primary = cc_find_template(vm, t->name_tok);
+        for (Template *p = primary ? primary->partials : NULL; p;
+             p           = p->next_partial)
+            if (p->start == t->start) {
+                vm->compiler.captured = p;
+                return t->end;
+            }
         register_partial(vm, t);
+        vm->compiler.captured = t;
         return t->end;
     }
-    if (hashmap_get2(tmpl_templates(vm), t->name, t->name_len))
+    Template *old = hashmap_get2(tmpl_templates(vm), t->name, t->name_len);
+    if (old && old->start == t->start) {
+        vm->compiler.captured = old;
+        return t->end;
+    }
+    if (old)
         error_tok(vm, t->name_tok, "redefinition of template '%s'", t->name);
     hashmap_put2(tmpl_templates(vm), t->name, t->name_len, t);
+    vm->compiler.captured = t;
     return t->end;
 }
 
@@ -3063,6 +3078,13 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                              (!x != !y || (x && strcmp(x->name, y->name)))) ||
                             xa != ya;
         }
+        // TODO: a file-scope call's copy of a file type could be unified with
+        // the parse's own (#2049)
+        if (clash && found->from_preparse)
+            error_tok(vm, site,
+                      "cannot name the instance: a file-scope call made '%s' "
+                      "over its own copy of a type this file declares",
+                      mb.p);
         if (clash)
             error_tok(vm, site,
                       "cannot name the instance: '%s' is also the name of "
@@ -3148,6 +3170,7 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         inst->tmpl    = t;
         inst->mangled = mangled;
         inst->state   = TI_IN_PROGRESS;
+        inst->from_preparse = vm->compiler.in_preparse_calls;
         inst->args    = args;
         inst->nargs   = total;
         hashmap_put(tmpl_insts(vm), mangled, inst);
@@ -3311,20 +3334,34 @@ Type *cc_template_inst_type(VirtualMachine *vm, Token **rest, Token *tok) {
 
 static const char *kind_name(TemplateKind kind);
 
+// The template `name` for the comptime builtin `builtin`, which wants a
+// function template or a type template.
+static Template *named_template(VirtualMachine *vm, const char *builtin,
+                                const char *name, bool want_func) {
+    Token    *site = vm->compiler.macro_call_tok;
+    Template *t =
+        name ? hashmap_get2(tmpl_templates(vm), name, strlen(name)) : NULL;
+    if (!t)
+        error_tok(vm, site, "%s: '%s' is not a template", builtin,
+                  name ? name : "");
+    if (want_func && t->kind != TMPL_FUNC)
+        error_tok(vm, site, "%s: '%s' is a %s template; use InstantiateType",
+                  builtin, t->name, kind_name(t->kind));
+    if (!want_func && t->kind == TMPL_FUNC)
+        error_tok(vm, site,
+                  "%s: '%s' is a function template; use InstantiateFunction",
+                  builtin, t->name);
+    return t;
+}
+
 // The instance of template `name` for the argument text `args`, as the
 // comptime builtins InstantiateType() and InstantiateFunction() ask for it.
 // The text is parsed like `@inst(args) name`.
 static TemplateInstance *instantiate_text(VirtualMachine *vm,
                                           const char *builtin, const char *name,
-                                          const char *args) {
+                                          const char *args, bool want_func) {
     Token *site = vm->compiler.macro_call_tok;
-    // TODO: a file-scope call runs before the parse and sees no templates
-    // (#2042)
-    if (!name || !hashmap_get2(tmpl_templates(vm), name, strlen(name)))
-        error_tok(vm, site,
-                  "%s: '%s' is not a template; a call at file scope "
-                  "runs before the file is parsed and sees none",
-                  builtin, name ? name : "");
+    named_template(vm, builtin, name, want_func);
     Token *toks =
         tokenize_string(vm, "<instantiate>",
                         arena_format(vm, "%s@(%s)", name, args ? args : ""));
@@ -3346,28 +3383,69 @@ static TemplateInstance *instantiate_text(VirtualMachine *vm,
     return inst;
 }
 
+// The instance of template `name` for the handles in `args`, as the comptime
+// builtins InstantiateTypeWith() and InstantiateFunctionWith() ask for it.
+static TemplateInstance *
+instantiate_handles(VirtualMachine *vm, const char *builtin, const char *name,
+                    const TemplateArgument *args, int n, bool want_func) {
+    Token    *site = vm->compiler.macro_call_tok;
+    Template *t    = named_template(vm, builtin, name, want_func);
+    if (n < 0 || (n > 0 && !args))
+        error_tok(vm, site, "%s: needs %s", builtin,
+                  n < 0 ? "a count of zero or more" : "an argument array");
+
+    TemplateArg  stack[TMPL_STACK_PARAMS];
+    TemplateArg *out = alloc_args(vm, stack, n);
+    for (int i = 0; i < n; i++) {
+        int  pi = i < t->nparams ? i : (tmpl_has_pack(t) ? t->nparams - 1 : -1);
+        bool is_const = pi >= 0 && t->params[pi].type_start;
+        if (!args[i].type == !args[i].value)
+            error_tok(vm, site,
+                      "%s: argument %d of '%s' must be exactly one of a type "
+                      "(TypeArg) or a constant (ValueArg)",
+                      builtin, i + 1, t->name);
+        if (pi >= 0 && is_const != !!args[i].value)
+            error_tok(vm, site,
+                      "%s: argument %d of '%s' is a %s but the parameter is a "
+                      "%s",
+                      builtin, i + 1, t->name,
+                      args[i].value ? "constant" : "type",
+                      is_const ? "constant" : "type");
+        memset(&out[i], 0, sizeof out[i]);
+        if (args[i].value)
+            out[i].expr = cc_expand_const_macro_calls(vm, args[i].value);
+        else
+            out[i].ty = strip_arg_bounds(vm, args[i].type);
+    }
+
+    bool saved_splice_active            = vm->compiler.comptime_splice_active;
+    vm->compiler.comptime_splice_active = true;
+    TemplateInstance *inst = instantiate_template(vm, t, out, n, site);
+    vm->compiler.comptime_splice_active = saved_splice_active;
+    return inst;
+}
+
 Type *cc_instantiate_type_text(VirtualMachine *vm, const char *name,
                                const char *args) {
-    TemplateInstance *inst =
-        instantiate_text(vm, "InstantiateType", name, args);
-    if (inst->tmpl->kind == TMPL_FUNC)
-        error_tok(vm, vm->compiler.macro_call_tok,
-                  "InstantiateType: '%s' is a function template; use "
-                  "InstantiateFunction",
-                  inst->tmpl->name);
-    return inst->ty;
+    return instantiate_text(vm, "InstantiateType", name, args, false)->ty;
 }
 
 Obj *cc_instantiate_function_text(VirtualMachine *vm, const char *name,
                                   const char *args) {
-    TemplateInstance *inst =
-        instantiate_text(vm, "InstantiateFunction", name, args);
-    if (inst->tmpl->kind != TMPL_FUNC)
-        error_tok(vm, vm->compiler.macro_call_tok,
-                  "InstantiateFunction: '%s' is a %s template; use "
-                  "InstantiateType",
-                  inst->tmpl->name, kind_name(inst->tmpl->kind));
-    return inst->fn;
+    return instantiate_text(vm, "InstantiateFunction", name, args, true)->fn;
+}
+
+Type *cc_instantiate_type_args(VirtualMachine *vm, const char *name,
+                               const TemplateArgument *args, int n) {
+    return instantiate_handles(vm, "InstantiateTypeWith", name, args, n, false)
+        ->ty;
+}
+
+Obj *cc_instantiate_function_args(VirtualMachine *vm, const char *name,
+                                  const TemplateArgument *args, int n) {
+    return instantiate_handles(vm, "InstantiateFunctionWith", name, args, n,
+                               true)
+        ->fn;
 }
 
 // File-scope `@inst(Types...) Name;` instantiates without using the result.
@@ -3422,6 +3500,11 @@ Token *cc_specialize_capture(VirtualMachine *vm, Token *tok) {
     if (t->kind != scan.kind)
         error_tok(vm, scan.name_tok, "'%s' is a %s template, not a %s", t->name,
                   kind_name(t->kind), kind_name(scan.kind));
+    for (Template *d = t->specs; d; d = d->next_spec)
+        if (d->start == scan.start) {
+            vm->compiler.captured = d;
+            return scan.end;
+        }
 
     Token       *a = scan.marker->next->next;
     TemplateArg  stack[TMPL_STACK_PARAMS];
@@ -3438,8 +3521,11 @@ Token *cc_specialize_capture(VirtualMachine *vm, Token *tok) {
 
     Template *def = arena_alloc(&vm->compiler.parser_arena, sizeof(Template));
     *def          = scan;
-    def->name     = t->name;
-    def->name_len = t->name_len;
+    def->name      = t->name;
+    def->name_len  = t->name_len;
+    def->next_spec = t->specs;
+    t->specs       = def;
+    vm->compiler.captured = def;
     instantiate(vm, t, args, n, scan.marker, def);
     return scan.end;
 }

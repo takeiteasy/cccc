@@ -27,6 +27,8 @@ Lookup tables for the comptime API.
 | `MakeArray(base, len)` | Create array type |
 | `InstantiateType(name, args)` | Instantiate a struct, union, enum or typedef [template](macros-templates.md#instantiating-from-a-handler); `args` is the text inside `@inst(...)` |
 | `InstantiateFunction(name, args)` | Instantiate a function template; returns the instance's `Obj *` |
+| `InstantiateTypeWith(name, args, n)` | Like `InstantiateType`, with an array of `TemplateArgument`: `TypeArg(type)` or `ValueArg(node)` per [parameter](macros-templates.md#from-type-handles) |
+| `InstantiateFunctionWith(name, args, n)` | Like `InstantiateFunction`, with `TemplateArgument`s |
 
 ### Enum APIs
 
