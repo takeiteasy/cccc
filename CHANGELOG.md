@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-11-13
+
 - Added: a function template with `[[cccc::operator(sym)]]` is instantiated from the operand types, so one `operator+` serves every `Vec2@(T)`. An operator written in a struct template's body binds for each instance.
 - Fixed: an operator written in the body of a struct completed after a forward declaration (`struct S; struct S { ... operator+ ... };`, or a `typedef struct S S;` first) was rejected with `needs a S or S * operand`.
 - Fixed: a file-scope `@comptime` call that returns `Quote("{ ... }")` holding a `[[cccc::operator]]` or `[[cccc::method]]` function reported `is already defined`.
