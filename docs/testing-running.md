@@ -126,6 +126,9 @@ was green at compile time:
 ./cccc --testing -c=native -o prog myfile.c       # tests, then host compile
 ```
 
+The file needs a `main()`; a suite-only file is refused before the suite runs.
+Use `--testing=native` to build a suite's own harness.
+
 The gate is independent of `--fail-fast`: that flag only stops the test
 *run* after the first failure, while any failing test blocks the compile
 regardless. The same guard applies to `--testing --build` — a build script

@@ -50,7 +50,7 @@ The emitted C behaves as the VM does, except:
 | `%L` on integer conversions | `L` is `ll` | Host libc: glibc agrees, BSD/Apple use 32 bits |
 | Zero-sized union through varargs | Consumes no slot | Host ABI passes a register; the read is garbage |
 | `ioctl` requests | Allowlist | Real `ioctl`, no allowlist |
-| `constructor(N)` priority | Honoured | Honoured by clang and Linux gcc; rejected by Homebrew gcc on macOS |
+| `constructor(N)` priority | Honoured | Honoured by clang and Linux gcc; on gcc for macOS a dispatcher calls the constructors in priority order[^prio] |
 | `sizeof`/`_Alignof` of a host-header type in a bit-field width or initialized-global image | Folded against CCCC's layout | Stays folded |
 
 ## Runtime shims
@@ -97,3 +97,5 @@ s.tag = 7; // (*(int *)((unsigned char *)&s + 0)) = 7
 A global initializer holding a pointer inside a union, or at a misaligned (`packed`) offset, is stored by a startup constructor, and the global is emitted without its top-level `const`.[^ctor] A `_Thread_local` or function-local global holding such a pointer is refused.
 
 [^ctor]: The constructor has priority 101 (none on gcc for macOS), so a user constructor of priority 101 or lower that runs first sees a null pointer.
+
+[^prio]: gcc on Mach-O has no constructor priorities. When a program uses one, the output spells every constructor and destructor through `__CCCC_CTOR`/`__CCCC_DTOR` macros that expand to nothing there, and one constructor and one destructor call them in priority order. The order holds within the generated file only.

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_GCC_MACOS_SKIP: gcc on macOS lays out unnamed bit-fields per AAPCS64, unlike Apple
 // Test: an UNNAMED bit-field carrying an explicit
 // __attribute__((aligned(N))) raises the enclosing struct's own alignment
 // (and, through it, its size) only under real AAPCS64, the same

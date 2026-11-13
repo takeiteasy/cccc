@@ -27,6 +27,9 @@
 //   EXPECT_COMPILE_ERROR           cccc fails with a diagnostic
 //   EXPECT_RUNTIME_ERROR           the program exits 255
 //   CCCC_NATIVE_SKIP[: reason]     left out of the --native pass
+//   CCCC_NATIVE_GCC_MACOS_SKIP: reason
+//                                  left out of the --native pass when the
+//                                  host cc is gcc on macOS
 //   CCCC_VM_SKIP: reason           left out of the default (VM) pass; only
 //                                  --native runs it
 //   CCCC_ENV: NAME=value           environment variable for cccc and the
@@ -77,7 +80,7 @@ typedef struct {
     int   nexpect_out, nreject_out, nexpect_err, nreject_err;
     int   compile_error, runtime_error;
     int   testing, build, drives_output;
-    char *native_skip, *leaks_skip, *vm_skip;
+    char *native_skip, *native_gcc_macos_skip, *leaks_skip, *vm_skip;
     char *host_cc[MAX_ARGS];
     int   nhost_cc, host_cc_check, no_include_dir;
     char *env[MAX_ARGS];
@@ -187,6 +190,10 @@ static char *apply_directive(Header *h, char *p, const char *file) {
         }
         if (!strcmp(name, "CCCC_NATIVE_SKIP")) {
             h->native_skip = strdup(*v ? v : "CCCC_NATIVE_SKIP");
+            return NULL;
+        }
+        if (!strcmp(name, "CCCC_NATIVE_GCC_MACOS_SKIP")) {
+            h->native_gcc_macos_skip = strdup(*v ? v : name);
             return NULL;
         }
         if (!strcmp(name, "CCCC_NO_INCLUDE_DIR")) {
@@ -644,6 +651,31 @@ static void print_tail(const char *label, const Buf *b) {
 // Exit statuses that pass when no EXPECT_COMPILE_ERROR / EXPECT_RUNTIME_ERROR.
 // 42 always; 0 for --testing suites and tests that check stdout; and any
 // non-zero status for --testing / --build tests that EXPECT_STDERR a failure.
+// The compiler -c=native uses: $CCCC_NATIVE_CC, else cc.
+static int native_cc_is_gcc_on_macos(void) {
+#ifdef __APPLE__
+    static int cached = -1;
+    if (cached >= 0)
+        return cached;
+    cached = 0;
+    FILE *p =
+        popen("${CCCC_NATIVE_CC:-cc} -dM -E - </dev/null 2>/dev/null", "r");
+    if (!p)
+        return cached;
+    char line[512];
+    int  gnuc = 0, clang = 0;
+    while (fgets(line, sizeof line, p)) {
+        gnuc  |= strstr(line, "__GNUC__") != NULL;
+        clang |= strstr(line, "__clang__") != NULL;
+    }
+    pclose(p);
+    cached = gnuc && !clang;
+    return cached;
+#else
+    return 0;
+#endif
+}
+
 static int pass_rule(const Header *h, int code) {
     if (code == 42)
         return 1;
@@ -920,10 +952,13 @@ int main(int argc, char **argv) {
     }
 
     if (native) {
-        const char *skip = h.native_skip     ? h.native_skip
-                           : h.compile_error ? "expects a compile error"
-                           : h.drives_output ? "picks its own output mode"
-                                             : NULL;
+        const char *skip =
+            h.native_skip ? h.native_skip
+            : h.native_gcc_macos_skip && native_cc_is_gcc_on_macos()
+                ? h.native_gcc_macos_skip
+            : h.compile_error ? "expects a compile error"
+            : h.drives_output ? "picks its own output mode"
+                              : NULL;
         if (skip) {
             printf("SKIP %s: %s\n", file, skip);
             return 0;

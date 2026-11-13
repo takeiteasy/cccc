@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `-c=native` with gcc on macOS builds programs that use `constructor(N)`/`destructor(N)`; gcc there has no priorities, so one constructor and one destructor call them in priority order.
+- Fixed: `-c=native` zero-initializes a pointer to an anonymous struct with `(void *)0` instead of a cast to a new anonymous struct type, which gcc 14 and later reject.
+- Fixed: `-c=native` and `-m` keep a pointer to a host pointer typedef (`pthread_t *`, `const pthread_t *`) spelled by its typedef name, not `void **`, so gcc accepts the assignments to it.
+- Fixed: `--testing -c=native` on a file with no `main()` reports `use --testing=native` before the suite runs, instead of a linker error.
 - Fixed: `-c=native` and `-m` write a block-scope struct, union or enum that a template instance uses as an argument once, at file scope, and the declaring function uses that definition. Before, the instance held an anonymous copy, so `@inst(struct S *) Vec` assigned `struct S **` to a different type (an error under gcc 14 and later) and a function template taking `T *` failed with `conflicting types` on its prototype and definition.
 
 ## [0.34.1] - 2026-11-13

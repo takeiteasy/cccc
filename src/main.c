@@ -3743,6 +3743,24 @@ int main(int argc, const char *argv[]) {
     // --list-tests) run, control falls through into the -c dispatches below,
     // so `--testing -c=native` really does compile after the tests; a
     // failing suite bails before any artifact is written.
+    if (testing_mode && testing_backend != TESTING_BACKEND_NATIVE &&
+        compile_format == COMPILE_NATIVE && !native_object && !build_mode) {
+        const char *entry = entry_name ? entry_name : "main";
+        bool        found = false;
+        for (Obj *o = merged_prog; o && !found; o = o->next)
+            found = o->is_function && o->name && strcmp(o->name, entry) == 0 &&
+                    o->is_definition;
+        if (!found) {
+            fprintf(stderr,
+                    "error: --testing -c=native builds an executable but the "
+                    "input defines no %s(); use --testing=native to build the "
+                    "test harness\n",
+                    entry);
+            exit_code = 1;
+            goto BAIL;
+        }
+    }
+
     if (testing_mode && testing_backend != TESTING_BACKEND_NATIVE) {
         CcTestOptions test_opts = {
             .test_glob    = test_glob,

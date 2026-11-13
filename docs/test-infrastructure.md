@@ -61,8 +61,9 @@ A suite's leading comment takes two optional lines (full table in
   native pass `--testing` becomes `--testing=native`.
 - `// CCCC_NATIVE_SKIP: <reason>` — leave the suite out of the native pass.
 
-There are no skip tables and no platform or compiler-family keyed skips: a
-suite is either in the native pass or carries `CCCC_NATIVE_SKIP`.
+A suite has no platform or compiler-family keyed skips: it is either in the
+native pass or carries `CCCC_NATIVE_SKIP`. A loose test can skip itself under
+gcc on macOS with `CCCC_NATIVE_GCC_MACOS_SKIP` (below).
 
 `--testing=native` serializes a standalone TAP harness into the generated C
 (a table of the program's `[[cccc::test]]` records and a `main()` that forks
@@ -211,6 +212,7 @@ live in `tests/fixtures/`. A multi-TU test lists the helper `.c` files in
 | `CCCC_HOST_CC[: flags]` | the stdout must also compile with the host `cc` (`$CC`); use `-Itests` when it replays an include of a fixture |
 | `CCCC_ENV: NAME=value` | environment variable for cccc and the program (repeatable) |
 | `CCCC_VM_SKIP: reason` | only the `--native` pass runs it (extended asm, VM-divergent `errno`) |
+| `CCCC_NATIVE_GCC_MACOS_SKIP: reason` | left out of the `--native` pass when the host `cc` (`$CCCC_NATIVE_CC`, else `cc`) is gcc on macOS |
 | `CCCC_NO_INCLUDE_DIR` | do not pass `-I./include`, so headers come from the embedded table |
 
 **Writing a test.** Prefer an end-to-end round trip whose exit code depends on
@@ -226,9 +228,6 @@ compiler through a `CCCC_NATIVE_CC` wrapper, artifacts written or refused by
 `-c=generated` output, and the width-0 bit-field layout guard against a real
 clang and gcc. `find_family` skips a compiler that cannot build a program that
 includes `<stdio.h>`, such as a Homebrew llvm clang with no matching SDK.
-
-**Known gap.** `test_native_ctor_dtor_native_1020` fails when `CCCC_NATIVE_CC`
-is gcc on macOS: gcc on Darwin rejects `__attribute__((constructor(150)))`.
 
 ## Guide pages
 

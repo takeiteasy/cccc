@@ -23,17 +23,8 @@
 // structs, referenced only inside a compile-time-only _Static_assert, never
 // trip one).
 //
-// Width-0 unnamed bit-fields' contribution to struct alignment is a
-// DELIBERATE, PERMANENT divergence -- not gcc-vs-clang as #1176 originally
-// concluded, but the real AAPCS64 rule: true on AArch64 everywhere except
-// Darwin (both compiler families), false on x86_64 and Darwin/arm64 clang
-// (see CCCC_ALIGN_ANON_BITFIELDS, src/parse_types.c). macOS/arm64 gcc-16 is
-// the one WONT_FIX outlier that still gives the "contributes" answer
-// despite being Darwin. Since `-c=native`'s default host `cc` is clang on
-// Darwin, the guard for tc_layoutguard_zero_width below is a TRUE POSITIVE
-// there: the emitted C really is miscompiled under any target that doesn't
-// implement the AAPCS64 rule. This file compiles clean under real AAPCS64 targets
-// (Linux/aarch64, either compiler family) and under macOS/arm64 gcc-16.
+// Unnamed bit-field layout, where gcc on macOS differs, is in
+// tests/test_layout_guard_zero_width.c.
 
 #include <setjmp.h>
 #include <time.h>
@@ -48,17 +39,6 @@ struct tc_layoutguard_plain {
 }; // sizeof 16, _Alignof 8, offsetof(a)=0 offsetof(b)=4 offsetof(c)=8
 
 struct tc_layoutguard_plain g_layoutguard_plain;
-
-// #1176 follow-up: the deliberate AAPCS64/x86_64 divergence -- see the
-// file-header comment.
-struct tc_layoutguard_zero_width {
-    char c;
-    int : 0;
-    char d;
-}; // AAPCS64/cccc: sizeof 8, _Alignof 4 -- x86_64/Darwin-clang: sizeof 5,
-   // _Alignof 1
-
-struct tc_layoutguard_zero_width g_layoutguard_zero_width;
 
 // jmp_buf (include/setjmp.h: `typedef long long jmp_buf[40];`) is
 // deliberately widened to a safe upper bound covering every supported host
@@ -91,27 +71,6 @@ int test_layout_guards_plain_struct(void) {
     g_layoutguard_plain.c = 3;
     if (g_layoutguard_plain.a != 1 || g_layoutguard_plain.b != 2 ||
         g_layoutguard_plain.c != 3)
-        return 1;
-
-    return 42;
-}
-
-[[cccc::test(return = 42)]]
-int test_layout_guards_zero_width_bitfield(void) {
-    // #1176 follow-up: pinned to cccc's own target-ABI rule -- see the
-    // file-header comment for why a Darwin-clang host's guard genuinely
-    // rejects this shape.
-#if defined(__aarch64__) && !defined(__APPLE__)
-    _Static_assert(sizeof(struct tc_layoutguard_zero_width) == 8, "cccc");
-    _Static_assert(_Alignof(struct tc_layoutguard_zero_width) == 4, "cccc");
-#else
-    _Static_assert(sizeof(struct tc_layoutguard_zero_width) == 5, "cccc");
-    _Static_assert(_Alignof(struct tc_layoutguard_zero_width) == 1, "cccc");
-#endif
-
-    g_layoutguard_zero_width.c = 'x';
-    g_layoutguard_zero_width.d = 'y';
-    if (g_layoutguard_zero_width.c != 'x' || g_layoutguard_zero_width.d != 'y')
         return 1;
 
     return 42;

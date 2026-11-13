@@ -542,22 +542,3 @@ int test_bitfield_suffix_aligned_1165(void) {
 
     return 42;
 }
-
-// gcc and clang disagree on struct-level alignment for an UNNAMED
-// bit-field's explicit aligned(N) (see test_bitfield_unnamed_aligned_1165
-// in tests/ for the sizeof/_Alignof pin, gcc's numbers) -- only the
-// portable offsetof (both compilers agree) is asserted here, so this file
-// stays green under the `test_native` pass regardless of which host
-// compiler `-c=native` shells out to.
-struct UnnamedSuffixAlignedBitfield1165 {
-    char a;
-    int : 5 __attribute__((aligned(16)));
-    int c;
-};
-
-[[cccc::test(return = 42)]]
-int test_bitfield_unnamed_suffix_aligned_offset_1165(void) {
-    if (offsetof(struct UnnamedSuffixAlignedBitfield1165, c) != 20)
-        return 1;
-    return 42;
-}

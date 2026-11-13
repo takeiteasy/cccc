@@ -1,7 +1,7 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: __attribute__\(\(constructor\)\) void plain_ctor
-// CCCC_EXPECT_STDOUT: __attribute__\(\(constructor\(150\)\)\) void prio_ctor
-// -m output keeps the constructor attribute and its priority.
+// CCCC_EXPECT_STDOUT: __CCCC_CTOR void plain_ctor
+// CCCC_EXPECT_STDOUT: __CCCC_CTOR_P\(150\) void prio_ctor
+// -m output keeps each constructor and its priority, spelled through the macros.
 int ctor_ran;
 int ctor_prio_ran;
 int order[1];

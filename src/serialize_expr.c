@@ -2702,7 +2702,15 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             bool anon_agg_ptr_cast = dst && dst->kind == TY_PTR && src &&
                                      src->kind == TY_PTR &&
                                      type_needs_anon_aggregate(ctx, dst);
-            if (widening || scalar_splat || anon_agg_ptr_cast) {
+            // The null pointer constant (a `{0}` initializer's per-member
+            // store) has the same problem: `(struct {...} *)0` is a fresh
+            // anonymous type, so spell it as the type-neutral `(void *)0`.
+            bool anon_agg_null_cast = dst && dst->kind == TY_PTR &&
+                                      expr_is_zero_constant(node->lhs) &&
+                                      type_needs_anon_aggregate(ctx, dst);
+            if (anon_agg_null_cast) {
+                fprintf(f, "((void *)0)");
+            } else if (widening || scalar_splat || anon_agg_ptr_cast) {
                 serialize_expr(f, vm, ctx, node->lhs, parent_prec);
             } else {
                 fprintf(f, "(");

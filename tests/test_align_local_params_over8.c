@@ -1,3 +1,4 @@
+// CCCC_NATIVE_GCC_MACOS_SKIP: gcc-16 on macOS misaligns a by-value over-aligned parameter at -O0
 // Expected return: 42
 // #1137: by-value over-aligned params, argument scratch temps, nested-function
 // access and block captures must all see correctly aligned addresses.

@@ -5701,6 +5701,92 @@ static void serialize_feature_macros(FILE *f, VirtualMachine *vm) {
 #endif
 }
 
+// gcc on Mach-O rejects constructor/destructor priorities, so a program with
+// any explicit priority runs every constructor/destructor from one dispatcher
+// there, in the order the priorities define: constructors by ascending
+// priority with the unprioritized ones last, destructors the exact reverse.
+// Everywhere else the macros expand to the plain attributes. The user
+// functions are called in place of being registered, so priorities order them
+// only within this translation unit.
+static bool init_fn_is_emitted(VirtualMachine *vm, SerializeContext *ctx,
+                               bool generated_only, bool no_emit_tests,
+                               Obj *obj) {
+    return obj->is_function && (obj->is_constructor || obj->is_destructor) &&
+           !generated_only_skips(generated_only, ctx, obj) &&
+           !obj_is_build_fn(vm, obj) &&
+           !(no_emit_tests && obj_is_test_fn(vm, obj)) &&
+           (!function_is_header_supplied(vm, ctx, obj) ||
+            gnu_inline_needs_body(obj));
+}
+
+static int init_order_key(Obj *fn) {
+    int prio = obj_attr(fn)->init_priority;
+    return prio == CCCC_NO_INIT_PRIORITY ? INT_MAX : prio;
+}
+
+static void serialize_init_dispatch_preamble(FILE *f) {
+    fputs("#if defined(__APPLE__) && !defined(__clang__)\n"
+          "#define __CCCC_CTOR\n"
+          "#define __CCCC_CTOR_P(n)\n"
+          "#define __CCCC_DTOR\n"
+          "#define __CCCC_DTOR_P(n)\n"
+          "#else\n"
+          "#define __CCCC_CTOR __attribute__((constructor))\n"
+          "#define __CCCC_CTOR_P(n) __attribute__((constructor(n)))\n"
+          "#define __CCCC_DTOR __attribute__((destructor))\n"
+          "#define __CCCC_DTOR_P(n) __attribute__((destructor(n)))\n"
+          "#endif\n\n",
+          f);
+}
+
+static void serialize_init_dispatchers(FILE *f, VirtualMachine *vm,
+                                       SerializeContext *ctx, Obj *prog,
+                                       bool generated_only,
+                                       bool no_emit_tests) {
+    if (!ctx->init_dispatch)
+        return;
+    for (int is_ctor = 1; is_ctor >= 0; is_ctor--) {
+        int n = 0;
+        for (Obj *o = prog; o; o = o->next)
+            if (init_fn_is_emitted(vm, ctx, generated_only, no_emit_tests, o) &&
+                (is_ctor ? o->is_constructor : o->is_destructor))
+                n++;
+        if (!n)
+            continue;
+        Obj **fns = malloc(sizeof(*fns) * (size_t)n);
+        int   len = 0;
+        for (Obj *o = prog; o; o = o->next) {
+            if (!init_fn_is_emitted(vm, ctx, generated_only, no_emit_tests,
+                                    o) ||
+                !(is_ctor ? o->is_constructor : o->is_destructor))
+                continue;
+            // Stable insertion: ascending for constructors, descending for
+            // destructors, declaration order (reversed for destructors) among
+            // equals.
+            int at = is_ctor ? len : 0;
+            if (is_ctor)
+                while (at > 0 &&
+                       init_order_key(fns[at - 1]) > init_order_key(o))
+                    at--;
+            else
+                while (at < len && init_order_key(fns[at]) > init_order_key(o))
+                    at++;
+            memmove(fns + at + 1, fns + at, sizeof(*fns) * (size_t)(len - at));
+            fns[at] = o;
+            len++;
+        }
+        fprintf(f,
+                "#if defined(__APPLE__) && !defined(__clang__)\n"
+                "__attribute__((%s)) static void __cccc_%s_dispatch(void) {\n",
+                is_ctor ? "constructor" : "destructor",
+                is_ctor ? "init" : "fini");
+        for (int i = 0; i < len; i++)
+            fprintf(f, "    %s();\n", fns[i]->name);
+        fputs("}\n#endif\n\n", f);
+        free(fns);
+    }
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                           bool generated_only, bool emit_test_harness,
                           bool no_emit_tests) {
@@ -5823,6 +5909,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // scrolling the user past every other line of generated output before
     // reaching the real "GNU decimal type extension not supported" error.
     serialize_decimal_native_guard(f, &ctx);
+
+    for (Obj *obj = prog; obj && !ctx.init_dispatch; obj = obj->next)
+        ctx.init_dispatch =
+            init_fn_is_emitted(vm, &ctx, generated_only, no_emit_tests, obj) &&
+            obj_attr(obj)->init_priority != CCCC_NO_INIT_PRIORITY;
+    if (ctx.init_dispatch)
+        serialize_init_dispatch_preamble(f);
 
     // Re-emit libraries queued via #pragma cccc link() using CCCC's own
     // spelling, so the queue round-trips if this output is ever re-fed to
@@ -6965,6 +7058,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             serialize_function(f, vm, &ctx, obj);
     }
 
+    serialize_init_dispatchers(f, vm, &ctx, prog, generated_only,
+                               no_emit_tests);
     serialize_omp_lock_shims(f, vm, prog, false); // #1368
     serialize_kernel_meta(f, vm, prog);    // #1394
 

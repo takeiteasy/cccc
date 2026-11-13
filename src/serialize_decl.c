@@ -140,6 +140,20 @@ static const char *knr_param_shim_name(char *buf, size_t bufsz,
     return buf;
 }
 
+// __attribute__((constructor[(N)])) / destructor, or the __CCCC_CTOR[_P(N)] /
+// __CCCC_DTOR macro standing in for it when the program is dispatched.
+static void serialize_init_attr(FILE *f, SerializeContext *ctx,
+                                const char *attr, const char *macro, int prio) {
+    if (ctx->init_dispatch && prio == CCCC_NO_INIT_PRIORITY)
+        fprintf(f, "%s ", macro);
+    else if (ctx->init_dispatch)
+        fprintf(f, "%s_P(%d) ", macro, prio);
+    else if (prio == CCCC_NO_INIT_PRIORITY)
+        fprintf(f, "__attribute__((%s)) ", attr);
+    else
+        fprintf(f, "__attribute__((%s(%d))) ", attr, prio);
+}
+
 // #897 (RESOLVED): a struct/union-by-value parameter's type used to be
 // mis-serialized here as "struct <param-name>" instead of its real tag --
 // e.g. `int helper(struct Point q)` emitted "struct q" in the generated
@@ -169,18 +183,12 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
     // is below): GCC rejects a trailing attribute on a function *definition*
     // while clang accepts it, so a suffix form would pass on macOS and fail to
     // compile on Linux.
-    if (fn->is_constructor) {
-        if (obj_attr(fn)->init_priority == CCCC_NO_INIT_PRIORITY)
-            fprintf(f, "__attribute__((constructor)) ");
-        else
-            fprintf(f, "__attribute__((constructor(%d))) ", obj_attr(fn)->init_priority);
-    }
-    if (fn->is_destructor) {
-        if (obj_attr(fn)->init_priority == CCCC_NO_INIT_PRIORITY)
-            fprintf(f, "__attribute__((destructor)) ");
-        else
-            fprintf(f, "__attribute__((destructor(%d))) ", obj_attr(fn)->init_priority);
-    }
+    if (fn->is_constructor)
+        serialize_init_attr(f, ctx, "constructor", "__CCCC_CTOR",
+                            obj_attr(fn)->init_priority);
+    if (fn->is_destructor)
+        serialize_init_attr(f, ctx, "destructor", "__CCCC_DTOR",
+                            obj_attr(fn)->init_priority);
 
     if (fn->is_static)
         fprintf(f, "static ");

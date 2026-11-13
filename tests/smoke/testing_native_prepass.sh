@@ -22,6 +22,13 @@ expect_fail "$CCCC" --testing -c=native -o fail_out fail.c
 expect_fail "$CCCC" --testing --fail-fast -c=native -o fail_out fail.c
 [ ! -e fail_out ] || fail "artifact was written despite failing tests (--fail-fast)"
 
+cat >nomain.c <<'EOS'
+[[cccc::test(return = 42)]] int t_ok(void) { return 42; }
+EOS
+"$CCCC" --testing -c=native -o nomain_out nomain.c 2>nomain_err && fail "no-main suite built"
+grep -q -- "--testing=native" nomain_err || fail "no-main diagnostic missing"
+[ ! -e nomain_out ] || fail "artifact written for a suite without main()"
+
 cat >build_fail.c <<'EOS'
 [[cccc::test(return = 999)]] int t_fail(void) { return 1; }
 [[cccc::build]]

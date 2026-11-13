@@ -2457,6 +2457,16 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         else
             snprintf(buf, sizeof(buf), "*%s%s%s%s", qualwords, qual, sep,
                      has_name ? name : "");
+        // A pointer to a from_include pointer typedef (`pthread_t *`) keeps
+        // the alias: decomposed to `void **`, it no longer matches the host's
+        // real `struct _opaque_pthread_t **`.
+        if (ty->base && ty->base->kind == TY_PTR &&
+            find_typedef_name_exact(ctx, ty->base) &&
+            type_def_is_from_include_suppressed(ctx, ty->base)) {
+            serialize_type(f, ctx, ty->base);
+            fprintf(f, " %s", buf);
+            return;
+        }
         serialize_type_decl(f, ctx, ty->base, buf);
         return;
     }

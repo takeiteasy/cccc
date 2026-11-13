@@ -137,6 +137,8 @@ Directives, one per comment line, anchored as the first token:
 | `CCCC_REJECT_STDOUT: <regex>` | stdout must not match. |
 | `CCCC_EXPECT_STDERR: <regex>` | stdout + stderr must match. |
 | `CCCC_REJECT_STDERR: <regex>` | stdout + stderr must not match. |
+| `CCCC_NATIVE_SKIP: <reason>` | Left out of the `-c=native` pass. |
+| `CCCC_NATIVE_GCC_MACOS_SKIP: <reason>` | Left out of the `-c=native` pass when the host compiler is gcc on macOS. |
 
 Example:
 

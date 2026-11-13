@@ -310,6 +310,10 @@ typedef struct {
     // to decide whether to emit the guarded #error preamble; see that
     // function's own comment for why gcc must not be affected.
     bool saw_decimal;
+    // The program has a constructor/destructor with an explicit priority, so
+    // every constructor/destructor is spelled through the __CCCC_CTOR/_DTOR
+    // macros and called by a dispatcher where the host cc has no priorities.
+    bool init_dispatch;
     // #1123: bumped once per wide-_BitInt (N>128) statement-expression
     // lowering emitted (serialize_expr.c) so nested/repeated occurrences in
     // one TU each get their own __cccc_bi_<n> temporaries instead of
