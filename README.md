@@ -12,10 +12,12 @@ Targets **macOS** (aarch64) and **Linux** (aarch64/x86_64). Release builds: [git
 
 ### Compile-time macros, tests and build recipes
 
-A `@comptime` function is ordinary C that CCCC runs *during* compilation. It can fold constants, build AST fragments with `Quote(...)` templates (`$1` splices an argument in), and emit whole declarations into the program. Tests and build recipes live in the same file.
+A `@comptime` function is ordinary C that CCCC runs *during* compilation. It can fold constants, build AST fragments with `Quote(...)` templates (`$1` splices an argument in), instantiate a `@template` and emit whole declarations into the program. Tests and build recipes live in the same file.
 
 ```c
 #include <stdio.h>
+
+@template(T) struct Vec2 { T x, y; };
 
 // A call-site macro: the call is replaced by the returned template.
 @comptime Node *square(Node *x) { return Quote("($1) * ($1)", x); }
@@ -23,26 +25,27 @@ A `@comptime` function is ordinary C that CCCC runs *during* compilation. It can
 // A comptime function in a global initializer folds to a constant.
 @comptime Node *pow2(Node *k) { return Quote("1 << ($1)", k); }
 
-// A file-scope macro that emits real declarations into the program.
-@comptime Node *emit_vec2(void) {
-    return Quote("{ struct Vec2 { int x, y; };"
-                 "  int vec2_dot(struct Vec2 a, struct Vec2 b) {"
+// A file-scope macro that instantiates the template and emits a function over
+// the instance.
+@comptime Node *emit_vec2_int(void) {
+    InstantiateType("Vec2", "int");
+    return Quote("{ int vec2_dot(struct Vec2__int a, struct Vec2__int b) {"
                  "      return a.x * b.x + a.y * b.y; } }");
 }
-emit_vec2();
+emit_vec2_int();
 
 int TABLE_SIZE = pow2(8);                  // 256, computed at compile time
 
 int main(void) {
-    struct Vec2 a = { 3, 4 };
-    struct Vec2 b = { square(2), 5 };      // square(2) -> (2) * (2)
+    Vec2@(int) a = { 3, 4 };
+    Vec2@(int) b = { square(2), 5 };       // square(2) -> (2) * (2)
     printf("%d %d\n", TABLE_SIZE, vec2_dot(a, b));   // 256 32
     return 0;
 }
 
 // Discovered and run by `cccc --testing comptime.c`.
 @test void dot_product(void) {
-    struct Vec2 a = { 3, 4 }, b = { square(2), 5 };
+    Vec2@(int) a = { 3, 4 }, b = { square(2), 5 };
     AssertEq(vec2_dot(a, b), 32);
 }
 
@@ -56,52 +59,51 @@ int main(void) {
 
 `cccc comptime.c` runs `main()` on the VM, `cccc -c=native -o demo comptime.c` builds a native binary, `cccc --testing comptime.c` runs the `@test`, and `cccc --build comptime.c` runs the `@build_target`. See [docs/macros.md](docs/macros.md), [docs/testing.md](docs/testing.md) and [docs/build.md](docs/build.md).
 
-### Derived code
+### Templates, derived code and operators
 
-Attributes on a type generate functions for it at compile time:
+A `@template` is written once and instantiated per type (`Vec2@(int)`). Attributes on it generate functions for every instance, and `[[cccc::operator]]` and `[[cccc::method]]` bind operators and `s.f(x)` calls to functions:
 
 ```c
 #include <stdio.h>
-#include <string.h>
 
-@to_string
-@from_string
-typedef enum { RED, GREEN, BLUE } Color;
+// Derive attributes run on every instance of a template.
+@template(T) @equals @compare @to_json @ctor
+struct Vec2 { T x, y; };
 
-@to_json
-@from_json
-@equals
-@ctor
-typedef struct {
-    int id;
-    char name[16];
-    Color favourite;
-} User;
+// Generic code is written once...
+@template(T) @inst(T) Vec2 vec2_add(@inst(T) Vec2 a, @inst(T) Vec2 b) {
+    return (@inst(T) Vec2){a.x + b.x, a.y + b.y};
+}
+@template(T) T vec2_dot(const @inst(T) Vec2 *a, const @inst(T) Vec2 *b) {
+    return a->x * b->x + a->y * b->y;
+}
+
+// ...and bound to operators and methods per instance.
+typedef Vec2@(int) IVec;
+[[cccc::operator(+)]] IVec ivec_add(IVec a, IVec b) { return vec2_add@(int)(a, b); }
+[[cccc::method(IVec, dot)]] int ivec_dot(const IVec *a, const IVec *b) { return vec2_dot@(int)(a, b); }
 
 int main(void) {
-    User u = User_new(7, "ann", GREEN);
+    IVec a = Vec2__int_new(3, 4), b = Vec2__int_new(1, 2);
+    IVec c = a + b;                             // ivec_add(a, b)
 
-    char buf[128];
-    User_to_json(&u, buf, sizeof buf);
-    puts(buf);                                // {"id":7,"name":"ann","favourite":1}
+    char buf[64];
+    Vec2__int_to_json(&c, buf, sizeof buf);
+    puts(buf);                                  // {"x":4,"y":6}
 
-    User v;
-    if (User_from_json(&v, buf) != 0 || !User_equals(&u, &v))
-        return 1;
-
-    printf("%s\n", Color_to_string(v.favourite));   // GREEN
-    return 42;
+    printf("%d %d\n", a.dot(&b), a < c);        // 11 1
+    return c == Vec2__int_new(4, 6) ? 42 : 1;   // == comes from @equals, < from @compare
 }
 ```
 
 Output:
 
 ```text
-{"id":7,"name":"ann","favourite":1}
-GREEN
+{"x":4,"y":6}
+11 1
 ```
 
-More attributes (`@serialize`, `@accessors`, `@hash`, `@bitflags`, ...) are in [docs/derive.md](docs/derive.md).
+See [docs/templates.md](docs/templates.md), [docs/operators.md](docs/operators.md) and [docs/methods.md](docs/methods.md). More attributes (`@serialize`, `@accessors`, `@hash`, `@bitflags`, ...) are in [docs/derive.md](docs/derive.md).
 
 ## Features
 
@@ -115,6 +117,7 @@ More attributes (`@serialize`, `@accessors`, `@hash`, `@bitflags`, ...) are in [
 | **Attributes** | GNU `__attribute__`, C23 `[[...]]` and the `@name` shorthand ([attributes.md](docs/attributes.md)) |
 | **Operators and methods** | `[[cccc::operator(+)]]` and `[[cccc::method(T)]]` bind operators and `s.f(x)` calls to functions on structs, written free or in the struct body ([operators.md](docs/operators.md), [methods.md](docs/methods.md)) |
 | **Syntax extensions** | `@name` attributes, struct-body methods and operators, `<=>`, `^^name` reflection, quasi-quotes ([syntax.md](docs/syntax.md)) |
+| **C++ comparison** | How templates, operators, methods and comptime relate to their C++ counterparts ([cpp.md](docs/cpp.md)) |
 | **C23 and extensions** | C89 through C23, GNU and MS extensions ([coverage.md](docs/coverage.md)) |
 | **Decimal floating point** | `_Decimal32/64/128` via the Intel BID library, opt-in ([install.md](docs/install.md)) |
 | **Kernels** | `[[cccc::kernel]]` and OpenCL C 1.2 over a grid of work-items; `-fopenmp` ([kernels.md](docs/kernels.md), [opencl.md](docs/opencl.md), [openmp.md](docs/openmp.md)) |
@@ -237,6 +240,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | [derive.md](docs/derive.md) | *hub* — attributes that generate code for a type: `@serialize`, `@to_json`, `@to_string`, ... |
 | [templates.md](docs/templates.md) | `@template`, `@inst` and `@specialize`: generic structs, unions and functions |
 | [templates-variadic.md](docs/templates-variadic.md) | Template parameter packs: `Ts...`, `sizeof...`, pattern expansion and folds |
+| [cpp.md](docs/cpp.md) | CCCC and C++: how templates, operators, methods, compile-time code and derived members are alike and differ |
 | [comptime-policy.md](docs/comptime-policy.md) | What comptime code may call, and `--comptime-allow` |
 | [comptime-limits.md](docs/comptime-limits.md) | Memory confinement and node-list checks for comptime code |
 | [security.md](docs/security.md) | What runs or downloads while compiling, `--sandbox`, untrusted code |

@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `docs/cpp.md` compares CCCC's templates, operators, methods, compile-time code, derived members and safety with their C++ counterparts.
+- Changed: the README examples show a generic `Vec2` template with derive attributes, an operator and a method, and a comptime function that instantiates a template.
 - Fixed: `-c=native` and `-m` no longer replay a header that uses the `@attribute` spelling (`struct P {...} @equals;`) or includes `<cccc/derive.h>`, `<cccc/json.h>` or `<cccc/text.h>`; the host compiler failed on `expected ';' after struct` or `'cccc/derive.h' file not found`. The header's types and functions come from the generated C.
 - Fixed: a struct with a derive attribute (`@equals`, `@to_json`, ...) in a header that two inputs include links as one definition instead of failing with `redefinition of 'P_equals'`. Two different structs of one name in different inputs still do.
 - Fixed: a `@comptime` function or variable defined in a header that two inputs include is one definition, not a `redefinition of`. This includes `<cccc/derive.h>`, so two inputs that each use a derive attribute build. A second definition of the same name with different text is `comptime function 'k' is already defined differently at a.c:1` (or `comptime variable`); two inputs with different `@comptime int cv = ...;` values used to share the last one silently.

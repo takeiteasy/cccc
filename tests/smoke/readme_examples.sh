@@ -5,8 +5,8 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 EX=$ROOT/examples/readme
 
 expect_exit 42 "$CCCC" "$EX/derive.c"
-grep -q '^{"id":7,"name":"ann","favourite":1}$' out.txt || fail "derive.c JSON output"
-grep -q '^GREEN$' out.txt || fail "derive.c enum string"
+grep -q '^{"x":4,"y":6}$' out.txt || fail "derive.c JSON output"
+grep -q '^11 1$' out.txt || fail "derive.c method and comparison output"
 
 expect_exit 0 "$CCCC" "$EX/comptime.c"
 grep -q '^256 32$' out.txt || fail "comptime.c output: $(cat out.txt)"
@@ -18,7 +18,7 @@ for name in derive comptime; do
     expect_exit 0 "$CCCC" -c=native -o "$name" "$EX/$name.c"
 done
 expect_exit 42 ./derive
-grep -q '^GREEN$' out.txt || fail "native derive output"
+grep -q '^{"x":4,"y":6}$' out.txt || fail "native derive output"
 expect_exit 0 ./comptime
 grep -q '^256 32$' out.txt || fail "native comptime output"
 
