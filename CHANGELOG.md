@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `MakeVarRef()` and `FindGlobal()` find an enum constant (`MakeVarRef("K")` for `enum { K = 20 };`). They returned NULL, so a call built with it as an argument lost the argument. A comptime function and a file-scope call see the constants of an anonymous enum, of a `typedef enum { ... }` and of an enum with a fixed underlying type (`enum E : unsigned char { ... }`), which the declaration index skipped.
 - Fixed: with several input files, each input's file-scope calls may generate a `static` function or variable of the same name as another input's (`MakeFunction("helper", ...)` then `FunctionSetStatic()`). They stopped with `expected unique generated function name, got existing definition 'helper'`. Generated externals of one name are a link error (`redefinition of 'helper'`); one input still cannot generate a name twice.
 - Fixed: a `static` function a file-scope call generates is callable from its input (`undefined function: helper`), and a generated `static` variable is private to its input (two inputs shared one object). `-c=native` renames a generated static that shares a name with another.
 - Fixed: two inputs that each generate an external variable of one name crashed the linker (`Host C crash (SIGSEGV)`); they report `redefinition of 'counter'`.

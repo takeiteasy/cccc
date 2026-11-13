@@ -1861,8 +1861,7 @@ static void register_synth_libc_call(VirtualMachine *vm, Obj *obj) {
 
 // Scope-then-globals lookup behind __builtin_ast_var_ref. Factored out so
 // it can be retried once after a #894 demand-driven splice attempt.
-static Node *var_ref_lookup(VirtualMachine *vm, const char *name,
-                            size_t name_len) {
+static Node *scope_ref(VirtualMachine *vm, const char *name, size_t name_len) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         for (VarScopeNode *node = sc->vars; node; node = node->next) {
             if (node->name_len == (int)name_len &&
@@ -1875,9 +1874,29 @@ static Node *var_ref_lookup(VirtualMachine *vm, const char *name,
                     n->ty   = node->var->ty;
                     return n;
                 }
+                if (node->enum_ty) {
+                    Node *n = alloc_node(vm, ND_NUM);
+                    n->val  = node->enum_val;
+                    if (node->enum_ty->enum_members_are_int) {
+                        n->ty             = ty_int;
+                        n->enum_source_ty = node->enum_ty;
+                    } else {
+                        n->ty = node->enum_ty;
+                    }
+                    return n;
+                }
             }
         }
     }
+
+    return NULL;
+}
+
+static Node *var_ref_lookup(VirtualMachine *vm, const char *name,
+                            size_t name_len) {
+    Node *scoped = scope_ref(vm, name, name_len);
+    if (scoped)
+        return scoped;
 
     // Also check globals
     Obj *global = __builtin_ast_find_global(name);
@@ -1890,7 +1909,8 @@ static Node *var_ref_lookup(VirtualMachine *vm, const char *name,
         return n;
     }
 
-    return NULL;
+    // Looking for a global may have spliced in an enum constant.
+    return scope_ref(vm, name, name_len);
 }
 
 CC_BUILTIN(__builtin_ast_var_ref, 1);

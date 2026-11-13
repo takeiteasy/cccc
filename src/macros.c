@@ -483,6 +483,16 @@ static void index_enum_constants(VirtualMachine *vm, HashMap *ordinary_map,
     }
 }
 
+// The `{` opening an enum body whose specifier continues at `after`: `{`
+// itself, or the one after a C23 `: underlying-type`. NULL for a declaration
+// without a body.
+static Token *enum_body_brace(Token *after, Token *semi) {
+    if (equal(after, ":"))
+        while (after != semi && !equal(after, "{"))
+            after = after->next;
+    return equal(after, "{") ? after : NULL;
+}
+
 // Token immediately before the first top-level (depth-0, outside any brace
 // body) '[' array-dimension group in [seg_start, seg_last], or seg_last
 // itself if there is none -- the candidate declared name for a simple
@@ -693,22 +703,35 @@ static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
                 t->next && t->next->kind == TK_IDENT) {
                 Token *tagname = t->next;
                 Token *after   = tagname->next;
-                if (after == semi || equal(after, "{") || equal(after, "*") ||
-                    equal(after, ",")) {
+                bool   is_enum = equal(t, "enum");
+                Token *brace   = is_enum ? enum_body_brace(after, semi)
+                                         : (equal(after, "{") ? after : NULL);
+                if (after == semi || brace || equal(after, "*") ||
+                    equal(after, ",") || (is_enum && equal(after, ":"))) {
                     register_comptime_decl_name(
                         vm, &vm->compiler.comptime_tag_index, tagname, decl,
                         CDK_TAG);
-                    decl_list_start = after;
-                    if (equal(after, "{")) {
-                        if (equal(t, "enum"))
+                    decl_list_start = brace ? brace : after;
+                    if (brace) {
+                        if (is_enum)
                             index_enum_constants(
-                                vm, &vm->compiler.comptime_decl_index, after,
+                                vm, &vm->compiler.comptime_decl_index, brace,
                                 semi, decl);
-                        Token *close    = find_matching_brace(after);
-                        decl_list_start = close ? close->next : after;
+                        Token *close    = find_matching_brace(brace);
+                        decl_list_start = close ? close->next : brace;
+                    } else if (equal(after, ":")) {
+                        decl_list_start = semi; // `enum E : int;`
                     }
                 }
                 break;
+            }
+            // `enum { A, B }` and `enum : T { A, B }` have no tag to register.
+            if (paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 &&
+                equal(t, "enum") && t->next && !(t->next->kind == TK_IDENT)) {
+                Token *brace = enum_body_brace(t->next, semi);
+                if (brace)
+                    index_enum_constants(vm, &vm->compiler.comptime_decl_index,
+                                         brace, semi, decl);
             }
             if (equal(t, "("))
                 paren_depth++;
