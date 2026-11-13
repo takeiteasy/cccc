@@ -4696,6 +4696,16 @@ static const char *cccc_keyword_alias_name(Token *tok) {
     return def && (def->flags & ATTR_KEYWORD_ALIAS) ? def->name : NULL;
 }
 
+static bool try_rewrite_cccc_keyword_attr(VirtualMachine *vm, Token **tok_ptr);
+
+// The @-spelling rewrites that apply to ordinary tokens (not @directive).
+static bool try_rewrite_at_markers(VirtualMachine *vm, Token **tok_ptr) {
+    return try_rewrite_template_marker(vm, tok_ptr) ||
+           try_rewrite_template_attr(vm, tok_ptr) ||
+           try_rewrite_at_attr(vm, tok_ptr) ||
+           try_rewrite_cccc_keyword_attr(vm, tok_ptr);
+}
+
 static bool try_rewrite_cccc_keyword_attr(VirtualMachine *vm, Token **tok_ptr) {
     Token      *tok  = *tok_ptr;
     const char *name = cccc_keyword_alias_name(tok);
@@ -6863,17 +6873,24 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 tok = skip_line(vm, tok->next);
                 continue;
             }
+            // The line's head is rewritten first so the scan below sees
+            // [[cccc::test]] for @test too. The raw line is recorded from the
+            // original token, so serialized output keeps the @ spelling.
+            while (try_rewrite_at_markers(vm, &tok)) {
+            }
             // Scan for [[cccc::test]]/[[cccc::build]]/[[cccc::build_target]] in
             // emitted tokens so comptime emit blocks can generate
             // mode-attributed functions. Use a local pointer so the emit loop's
             // tok is unaffected.
             {
-                Token *scan = start;
+                Token *scan = tok;
                 try_extract_attr_macro(vm, &scan, /*emit_scan=*/true);
             }
             cc_record_emit_source(vm, copy_raw_directive_line(vm, start));
             bool first_token = true;
             while (tok->kind != TK_EOF && (first_token || !tok->at_bol)) {
+                if (try_rewrite_at_markers(vm, &tok))
+                    continue;
                 first_token        = false;
                 tok->line_delta    = tok->file->line_delta;
                 tok->filename      = tok->file->display_name;

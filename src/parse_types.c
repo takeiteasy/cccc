@@ -3668,6 +3668,15 @@ static Token *apply_attr(VirtualMachine *vm, Token *tok, const AttrSite *site,
         return def->apply(vm, tok, &resolved, ty, attr);
     }
 
+    // Registered by the preprocessor's emit-block scan; the tokens stay.
+    if (def && !def->apply &&
+        (def->marker == ATTR_MARK_TEST || def->marker == ATTR_MARK_BUILD ||
+         def->marker == ATTR_MARK_BUILD_TARGET ||
+         def->marker == ATTR_MARK_TEST_SETUP ||
+         def->marker == ATTR_MARK_TEST_TEARDOWN) &&
+        site->cccc_scoped)
+        return skip_optional_args(tok);
+
     if (find_attribute_macro(vm, name_tok)) {
         Node *args      = NULL;
         int   arg_count = 0;

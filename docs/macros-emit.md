@@ -59,7 +59,16 @@ int win_init(void);            // compiled and emitted
 
 An emit block needs an enclosing comptime context, a comptime block may hold several, and nesting a block in one of its own kind is an error. Macros such as `AssertEq` or `Executable` are **not** expanded inside, so use the `__builtin_*` functions directly.
 
-Functions in an emit block may carry `[[cccc::test]]`, `[[cccc::build]]`, `[[cccc::build_target]]`, `[[cccc::test_setup]]` and `[[cccc::test_teardown]]`; they register as in normal source:
+The `@` spellings work as in ordinary code: `@name` attributes, and the [template](templates.md) markers `@template`, `@specialize`, `@inst` and `Name@(...)`. `-c=generated` replays the lines as written.
+
+```c
+#pragma cccc emit begin
+@template(T) T mx(T a, T b) { return a > b ? a : b; }
+int answer(void) { return @inst(int) mx(1, 42); }
+#pragma cccc emit end
+```
+
+Functions in an emit block may carry `[[cccc::test]]`, `[[cccc::build]]`, `[[cccc::build_target]]`, `[[cccc::test_setup]]` and `[[cccc::test_teardown]]` (or `@test`, `@build`, ...); they register as in normal source:
 
 ```c
 #pragma cccc comptime begin

@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `@template`, `@inst`, `Name@(...)` and `@name` attributes work inside an emit block (`#pragma cccc emit begin`), including `@test`, `@build` and `@build_target`. They reached the parser as a raw `@` (`expected an expression, found '@'`). `-c=generated` replays the lines as written.
 - Added: `t.v...` expands in a declaration at file scope: an array length, an initializer list or a `_Static_assert` (`char flat[(sizeof(g.v) + ... + 0)];`). It stopped with `member pack 'v' must be expanded with '...'`.
 - Added: `t.v...` expands in a struct or union body (a member's array length or initializer), and a struct or union template pattern may hold a template pack and an instance member pack together: `char b[(sizeof(Ts) + sizeof(g.v) + ...)]`. It stopped with `member pack 'v' must be expanded with '...'`.
 - Fixed: `cccc -E` prints template definitions and instances in their source spelling (`@template(T)`, `@specialize(A)`, `max@(int)(40, 42)`), each on one line, so its output compiles again. It printed the internal `__cccc_template(T)` and split an `@inst` over several lines.
