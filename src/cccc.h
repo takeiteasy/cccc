@@ -4214,6 +4214,12 @@ typedef struct Template {
     struct TemplateInstance *insts; // primary: the instances made from it
     struct Template         *specs; // primary: its full specializations
     struct Template         *next_spec;
+    // A function template with [[cccc::operator(sym)]]: its operand patterns
+    // (a pointer to an aggregate stripped), parsed on first use.
+    const char   *op_sym;
+    bool          op_ready;
+    int           op_n;
+    struct Type  *op_pat[2];
 } Template;
 
 // A template definition found by the comptime index, kept so a file-scope call
@@ -4258,6 +4264,7 @@ typedef struct Compiler {
     // Preprocessor state
     bool         skip_preprocess; // Skip preprocessing step
     bool         saw_templates;   // `@template`/`@inst` appeared in the input
+    bool         saw_operator_templates; // a function template carries [[cccc::operator]]
     bool         saw_variadic_aggregate; // a variadic struct was defined
     HashMap      member_pack_names;      // `Ts... name;` in a variadic struct
     HashMap      templates;       // name -> Template *

@@ -1826,6 +1826,12 @@ static Type *install_body_tag(VirtualMachine *vm, Token *body, Token *tag,
     if (body && body->origin && vm->compiler.in_index_splice)
         hashmap_put_int(&vm->compiler.spliced_aggs, (long long)body->origin,
                         result);
+    // Completing a forward declaration copies `ty` into it; methods queued
+    // while the body was parsed belong to the completed type.
+    if (result != ty)
+        for (PendingMethod *m = vm->compiler.pending_methods; m; m = m->next)
+            if (m->owner == ty)
+                m->owner = result;
     return result;
 }
 

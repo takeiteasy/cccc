@@ -20,6 +20,8 @@ bool less = a < b;    // vec2_cmp(&a, &b) < 0
 int order = a <=> b;  // vec2_cmp(&a, &b)
 ```
 
+A function template with the attribute is deduced from the operands: see [templates.md](templates.md#operators).
+
 ## Defining in the struct
 
 An operator written in a struct or union body is the same as the free form, named `<T>_operator_<name>`.

@@ -1317,6 +1317,7 @@ void hashmap_put_borrowed(HashMap *map, const char *key, void *val);
 // The HashMap struct itself is NOT freed.
 void hashmap_deinit(HashMap *map);
 void hashmap_deinit_borrowed(HashMap *map);
+void hashmap_each(HashMap *map, void (*fn)(void *val, void *ctx), void *ctx);
 
 // Snapshot/restore: deep-clone a HashMap's bucket array and owned string
 // keys so it can be rolled back after a sub-pass that must not leak #define

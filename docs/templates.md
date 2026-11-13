@@ -342,8 +342,35 @@ _Bool same = Cell__int_equals(&x, &y);
 | Argument that is a variable-length array | Compile error |
 | Argument that is an unnamed struct, union or enum with no typedef name | Compile error asking for a tag or typedef name |
 | A runtime template used in comptime code, or the reverse | Each program has its own templates: `'twice' is not a template in comptime code` |
-| `[[cccc::operator(sym)]]` on a function template, or an operator written in a struct template's body | Not bound for the instances; [bind them per instance](cpp.md#templates-and-members) |
 | Defining a template after its first `@inst` | The template must come first |
+
+## Operators
+
+A function template with `[[cccc::operator(sym)]]` is instantiated from the operand types when an operator is used. An operator written in a struct template's body belongs to every instance.
+
+```c
+@template(T) struct Vec2 { T x, y; };
+
+@template(T) [[cccc::operator(+)]] @inst(T) Vec2 vadd(@inst(T) Vec2 a, @inst(T) Vec2 b) {
+    return (@inst(T) Vec2){a.x + b.x, a.y + b.y};
+}
+@template(T) [[cccc::operator(*)]] @inst(T) Vec2 vscale(@inst(T) Vec2 a, T s) {
+    return (@inst(T) Vec2){a.x * s, a.y * s};
+}
+
+@inst(int) Vec2 a = {3, 4};
+@inst(int) Vec2 c = a + a;     // vadd__int
+@inst(int) Vec2 d = a * 2;     // vscale__int
+```
+
+| Rule | Detail |
+|---|---|
+| Deduced from | The operand types. Each parameter must appear in them unless it has a default: `operator template parameter 'U' is not deduced by its operands` |
+| Parameters | Types and integer constants; no pack, float or pointer constants |
+| Operand | A by-value or by-address struct operand, as for [operators](operators.md); a scalar parameter such as `T s` takes the deduced type exactly |
+| Choice | A concrete operator wins. Two templates matching one pair of operands are an error: `ambiguous operator templates for '+' ('vadd', 'vsum')` |
+| `[]` | Deduced from the first operand only |
+| In the body | `struct Vec2 operator+(struct Vec2 *a, struct Vec2 *b)` binds `+` for each instance |
 
 ## Diagnostics
 

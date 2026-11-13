@@ -372,6 +372,16 @@ void hashmap_delete_int(HashMap *map, long long key) {
         ent->key = TOMBSTONE;
 }
 
+void hashmap_each(HashMap *map, void (*fn)(void *val, void *ctx), void *ctx) {
+    if (!map || !map->buckets)
+        return;
+    for (int i = 0; i < map->capacity; i++) {
+        HashEntry *ent = &map->buckets[i];
+        if (ent->key && ent->key != TOMBSTONE)
+            fn(ent->val, ctx);
+    }
+}
+
 void hashmap_deinit(HashMap *map) {
     if (!map || !map->buckets)
         return;

@@ -592,6 +592,24 @@ static void note_member_packs(VirtualMachine *vm, const Template *t) {
         }
 }
 
+// The `sym` of a `[[cccc::operator(sym)]]` on function template `t`, or NULL.
+static const char *operator_sym_of(const Template *t) {
+    for (Token *p = t->start; p->kind != TK_EOF && p != t->name_tok;
+         p        = p->next) {
+        if (p == t->marker)
+            p = t->marker_end;
+        if (p == t->name_tok)
+            break;
+        Token *after;
+        if (equal(p, "operator") && equal(p->next, "(")) {
+            const char *sym = overloadable_operator(p->next->next, &after);
+            if (sym)
+                return sym;
+        }
+    }
+    return NULL;
+}
+
 Token *cc_template_capture(VirtualMachine *vm, Token *tok) {
     Template    scan;
     const char *err     = NULL;
@@ -607,6 +625,8 @@ Token *cc_template_capture(VirtualMachine *vm, Token *tok) {
     t->name     = arena_strndup(vm, t->name_tok->loc, t->name_tok->len);
     t->name_len = t->name_tok->len;
     note_member_packs(vm, t);
+    if (t->kind == TMPL_FUNC && (t->op_sym = operator_sym_of(t)))
+        vm->compiler.saw_operator_templates = true;
     // A file-scope call that ran before the parse registered it already.
     if (t->pattern) {
         Template *primary = cc_find_template(vm, t->name_tok);
@@ -3251,6 +3271,174 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
                                        TemplateArg *args, int nargs,
                                        Token *site) {
     return instantiate(vm, t, args, nargs, site, NULL);
+}
+
+// Parses the operand types of operator template `t` as patterns, once: each
+// type parameter stands for a placeholder, and `@inst(T) Vec2` for an instance
+// pattern, as in a partial specialization.
+static void operator_prepare(VirtualMachine *vm, Template *t) {
+    if (t->op_ready)
+        return;
+    if (tmpl_has_pack(t))
+        error_tok(vm, t->name_tok,
+                  "an operator template cannot have a parameter pack");
+    if (t->nparams > TMPL_MAX_ARGS)
+        error_tok(vm, t->name_tok,
+                  "an operator template takes at most %d parameters",
+                  TMPL_MAX_ARGS);
+
+    TmplSnapshot snap;
+    snapshot_save(vm, &snap);
+    jmp_buf  jb;
+    jmp_buf *saved_jb = vm->error_jmp_buf;
+    vm->error_jmp_buf = &jb;
+    if (setjmp(jb)) {
+        snapshot_restore(vm, &snap);
+        vm->error_jmp_buf = saved_jb;
+        longjmp(*saved_jb, 1);
+    }
+    snapshot_clear(vm);
+    vm->compiler.scope       = tmpl_file_scope(vm);
+    vm->compiler.tmpl_anchor = tmpl_file_scope(vm);
+    Scope *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
+    memset(bindings, 0, sizeof(Scope));
+    vm->compiler.tmpl_bindings = bindings;
+
+    t->vars =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(Type *) * t->nparams);
+    memset(t->vars, 0, sizeof(Type *) * t->nparams);
+    for (int k = 0; k < t->nparams; k++) {
+        TemplateParam *p = &t->params[k];
+        if (p->type_start) {
+            if (p->dependent || !is_integer(param_type(vm, t, k)))
+                error_tok(vm, p->name,
+                          "an operator template deduces type and integer "
+                          "parameters only");
+            continue;
+        }
+        Type *ph                         = struct_type(vm);
+        ph->size                         = 1;
+        type_agg_mut(vm, ph)->struct_tag = p->name;
+        t->vars[k]                       = ph;
+        Obj *unused                      = NULL;
+        bind_param(vm, t, k, ph, NULL, bindings, &unused);
+    }
+
+    Token *p = t->marker_end;
+    for (;;) {
+        Token *q = skip_attr_groups(p);
+        if (q != p)
+            p = q;
+        else if (is_linkage_kw(p))
+            p = p->next;
+        else
+            break;
+    }
+    vm->compiler.tmpl_pattern = t;
+    Token   *rest;
+    Token   *toks = clone_range(vm, p, t->body_open);
+    Type    *ty   = declspec(vm, &rest, toks, NULL);
+    DeclName dn;
+    ty = declarator(vm, &rest, rest, ty, &dn);
+    int n = 0;
+    for (Type *prm = ty->kind == TY_FUNC ? ty->params : NULL; prm;
+         prm       = prm->next, n++) {
+        if (n == 2)
+            error_tok(vm, t->name_tok,
+                      "an operator template takes one or two parameters");
+        Type *pointee = prm->kind == TY_PTR ? unqualified(vm, prm->base) : NULL;
+        bool  by_addr =
+            pointee && (pointee->kind == TY_STRUCT || pointee->kind == TY_UNION);
+        t->op_pat[n] = unqualified(vm, by_addr ? prm->base : prm);
+    }
+    if (!n)
+        error_tok(vm, t->name_tok,
+                  "an operator template takes one or two parameters");
+    t->op_n = n;
+
+    bool used[TMPL_MAX_ARGS] = {};
+    for (int i = 0; i < (strcmp(t->op_sym, "[]") ? n : 1); i++)
+        pattern_mark_vars(t, t->op_pat[i], used, true);
+    for (int k = 0; k < t->nparams; k++)
+        if (!used[k] && !t->params[k].def)
+            error_tok(vm, t->params[k].name,
+                      "operator template parameter '%.*s' is not deduced by "
+                      "its operands",
+                      (int)t->params[k].name->len, t->params[k].name->loc);
+
+    t->op_ready = true;
+    snapshot_restore(vm, &snap);
+    vm->error_jmp_buf = saved_jb;
+}
+
+typedef struct {
+    VirtualMachine *vm;
+    const char     *sym;
+    Type           *lhs, *rhs;
+    bool            unary;
+    Token          *tok;
+    Template       *found[2];
+    Deduced         deduced; // of found[0]
+    int             nfound;
+} OperatorQuery;
+
+static void operator_candidate(void *val, void *ctx) {
+    OperatorQuery *q = ctx;
+    Template      *t = val;
+    if (t->kind != TMPL_FUNC || !t->op_sym || strcmp(t->op_sym, q->sym))
+        return;
+    operator_prepare(q->vm, t);
+    if (t->op_n != (q->unary ? 1 : 2))
+        return;
+    Deduced d = {};
+    Matcher m = {q->vm, t, NULL, &d, q->tok};
+    if (!match_type(&m, t->op_pat[0], q->lhs))
+        return;
+    if (!q->unary && strcmp(q->sym, "[]") &&
+        !match_type(&m, t->op_pat[1], q->rhs))
+        return;
+    if (q->nfound < 2)
+        q->found[q->nfound] = t;
+    if (!q->nfound)
+        q->deduced = d;
+    q->nfound++;
+}
+
+// Instantiates the operator template for `sym` whose operand patterns match
+// these operand types, so the operator lookup finds the instance; false when no
+// template matches. `rhs` is unused for a unary operator and for `[]`.
+bool cc_instantiate_operator_template(VirtualMachine *vm, const char *sym,
+                                      Type *lhs, Type *rhs, bool unary,
+                                      Token *tok) {
+    if (!vm->compiler.saw_operator_templates)
+        return false;
+    OperatorQuery q = {.vm = vm, .sym = sym, .lhs = lhs, .rhs = rhs,
+                       .unary = unary, .tok = tok};
+    hashmap_each(tmpl_templates(vm), operator_candidate, &q);
+    if (!q.nfound)
+        return false;
+    if (q.nfound > 1)
+        error_tok(vm, tok, "ambiguous operator templates for '%s' ('%s', '%s')",
+                  sym, q.found[0]->name, q.found[1]->name);
+
+    Template   *t = q.found[0];
+    TemplateArg args[TMPL_MAX_ARGS];
+    memset(args, 0, sizeof(args));
+    int given = 0;
+    for (; given < t->nparams; given++) {
+        TemplateArg *a = &args[given];
+        if (t->params[given].type_start) {
+            if (!q.deduced.set[given])
+                break;
+            a->expr = new_long(vm, q.deduced.cv[given].val, tok);
+        } else {
+            if (!q.deduced.ty[given])
+                break;
+            a->ty = q.deduced.ty[given];
+        }
+    }
+    instantiate_template(vm, t, args, given, tok);
+    return true;
 }
 
 // Parses argument `n` of `t` at `tok`: a type, or a constant expression where

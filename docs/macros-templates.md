@@ -183,7 +183,7 @@ Arguments are matched to parameters in order, and a pack takes the rest. A type 
 
 ### At file scope
 
-A file-scope call (`gen();`) sees the templates of its own input file, including those from the headers it includes. The instances it makes are the ones the file's own code names afterwards, so `Box @(int)` after `gen()` reuses `Box__int`. `Quote("@inst(...)")` works there too.[^filescope]
+A file-scope call (`gen();`) sees the templates of its own input file, including those from the headers it includes. The instances it makes are the ones the file's own code names afterwards, so `Box @(int)` after `gen()` reuses `Box__int`. A call runs before the file's own `@inst` lines, so a generator that uses an instance calls `InstantiateType` itself. `Quote("@inst(...)")` works there too.[^filescope]
 
 ```c
 @template(T) struct Box { T value; };

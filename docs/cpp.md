@@ -4,7 +4,7 @@ Where CCCC's features behave like their C++ counterparts and where they differ. 
 
 | C++ feature | CCCC counterpart | Same idea | Main difference |
 |---|---|---|---|
-| Class and function templates | [`@template`](templates.md) | Instantiate per argument list, specialise, packs, defaults | Explicit arguments only; no deduction, constraints or overloads |
+| Class and function templates | [`@template`](templates.md) | Instantiate per argument list, specialise, packs, defaults | Explicit arguments, except that operator templates are deduced from their operands; no constraints or overloads |
 | Operator overloading | [`[[cccc::operator]]`](operators.md) | `a + b` calls a user function | Free functions bound by attribute; exact operand types; fewer operators |
 | Member functions | [`[[cccc::method]]`](methods.md) | `s.f(x)` | Static, explicit receiver, no `this`, no inheritance |
 | `constexpr`, `consteval`, `if constexpr` | [`@comptime`](macros.md) | Code runs during compilation | Runs arbitrary C and builds syntax trees; not part of the type system |
@@ -93,22 +93,20 @@ An rvalue receiver (`make().len()`) passed to a `T *` parameter is copied into a
 
 ### Templates and members
 
-A method in a struct template's body is a method of every instance; the receiver is `struct Vec2 *`, as the template name stands for the instance. An operator binds to a concrete struct, so bind it per instance on a `typedef`, with a generic function doing the work:
+A method or operator written in a struct template's body belongs to every instance; the receiver is `struct Vec2 *`, as the template name stands for the instance. An operator written once as a function template is instantiated from its operands, so `a + b` over a `Vec2@(int)` makes `vadd__int`:
 
 ```c
 @template(T) struct Vec2 {
     T x, y;
     T dot(const struct Vec2 *self, const struct Vec2 *o) { return self->x * o->x + self->y * o->y; }
+    struct Vec2 operator-(struct Vec2 a) { return (struct Vec2){-a.x, -a.y}; }
 };
-@template(T) @inst(T) Vec2 vec2_add(@inst(T) Vec2 a, @inst(T) Vec2 b) {
+@template(T) [[cccc::operator(+)]] @inst(T) Vec2 vadd(@inst(T) Vec2 a, @inst(T) Vec2 b) {
     return (@inst(T) Vec2){a.x + b.x, a.y + b.y};
 }
-
-typedef Vec2@(int) IVec;
-[[cccc::operator(+)]] IVec ivec_add(IVec a, IVec b) { return vec2_add@(int)(a, b); }
 ```
 
-C++ writes `operator+` once for every `T`.[^membertemplates]
+[More in templates.md](templates.md#operators)
 
 ## Compile-time evaluation
 
@@ -187,4 +185,3 @@ No classes or inheritance, function or operator overloading beyond operand-type 
 
 [^spelling]: The prefix `@inst(int) max`, the postfix `max@(int)` and the keyword `__inst(int) max` name the same instance; see [templates.md](templates.md#spellings).
 
-[^membertemplates]: `[[cccc::operator(+)]]` on a function template is not applied to its instances, and an `operator+` in a struct template's body is rejected for the instance (`operator '+' in Vec2__int needs a Vec2__int or Vec2__int * operand`).

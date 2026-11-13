@@ -4325,6 +4325,8 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
                         // Snapshot globals before execution so we can identify
                         // the objects this call generates.
                         Obj   *globals_before = vm->compiler.globals;
+                        int    nops_before    = vm->compiler.noperators;
+                        int    nmeths_before  = vm->compiler.nmethods;
                         Scope *scope_before   = vm->compiler.scope;
                         Scope *saved_scope_next =
                             scope_before ? scope_before->next : NULL;
@@ -4426,6 +4428,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
                             }
                             if (body_last) {
                                 vm->compiler.globals = globals_before;
+                                rewind_bindings(vm, nops_before, nmeths_before);
                                 body_last->next      = next_tok;
                                 preparse_tokens_replaced(vm, tok, body_first);
                                 if (prev)

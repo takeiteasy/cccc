@@ -555,6 +555,10 @@ MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name);
 const char *overloadable_operator(Token *tok, Token **rest);
 const char *operator_name(const char *sym, bool unary);
 void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
+void rewind_bindings(VirtualMachine *vm, int nops, int nmeths);
+bool cc_instantiate_operator_template(VirtualMachine *vm, const char *sym,
+                                      Type *lhs, Type *rhs, bool unary,
+                                      Token *tok);
 Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
                         Node *rhs, Token *tok);
 Node *overloaded_subscript(VirtualMachine *vm, Node *base, Node *idx,
