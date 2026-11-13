@@ -305,6 +305,10 @@ Each parameter names its argument type throughout the body, so `T a, b;` with `T
 
 Instantiation nests up to 64 levels deep.
 
+## Preprocessed output
+
+`cccc -E` prints the source spellings `@template(T)`, `@specialize(A)` and `Name@(Args)`, each on one line, so the output compiles again: `@inst(int) max(40, 42)` prints as `max@(int)(40, 42)`.
+
 ## Functions and linkage
 
 A function instance is shared: the program has one copy, and a pointer to it compares equal in every translation unit. Two files that instantiate the same template, or a header that holds one, link cleanly.[^linkage]

@@ -2490,6 +2490,29 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
     return true;
 }
 
+// The template markers the preprocessor rewrites to its internal spelling,
+// printed as the source forms `@template(T)`, `@specialize(A)` and
+// `Name@(Args)`. An instance is `__cccc_inst ( Name [, Args] )`; its `Name` and
+// `(` are printed here and the loop prints the rest.
+static bool output_template_marker(FILE *f, Token **tok_ptr) {
+    Token *t = *tok_ptr;
+    if (t->kind != TK_IDENT)
+        return false;
+    if (equal(t, "__cccc_template") || equal(t, "__cccc_specialize")) {
+        fputs(equal(t, "__cccc_template") ? "@template" : "@specialize", f);
+        *tok_ptr = t->next;
+        return true;
+    }
+    if (!equal(t, "__cccc_inst") || !t->next || !equal(t->next, "(") ||
+        !t->next->next || t->next->next->kind != TK_IDENT)
+        return false;
+    Token *name = t->next->next;
+    fprintf(f, "%.*s@(", name->len, name->loc);
+    Token *rest = name->next;
+    *tok_ptr    = rest && equal(rest, ",") ? rest->next : rest;
+    return true;
+}
+
 // Output preprocessed tokens as source code (for -E flag)
 void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok) {
     if (!f || !tok)
@@ -2528,7 +2551,7 @@ void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok) {
         if (t->has_space && !at_bol)
             fprintf(f, " ");
 
-        if (output_attr(f, vm, &t)) {
+        if (output_attr(f, vm, &t) || output_template_marker(f, &t)) {
             at_bol = 0;
             continue;
         }

@@ -4584,12 +4584,14 @@ static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
     if (has_args) {
         Token *comma;
         cur->next = synth_tokens(vm, tok, ",", &comma);
-        cur       = comma;
+        comma->at_bol = false;
+        cur           = comma;
         for (Token *p = args_open->next; p != close; p = p->next)
             cur = cur->next = copy_token(vm, p);
     }
     Token *rparen;
     cur->next                  = synth_tokens(vm, tok, ")", &rparen);
+    rparen->at_bol             = false;
     rparen->next               = after;
 
     new_toks->at_bol           = tok->at_bol;
