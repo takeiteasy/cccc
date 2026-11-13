@@ -131,6 +131,15 @@ static bool same_template_origin(VirtualMachine *vm, Obj *a, Obj *b) {
                    cc_canonical_path_key(vm, tb->file->name));
 }
 
+// Whether two generated definitions come from one attribute use, as when a
+// header's derived struct reaches two inputs.
+static bool same_attr_origin(VirtualMachine *vm, Obj *a, Obj *b) {
+    Token *ta = obj_fn(a)->attr_origin, *tb = obj_fn(b)->attr_origin;
+    return ta && tb && ta->file && tb->file && ta->line_no == tb->line_no &&
+           !strcmp(cc_canonical_path_key(vm, ta->file->name),
+                   cc_canonical_path_key(vm, tb->file->name));
+}
+
 // A generated definition has no token of its own: the call that made it is the
 // place to report.
 static void link_error_obj(VirtualMachine *vm, const Obj *obj, char *fmt) {
@@ -193,6 +202,8 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                         link_error_obj(vm, obj,
                                        "conflicting definitions of template "
                                        "instance '%s'");
+                } else if (both_def && same_attr_origin(vm, obj, existing)) {
+                    // One copy per program, however many inputs derived it.
                 } else if (both_def && obj->is_function && obj->is_gnu_inline &&
                            existing->is_function) {
                     // A GNU inline-only body yields to a real definition,

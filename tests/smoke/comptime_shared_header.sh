@@ -97,3 +97,37 @@ printf '@comptime int cv = 6;\nint main(void) { return 0; }\n' >w2.c
 expect_fail "$CCCC" w1.c w2.c
 grep -q "comptime variable 'cv' is already defined differently at w1.c:1" err.txt ||
     fail "no conflicting-variable error: $(cat err.txt)"
+
+# A struct derived in a shared header is one definition per program.
+cat >derived.h <<'EOS2'
+#pragma once
+struct M { int a; char *name; } @equals @hash @getters @setters @ctor @to_string;
+EOS
+cat >m_p.c <<'EOS2'
+#include <cccc/derive.h>
+#include "derived.h"
+int from_q(void);
+int main(void) {
+    struct M m = {0};
+    set_a(&m, 3);
+    return 39 + get_a(&m) + from_q();
+}
+EOS
+cat >m_q.c <<'EOS2'
+#include <cccc/derive.h>
+#include "derived.h"
+int from_q(void) {
+    struct M m = {0};
+    return M_equals(&m, &m) * 0;
+}
+EOS
+cp m_q.c m_r.c
+expect_exit 42 "$CCCC" m_p.c m_q.c
+expect_exit 42 "$CCCC" m_p.c m_q.c m_r.c
+
+# Two different structs of one name still collide.
+printf '#include <cccc/derive.h>\nstruct P { int x; } @equals;\nint main(void) { return 0; }\n' >o_p.c
+printf '#include <cccc/derive.h>\nstruct P { long y; } @equals;\nint other;\n' >o_q.c
+expect_fail "$CCCC" o_p.c o_q.c
+grep -q "redefinition of 'P_equals'" err.txt ||
+    fail "no duplicate-derive error: $(cat err.txt)"

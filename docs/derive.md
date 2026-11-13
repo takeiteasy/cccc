@@ -343,6 +343,10 @@ with one of its parts (`@json @to_json`), or two bundles that share a part
 (`@hashable @ordered` both publish `T_equals`), is a compile error that names
 the duplicate function. Write `@hashable @compare` for both.
 
+## Several input files
+
+A struct derived in a header that two inputs include links as one definition: each derived function exists once in the program. Two different structs of one name in different inputs still stop with `redefinition of 'T_equals'`.
+
 ## Writing your own
 
 Handlers for your own attributes use the same mechanism

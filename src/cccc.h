@@ -2634,6 +2634,7 @@ typedef struct ObjFn {
     Token    *def_begin, *def_end; // source span of a file-scope definition
     Token    *gen_site; // file-scope comptime call that generated this Obj
     int       gen_input;   // index of the input whose call generated this Obj
+    Token    *attr_origin; // the attribute use whose handler generated this Obj
     Token    *tmpl_origin; // is_tmpl_inst: start of the @template/@specialize
     // Hot reload (REPL / cc_redefine_function): a redefinition is a fresh Obj
     // whose reload_of is the Obj it replaces. The oldest Obj stays the

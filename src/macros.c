@@ -3471,6 +3471,7 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
                                          owner_kind, owner_name)
                           : arena_format(vm, "member %s", target->name);
     }
+    Obj               *globals_before = vm->compiler.globals;
     ExpansionFrameHint hint = {
         .kind        = EXPANSION_ATTR_HANDLER,
         .target_desc = target_desc,
@@ -3479,6 +3480,9 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
     Node *result = execute_macro_fn_ex(vm, pm, tok, NULL, total_args,
                                        fixed_values, fixed_count, &hint);
     (void)result;
+    for (Obj *o = vm->compiler.globals; o && o != globals_before; o = o->next)
+        if (o->is_macro_generated)
+            obj_fn_mut(vm, o)->attr_origin = tok;
 
     vm->compiler.macro_vararg_nodes       = saved_vararg_nodes;
     vm->compiler.macro_vararg_strs        = saved_vararg_strs;
