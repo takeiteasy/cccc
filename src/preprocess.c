@@ -4568,6 +4568,9 @@ static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
         TemplateMarker kind = template_marker_kind(kw->loc, kw->len, at);
         if (kind == TM_NONE)
             return false;
+        // glibc names parameters `__template` (`mkstemp (char *__template)`).
+        if (!at && kind != TM_INST && !(kw->next && equal(kw->next, "(")))
+            return false;
         spell =
             arena_format(vm, "%s%.*s", at ? "@" : "", (int)kw->len, kw->loc);
         if (kind != TM_INST) {

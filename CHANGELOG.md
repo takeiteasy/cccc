@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `__template` and `__specialize` are template keywords only before `(`. glibc's `mkstemp (char *__template)` stopped every `--use-system-headers` program on Linux with `a template cannot be typedef or extern`.
+- Fixed: the `-c=generated` float-to-integer smoke test links `-lm` (`feraiseexcept` is in libm on glibc).
 ## [0.34.0] - 2026-11-13
 
 - Added: `docs/cpp.md` compares CCCC's templates, operators, methods, compile-time code, derived members and safety with their C++ counterparts.

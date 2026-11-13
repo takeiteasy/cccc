@@ -9,7 +9,7 @@ CC=$(real_cc)
 check() {
     expect_exit 0 "$CCCC" -c=generated -o "$1.gen.c" "$1.c"
     printf '%s\n' "$MAIN" >>"$1.gen.c"
-    "$CC" -w -Werror=implicit-function-declaration -o "$1" "$1.gen.c" ||
+    "$CC" -w -Werror=implicit-function-declaration -o "$1" "$1.gen.c" -lm ||
         fail "$1: host compiler rejected the output"
     expect_exit 42 "./$1"
     defs=$(grep -c "^static .* $2(.*) {" "$1.gen.c")
