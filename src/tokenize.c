@@ -250,13 +250,21 @@ static ExpansionFrame *resolve_expansion_chain(VirtualMachine *vm, Token *tok) {
     return head;
 }
 
+// File name a diagnostic reports: the name a `#line` directive gave this token,
+// else the real file.
+static const char *tok_diag_file(Token *tok) {
+    if (tok->filename)
+        return tok->filename;
+    return tok->file ? tok->file->name : NULL;
+}
+
 // One frame's note text, no "note: " prefix or trailing newline -- callers
 // add those per output mode (plain text vs. JSON).
 static char *format_expansion_frame(VirtualMachine *vm, ExpansionFrame *fr) {
     Token      *site    = frame_site(fr);
     int         line_no = site ? tok_line_no(site) : 0;
     int         col_no  = site ? tok_col_no(site) : 0;
-    const char *fname   = (site && site->file) ? site->file->name : "?";
+    const char *fname = site && tok_diag_file(site) ? tok_diag_file(site) : "?";
     const char *name = fr->name ? fr->name : "?";
     switch (fr->kind) {
         case EXPANSION_ATTR_HANDLER:
@@ -327,7 +335,7 @@ static CompileError *build_expansion_notes(VirtualMachine *vm,
         note->message =
             arena_format(vm, "  note: %s\n", format_expansion_frame(vm, fr));
         Token *site    = frame_site(fr);
-        note->filename = (site && site->file) ? site->file->name : NULL;
+        note->filename = site ? tok_diag_file(site) : NULL;
         note->line_no  = site ? tok_line_no(site) : 0;
         note->col_no   = site ? tok_col_no(site) : 0;
         note->severity = 2; // note
@@ -411,8 +419,9 @@ static void vdiagnostic_at(VirtualMachine *vm, const char *filename, char *input
                 char  *note_msg = format_expansion_frame(vm, fr);
                 Token *site     = frame_site(fr);
                 fprintf(stderr, "{\"file\":\"");
-                print_escaped_string_fp(
-                    stderr, site && site->file ? site->file->name : "?");
+                print_escaped_string_fp(stderr, site && tok_diag_file(site)
+                                                    ? tok_diag_file(site)
+                                                    : "?");
                 fprintf(stderr, "\",\"line\":%d,\"column\":%d,\"message\":\"",
                         site ? tok_line_no(site) : 0,
                         site ? tok_col_no(site) : 0);
@@ -624,11 +633,11 @@ void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...) {
     ExpansionFrame *chain   = resolve_expansion_chain(vm, tok);
     va_list         ap;
     va_start(ap, fmt);
-    verror_at(vm, site->file->name, site->file->contents, line_no, site->loc,
+    verror_at(vm, tok_diag_file(site), site->file->contents, line_no, site->loc,
               chain, fmt, ap);
     va_end(ap);
 
-    collect_compile_error(vm, site->file->name, line_no, col_no);
+    collect_compile_error(vm, tok_diag_file(site), line_no, col_no);
 
     // Always use longjmp/exit (Level 1: no parser recovery)
     if (vm && vm->error_jmp_buf) {
@@ -648,11 +657,11 @@ bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...) {
     ExpansionFrame *chain   = resolve_expansion_chain(vm, tok);
     va_list         ap;
     va_start(ap, fmt);
-    verror_at(vm, site->file->name, site->file->contents, line_no, site->loc,
+    verror_at(vm, tok_diag_file(site), site->file->contents, line_no, site->loc,
               chain, fmt, ap);
     va_end(ap);
 
-    if (collect_compile_error(vm, site->file->name, line_no, col_no)) {
+    if (collect_compile_error(vm, tok_diag_file(site), line_no, col_no)) {
         // Check if we've hit max errors
         if (vm->max_errors > 0 && vm->error_count >= vm->max_errors) {
             // Too many errors, bail out
@@ -700,7 +709,7 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
     ExpansionFrame *chain = resolve_expansion_chain(vm, tok);
     va_list         ap;
     va_start(ap, fmt);
-    vdiagnostic_at(vm, site->file->name, site->file->contents, line_no,
+    vdiagnostic_at(vm, tok_diag_file(site), site->file->contents, line_no,
                    site->loc, is_error ? "error" : "warning", warn_name, chain,
                    fmt, ap);
     va_end(ap);
@@ -716,7 +725,8 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
 
     // If this warning is treated as an error, collect it as an error and abort.
     if (is_error) {
-        collect_diagnostic(vm, site->file->name, line_no, col_no, 0, warn_name);
+        collect_diagnostic(vm, tok_diag_file(site), line_no, col_no, 0,
+                           warn_name);
 
         // Use longjmp like error_tok
         if (vm->error_jmp_buf) {
@@ -727,7 +737,8 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
 
     // Collect warning if error collection is enabled
     if (vm->collect_errors)
-        collect_diagnostic(vm, site->file->name, line_no, col_no, 1, warn_name);
+        collect_diagnostic(vm, tok_diag_file(site), line_no, col_no, 1,
+                           warn_name);
 }
 
 void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt,

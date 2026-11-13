@@ -22,7 +22,7 @@ Lookup tables for the comptime API.
 | `TypeParamCount(ty)` | Count function parameters |
 | `TypeParamAt(ty, i)` | Get function parameter type |
 | `TypeIsVariadic(ty)` | Test variadic function type |
-| `TypeName(ty)` | Get a type name when available — for a tagged struct/union/enum, always the tag (never a typedef alias spelling, even when looked up by one) |
+| `TypeName(ty)` | Get a type name when available — for a tagged struct/union/enum, always the tag (never a typedef alias spelling, even when looked up by one); otherwise the typedef name (`mylong`), else the spelling of a builtin scalar (`unsigned long`), else `NULL` (pointers, arrays, untagged aggregates with no typedef) |
 | `MakePointer(base)` | Create pointer type |
 | `MakeArray(base, len)` | Create array type |
 | `InstantiateType(name, args)` | Instantiate a struct, union, enum or typedef [template](macros-templates.md#instantiating-from-a-handler); `args` is the text inside `@inst(...)` |

@@ -3948,7 +3948,8 @@ static void read_line_marker(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (tok->kind != TK_NUM || tok_lit(tok)->ty->kind != TY_INT)
         error_tok(vm, tok, "invalid line marker");
-    start->file->line_delta = tok_lit(tok)->val - start->line_no;
+    // The number names the line after the directive.
+    start->file->line_delta = tok_lit(tok)->val - start->line_no - 1;
 
     tok                     = tok->next;
     if (tok->kind == TK_EOF)
@@ -6834,13 +6835,13 @@ static bool try_capture_comptime_template(VirtualMachine *vm, Token **tok_ptr) {
     if (r == 0)
         return false;
 
-    // TODO: queued as text, so diagnostics name <comptime-include> (#2046)
     Token *last = def;
     while (last->next != scan.end)
         last = last->next;
-    char *text =
-        arena_format(vm, "#line %d \"%s\"\n%.*s", tok->line_no, tok->file->name,
-                     (int)(last->loc + last->len - tok->loc), tok->loc);
+    char *text = arena_format(
+        vm, "#line %d \"%s\"\n%.*s", tok->line_no + tok->file->line_delta,
+        tok->filename ? tok->filename : tok->file->name,
+        (int)(last->loc + last->len - tok->loc), tok->loc);
     queue_comptime_directive(vm, text);
     *tok_ptr = scan.end;
     return true;

@@ -1885,7 +1885,9 @@ static void checked_conflict_error(VirtualMachine *vm, Type *n, Token *new_tok,
     error_tok(vm, at,
               "conflicting checked-pointer bounds for %s of '%s' (first "
               "declared at %s:%d)",
-              what, name, old_tok->file->name, old_tok->line_no);
+              what, name,
+              old_tok->filename ? old_tok->filename : old_tok->file->name,
+              old_tok->line_no);
 }
 
 // Errors when the two function types spell different bounds for the same

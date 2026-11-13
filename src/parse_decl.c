@@ -128,6 +128,9 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
         else if (ty->kind == TY_ENUM && !type_agg(ty)->enum_tag &&
                  !type_agg(ty)->typedef_name)
             type_agg_mut(vm, ty)->typedef_name = ty->name;
+        else if (ty->kind != TY_STRUCT && ty->kind != TY_UNION &&
+                 ty->kind != TY_ENUM)
+            type_agg_mut(vm, ty)->typedef_name = ty->name;
         assign_scope_ord(vm, ty);
         char *name = get_ident(vm, ty->name);
         check_typedef_redefinition(vm, ty, name);

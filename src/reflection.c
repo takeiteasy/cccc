@@ -578,16 +578,10 @@ bool __builtin_ast_type_is_variadic(Type *ty) {
     return ty->is_variadic;
 }
 
-// #900: struct_union_decl/enum_specifier (src/parse.c) set a fresh tag
-// Type's ->name to the tag token, but a *reference* to an existing tag
-// (e.g. a second function parameter of the same struct type) returns the
-// canonical, shared Type -- and declarator() then overwrites that shared
-// type's ->name with the declarator's own identifier (parameter/variable
-// name), not the tag. #892 added Type.struct_tag/Type.enum_tag to survive
-// that overwrite (see src/cccc.h); the serializer (src/serialize_type.c)
-// already prefers them. Prefer the same fields here so TypeName()/TypeCName()
-// report the real tag instead of whichever declarator last clobbered the shared
-// Type.
+// A declarator overwrites ->name on the shared Type it declares (a variable or
+// parameter name, even on the singleton `int`), so the name comes from the tag
+// or typedef tokens kept in TypeAgg instead. An untagged aggregate or alias
+// copy finds its typedef through ->origin.
 static Token *type_name_token(Type *ty) {
     if (!ty)
         return NULL;
@@ -596,21 +590,63 @@ static Token *type_name_token(Type *ty) {
         return type_agg(ty)->struct_tag;
     if (ty->kind == TY_ENUM && type_agg(ty)->enum_tag)
         return type_agg(ty)->enum_tag;
-    return ty->name;
+    for (Type *t = ty; t; t = t->origin)
+        if (type_agg(t)->typedef_name)
+            return type_agg(t)->typedef_name;
+    return NULL;
+}
+
+// Spelling of an unaliased builtin scalar, NULL for any other type.
+static const char *builtin_type_spelling(VirtualMachine *vm, Type *ty) {
+    bool u = ty->is_unsigned;
+    switch (ty->kind) {
+        case TY_VOID:
+            return "void";
+        case TY_BOOL:
+            return vm->compiler.c_std >= CCCC_STD_C23 ? "bool" : "_Bool";
+        case TY_CHAR:
+            return u ? "unsigned char" : "char";
+        case TY_SHORT:
+            return u ? "unsigned short" : "short";
+        case TY_INT:
+            return u ? "unsigned int" : "int";
+        case TY_LONG:
+            if (ty->is_long_long)
+                return u ? "unsigned long long" : "long long";
+            return u ? "unsigned long" : "long";
+        case TY_FLOAT:
+            return "float";
+        case TY_DOUBLE:
+            return "double";
+        case TY_LDOUBLE:
+            return "long double";
+        case TY_FLOAT16:
+            return "_Float16";
+        case TY_DECIMAL32:
+            return "_Decimal32";
+        case TY_DECIMAL64:
+            return "_Decimal64";
+        case TY_DECIMAL128:
+            return "_Decimal128";
+        default:
+            return NULL;
+    }
 }
 
 CC_BUILTIN_CSTR(__builtin_ast_type_name, 1);
 const char *__builtin_ast_type_name(Type *ty) {
-    Token *name = type_name_token(ty);
-    if (!name)
-        return NULL;
+    VirtualMachine *vm   = __builtin_current_vm;
+    Token          *name = type_name_token(ty);
+    if (!name) {
+        const char *spelling = ty && vm ? builtin_type_spelling(vm, ty) : NULL;
+        return spelling ? arena_strdup(vm, spelling) : NULL;
+    }
 
     // Extract string from token into an arena-allocated buffer -- a shared
     // static buffer would alias across calls (e.g. for callers building a
     // name array across multiple types).
-    VirtualMachine *vm     = __builtin_current_vm;
-    int             len    = name->len;
-    char           *buffer = arena_alloc(&vm->compiler.parser_arena, len + 1);
+    int   len    = name->len;
+    char *buffer = arena_alloc(&vm->compiler.parser_arena, len + 1);
     memcpy(buffer, name->loc, len);
     buffer[len] = '\0';
     return buffer;

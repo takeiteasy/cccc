@@ -632,16 +632,18 @@ bool __builtin_ast_type_is_variadic(Type *ty);
 
 /*! @brief Return the user-visible name of a type, if any.
  * @param ty The type to inspect.
- * @return A freshly-allocated NUL-terminated string, or NULL for anonymous
- * types.
+ * @return A freshly-allocated NUL-terminated string: the tag, else the typedef
+ * name, else the spelling of a builtin scalar ("int", "unsigned long"). NULL
+ * for any other type, such as a pointer, an array or an untagged aggregate
+ * with no typedef.
  * @details Convenience wrapper: TypeName(ty).
  */
 const char *__builtin_ast_type_name(Type *ty);
 
 /*! @brief Return a valid C identifier fragment naming `ty`.
  * @param ty The type to inspect.
- * @return TypeName(ty) for named types, or a builtin spelling ("int",
- *   "double", "ulong", ...) for builtin scalar types, or NULL.
+ * @return A short identifier-safe builtin spelling ("int", "double",
+ *   "ulong", ...) for builtin scalar types, else TypeName(ty), or NULL.
  * @details Convenience wrapper: TypeCName(ty). Intended for naming
  *   generated functions, e.g. sum_<T> from GenerateSum(elem_type).
  */
