@@ -53,8 +53,8 @@ VirtualMachine *__builtin_current_vm = NULL;
 
 // Linking builtins reject a node that would contain itself or repeat in a
 // list; later compiler walks loop or recurse forever on such a cycle.
-static void reflect_link_error_at(VirtualMachine *vm, Token *fallback,
-                                  const char *msg) {
+static noreturn void reflect_link_error_at(VirtualMachine *vm, Token *fallback,
+                                           const char *msg) {
     Token *tok =
         vm->compiler.macro_call_tok ? vm->compiler.macro_call_tok : fallback;
     if (tok)
@@ -62,7 +62,7 @@ static void reflect_link_error_at(VirtualMachine *vm, Token *fallback,
     error("%s", msg);
 }
 
-static void reflect_link_error(VirtualMachine *vm, const char *msg) {
+static noreturn void reflect_link_error(VirtualMachine *vm, const char *msg) {
     reflect_link_error_at(vm, NULL, msg);
 }
 
@@ -72,6 +72,15 @@ static void reflect_null_entry_error(VirtualMachine *vm, const char *what,
                                      int index) {
     char msg[128];
     snprintf(msg, sizeof msg, "%s %d is NULL", what, index + 1);
+    reflect_link_error(vm, msg);
+}
+
+static void reflect_require(VirtualMachine *vm, const void *arg,
+                            const char *what) {
+    if (arg)
+        return;
+    char msg[128];
+    snprintf(msg, sizeof msg, "%s is NULL", what);
     reflect_link_error(vm, msg);
 }
 
@@ -752,16 +761,20 @@ const char *__builtin_ast_type_c_name(Type *ty) {
 CC_BUILTIN(__builtin_ast_make_pointer, 1);
 Type *__builtin_ast_make_pointer(Type *base) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !base)
+    if (!vm)
         return NULL;
+    reflect_require(vm, base, "MakePointer: base type");
     return pointer_to(vm, base);
 }
 
 CC_BUILTIN(__builtin_ast_make_array, 2);
 Type *__builtin_ast_make_array(Type *base, int len) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !base || len < 0)
+    if (!vm)
         return NULL;
+    reflect_require(vm, base, "MakeArray: element type");
+    if (len < 0)
+        reflect_link_error(vm, "MakeArray: length is negative");
     return array_of(vm, base, len);
 }
 
@@ -1757,8 +1770,9 @@ bool __builtin_ast_const_uint_value(Node *node, uint64_t *out) {
 CC_BUILTIN(__builtin_ast_string_literal, 1);
 Node *__builtin_ast_string_literal(const char *str) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !str)
+    if (!vm)
         return NULL;
+    reflect_require(vm, str, "MakeStringLiteral: string");
 
     int len = strlen(str);
 
@@ -1954,8 +1968,10 @@ Node *__builtin_ast_var_ref(const char *name) {
 CC_BUILTIN(__builtin_ast_param_ref, 2);
 Node *__builtin_ast_param_ref(Obj *fn, const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !fn || !name)
+    if (!vm)
         return NULL;
+    reflect_require(vm, fn, "MakeParamRef: function");
+    reflect_require(vm, name, "MakeParamRef: name");
 
     // Find the parameter in the function's params list
     size_t name_len = strlen(name);
@@ -1970,7 +1986,10 @@ Node *__builtin_ast_param_ref(Obj *fn, const char *name) {
         }
     }
 
-    return NULL;
+    char msg[160];
+    snprintf(msg, sizeof msg, "MakeParamRef: '%s' has no parameter '%s'",
+             fn->name, name);
+    reflect_link_error(vm, msg);
 }
 
 // ============================================================================
@@ -1980,8 +1999,10 @@ Node *__builtin_ast_param_ref(Obj *fn, const char *name) {
 CC_BUILTIN(__builtin_ast_binary, 3);
 Node *__builtin_ast_binary(NodeKind op, Node *left, Node *right) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !left || !right)
+    if (!vm)
         return NULL;
+    reflect_require(vm, left, "MakeBinary: left operand");
+    reflect_require(vm, right, "MakeBinary: right operand");
 
     Node *node = alloc_node(vm, op);
     node->lhs  = left;
@@ -1993,8 +2014,9 @@ Node *__builtin_ast_binary(NodeKind op, Node *left, Node *right) {
 CC_BUILTIN(__builtin_ast_unary, 2);
 Node *__builtin_ast_unary(NodeKind op, Node *operand) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !operand)
+    if (!vm)
         return NULL;
+    reflect_require(vm, operand, "MakeUnary: operand");
 
     Node *node = alloc_node(vm, op);
     node->lhs  = operand;
@@ -2004,8 +2026,10 @@ Node *__builtin_ast_unary(NodeKind op, Node *operand) {
 CC_BUILTIN(__builtin_ast_cast, 2);
 Node *__builtin_ast_cast(Node *expr, Type *target_type) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !expr || !target_type)
+    if (!vm)
         return NULL;
+    reflect_require(vm, expr, "MakeCast: expression");
+    reflect_require(vm, target_type, "MakeCast: type");
 
     // A MakeMember/MakeSubscript operand has no type until add_type runs.
     add_type(vm, expr);
@@ -2056,8 +2080,12 @@ Node *__builtin_ast_block(Node **stmts, int count) {
 CC_BUILTIN(__builtin_ast_block_add_stmt, 2);
 Node *__builtin_ast_block_add_stmt(Node *block, Node *stmt) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !block || !stmt || block->kind != ND_BLOCK)
+    if (!vm)
         return NULL;
+    reflect_require(vm, block, "BlockAddStmt: block");
+    reflect_require(vm, stmt, "BlockAddStmt: statement");
+    if (block->kind != ND_BLOCK)
+        reflect_link_error(vm, "BlockAddStmt: block is not a block node");
 
     if (node_in_chain(block->body, stmt))
         reflect_link_error(vm, "statement is already in this block");
@@ -2079,8 +2107,9 @@ Node *__builtin_ast_block_add_stmt(Node *block, Node *stmt) {
 CC_BUILTIN(__builtin_ast_if, 3);
 Node *__builtin_ast_if(Node *cond, Node *then_body, Node *else_body) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !cond)
+    if (!vm)
         return NULL;
+    reflect_require(vm, cond, "MakeIf: condition");
 
     Node *node = alloc_node(vm, ND_IF);
     node_ctl_mut(vm, node)->cond = cond;
@@ -2096,8 +2125,9 @@ void __builtin_macro_error_at(Node *node, const char *fmt, ...);
 CC_BUILTIN(__builtin_ast_switch, 1);
 Node *__builtin_ast_switch(Node *cond) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !cond)
+    if (!vm)
         return NULL;
+    reflect_require(vm, cond, "MakeSwitch: condition");
 
     Node *node         = alloc_node(vm, ND_SWITCH);
     node_ctl_mut(vm, node)->cond         = cond;
@@ -2174,6 +2204,7 @@ Node *__builtin_ast_expr_stmt(Node *expr) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm)
         return NULL;
+    reflect_require(vm, expr, "MakeExprStmt: expression");
 
     Node *node = alloc_node(vm, ND_EXPR_STMT);
     node->lhs  = expr;
@@ -2254,8 +2285,10 @@ static Node *make_local_var_node(VirtualMachine *vm, char *name, Type *ty) {
 CC_BUILTIN(__builtin_ast_local_var, 2);
 Node *__builtin_ast_local_var(const char *name, Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name || !ty)
+    if (!vm)
         return NULL;
+    reflect_require(vm, name, "MakeLocalVar: name");
+    reflect_require(vm, ty, "MakeLocalVar: type");
 
     char *arena_name = arena_format(vm, "%s", name);
     return make_local_var_node(vm, arena_name, ty);
@@ -2264,8 +2297,9 @@ Node *__builtin_ast_local_var(const char *name, Type *ty) {
 CC_BUILTIN(__builtin_ast_local_var_unique, 1);
 Node *__builtin_ast_local_var_unique(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty)
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "MakeLocalVarUnique: type");
 
     // Use the existing gensym to produce a name that can't be captured by
     // user-written code (prefix .L.. is not valid in user identifiers)
@@ -2280,8 +2314,10 @@ Node *__builtin_ast_local_var_unique(Type *ty) {
 CC_BUILTIN(__builtin_ast_assign, 2);
 Node *__builtin_ast_assign(Node *target, Node *value) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !target || !value)
+    if (!vm)
         return NULL;
+    reflect_require(vm, target, "MakeAssign: target");
+    reflect_require(vm, value, "MakeAssign: value");
 
     Node *node = alloc_node(vm, ND_ASSIGN);
     node->lhs  = target;
@@ -2289,12 +2325,8 @@ Node *__builtin_ast_assign(Node *target, Node *value) {
     return node;
 }
 
-CC_BUILTIN(__builtin_ast_member, 2);
-Node *__builtin_ast_member(Node *obj, const char *name) {
-    VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !obj || !name)
-        return NULL;
-
+// NULL when `name` is not a member of `obj`'s struct or union type.
+static Node *member_lookup(VirtualMachine *vm, Node *obj, const char *name) {
     // Ensure lhs type is computed (mirrors struct_ref in parse.c:3796)
     add_type(vm, obj);
 
@@ -2312,7 +2344,7 @@ Node *__builtin_ast_member(Node *obj, const char *name) {
             Node *through   = alloc_node(vm, ND_MEMBER);
             through->lhs    = obj;
             through->member = m;
-            Node *found     = __builtin_ast_member(through, name);
+            Node *found     = member_lookup(vm, through, name);
             if (found)
                 return found;
         }
@@ -2322,6 +2354,20 @@ Node *__builtin_ast_member(Node *obj, const char *name) {
     Node *node   = alloc_node(vm, ND_MEMBER);
     node->lhs    = obj;
     node->member = mem;
+    return node;
+}
+
+CC_BUILTIN(__builtin_ast_member, 2);
+Node *__builtin_ast_member(Node *obj, const char *name) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
+        return NULL;
+    reflect_require(vm, obj, "MakeMember: object");
+    reflect_require(vm, name, "MakeMember: member name");
+    Node *node = member_lookup(vm, obj, name);
+    if (!node)
+        reflect_link_error(vm, "MakeMember: object is not a struct or union "
+                               "with that member");
     return node;
 }
 
@@ -2428,8 +2474,9 @@ static Node *reflect_expand_loop_body(VirtualMachine *vm, Node *node,
 CC_BUILTIN(__builtin_ast_while, 2);
 Node *__builtin_ast_while(Node *cond, Node *body) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !cond)
+    if (!vm)
         return NULL;
+    reflect_require(vm, cond, "MakeWhile: condition");
 
     Node *node = alloc_node(vm, ND_FOR);
     node_ctl_mut(vm, node)->cond = cond;
@@ -2457,8 +2504,9 @@ Node *__builtin_ast_for(Node *init, Node *cond, Node *inc, Node *body) {
 CC_BUILTIN(__builtin_ast_do_while, 2);
 Node *__builtin_ast_do_while(Node *body, Node *cond) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !cond)
+    if (!vm)
         return NULL;
+    reflect_require(vm, cond, "MakeDoWhile: condition");
 
     Node *node = alloc_node(vm, ND_DO);
     reflect_assign_loop_labels(vm, node);
@@ -2480,8 +2528,11 @@ static inline int reflect_align_to(int n, int align) {
 CC_BUILTIN(__builtin_ast_cond, 3);
 Node *__builtin_ast_cond(Node *cond, Node *then_expr, Node *else_expr) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !cond || !then_expr || !else_expr)
+    if (!vm)
         return NULL;
+    reflect_require(vm, cond, "MakeCond: condition");
+    reflect_require(vm, then_expr, "MakeCond: then expression");
+    reflect_require(vm, else_expr, "MakeCond: else expression");
     Node *node = alloc_node(vm, ND_COND);
     node_ctl_mut(vm, node)->cond = cond;
     node_ctl_mut(vm, node)->then = then_expr;
@@ -2509,8 +2560,9 @@ Node *__builtin_ast_null(void) {
 CC_BUILTIN(__builtin_ast_sizeof_type, 1);
 Node *__builtin_ast_sizeof_type(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty)
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "MakeSizeofType: type");
     return __builtin_ast_int_literal(ty->size);
 }
 
@@ -2518,8 +2570,9 @@ Node *__builtin_ast_sizeof_type(Type *ty) {
 CC_BUILTIN(__builtin_ast_alignof_type, 1);
 Node *__builtin_ast_alignof_type(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty)
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "MakeAlignofType: type");
     return __builtin_ast_int_literal(ty->align);
 }
 
@@ -2527,11 +2580,12 @@ Node *__builtin_ast_alignof_type(Type *ty) {
 CC_BUILTIN(__builtin_ast_sizeof_expr, 1);
 Node *__builtin_ast_sizeof_expr(Node *expr) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !expr)
+    if (!vm)
         return NULL;
+    reflect_require(vm, expr, "MakeSizeofExpr: expression");
     add_type(vm, expr);
     if (!expr->ty)
-        return NULL;
+        reflect_link_error(vm, "MakeSizeofExpr: expression has no type");
     return __builtin_ast_int_literal(expr->ty->size);
 }
 
@@ -2542,8 +2596,10 @@ Node *__builtin_ast_sizeof_expr(Node *expr) {
 CC_BUILTIN(__builtin_ast_subscript, 2);
 Node *__builtin_ast_subscript(Node *arr, Node *idx) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !arr || !idx)
+    if (!vm)
         return NULL;
+    reflect_require(vm, arr, "MakeSubscript: array");
+    reflect_require(vm, idx, "MakeSubscript: index");
 
     // Resolve types so we can inspect pointer/array base
     add_type(vm, arr);
@@ -2681,8 +2737,9 @@ static Node *make_gvar_compound_literal(VirtualMachine *vm, Type *ty,
 CC_BUILTIN(__builtin_ast_compound_literal, 3);
 Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty)
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "CompoundLiteral: type");
     reflect_check_no_null(vm, inits, n, "CompoundLiteral: initializer");
     Token *tok = vm->compiler.macro_call_tok;
     Obj   *fn  = vm->compiler.current_fn;
@@ -2736,8 +2793,11 @@ Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n) {
 CC_BUILTIN(__builtin_ast_init_array, 3);
 Node *__builtin_ast_init_array(Type *elem_ty, Node **elems, int n) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !elem_ty || !elems || n <= 0)
+    if (!vm)
         return NULL;
+    reflect_require(vm, elem_ty, "InitArray: element type");
+    if (n <= 0 || !elems)
+        reflect_link_error(vm, "InitArray: needs at least one element");
     Type *arr_ty = array_of(vm, elem_ty, n);
     return __builtin_ast_compound_literal(arr_ty, elems, n);
 }
@@ -2749,10 +2809,17 @@ CC_BUILTIN(__builtin_ast_init_struct, 4);
 Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
                                 int n) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty || n < 0 || (n > 0 && (!fields || !values)))
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "InitStruct: type");
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
-        return NULL;
+        reflect_link_error(vm, "InitStruct: type is not a struct or union");
+    if (n < 0)
+        reflect_link_error(vm, "InitStruct: count is negative");
+    if (n > 0) {
+        reflect_require(vm, fields, "InitStruct: field names");
+        reflect_require(vm, values, "InitStruct: values");
+    }
     reflect_check_no_null(vm, values, n, "InitStruct: value");
     for (int i = 0; i < n; i++) {
         if (!fields[i])
@@ -2932,8 +2999,11 @@ static void reflect_serdes_value(VirtualMachine *vm, SerdesCalls *calls,
 CC_BUILTIN(__builtin_ast_serialize, 3);
 Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty || !expr || !buf)
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "Serialize: type");
+    reflect_require(vm, expr, "Serialize: expression");
+    reflect_require(vm, buf, "Serialize: buffer");
 
     add_type(vm, expr);
     add_type(vm, buf);
@@ -2958,8 +3028,10 @@ Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf) {
 CC_BUILTIN(__builtin_ast_deserialize, 2);
 Node *__builtin_ast_deserialize(Type *ty, Node *buf) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty || !buf)
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "Deserialize: type");
+    reflect_require(vm, buf, "Deserialize: buffer");
 
     add_type(vm, buf);
     Node *tmp = make_local_var_node(vm, reflect_unique_name(vm), ty);
@@ -2989,8 +3061,10 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf) {
 CC_BUILTIN(__builtin_ast_enum_to_string_switch, 2);
 Node *__builtin_ast_enum_to_string_switch(Type *ty, Node *expr) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty || !expr)
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "EnumToString: type");
+    reflect_require(vm, expr, "EnumToString: expression");
 
     add_type(vm, expr);
 
@@ -3021,8 +3095,10 @@ Node *__builtin_ast_enum_to_string_switch(Type *ty, Node *expr) {
 CC_BUILTIN(__builtin_ast_enum_from_string_chain, 2);
 Node *__builtin_ast_enum_from_string_chain(Type *ty, Node *expr) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty || !expr)
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "EnumFromString: type");
+    reflect_require(vm, expr, "EnumFromString: expression");
 
     add_type(vm, expr);
 
@@ -3056,8 +3132,9 @@ Node *__builtin_ast_enum_from_string_chain(Type *ty, Node *expr) {
 CC_BUILTIN(__builtin_ast_make_const, 1);
 Type *__builtin_ast_make_const(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty)
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "MakeConst: type");
     Type *result     = copy_type(vm, ty);
     result->is_const = true;
     return result;
@@ -3067,8 +3144,9 @@ Type *__builtin_ast_make_const(Type *ty) {
 CC_BUILTIN(__builtin_ast_make_volatile, 1);
 Type *__builtin_ast_make_volatile(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty)
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "MakeVolatile: type");
     Type *result        = copy_type(vm, ty);
     result->is_volatile = true;
     return result;
@@ -3114,8 +3192,9 @@ CC_BUILTIN(__builtin_ast_make_func_ptr_type, 3);
 Type *__builtin_ast_make_func_ptr_type(Type *return_ty, Type **param_types,
                                        int nparams) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !return_ty)
+    if (!vm)
         return NULL;
+    reflect_require(vm, return_ty, "MakeFuncPtrType: return type");
 
     Type *copies[16];
     if (nparams > 16)
@@ -3210,8 +3289,10 @@ static bool generated_for_other_input(VirtualMachine *vm, const Obj *obj) {
 CC_BUILTIN(__builtin_ast_function, 2);
 Obj *__builtin_ast_function(const char *name, Type *return_type) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name || !return_type)
+    if (!vm)
         return NULL;
+    reflect_require(vm, name, "MakeFunction: name");
+    reflect_require(vm, return_type, "MakeFunction: return type");
 
     // Check if there's already a forward declaration for this function
     size_t name_len = strlen(name);
@@ -3286,8 +3367,11 @@ static Node *reflect_noop_node(VirtualMachine *vm) {
 CC_BUILTIN(__builtin_ast_publish, 2);
 Node *__builtin_ast_publish(Obj *obj, Token *tok) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !obj || !obj->ty)
+    if (!vm)
         return NULL;
+    reflect_require(vm, obj, "PublishNode: object");
+    if (!obj->ty)
+        reflect_link_error(vm, "PublishNode: object has no type");
     if (!vm->compiler.scope)
         return NULL;
 
@@ -3352,8 +3436,11 @@ Node *__builtin_ast_publish_type(Type *ty, Token *tok) {
 CC_BUILTIN(__builtin_ast_function_add_param, 3);
 void __builtin_ast_function_add_param(Obj *fn, const char *name, Type *type) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !fn || !name || !type)
+    if (!vm)
         return;
+    reflect_require(vm, fn, "FunctionAddParam: function");
+    reflect_require(vm, name, "FunctionAddParam: name");
+    reflect_require(vm, type, "FunctionAddParam: type");
 
     // Create parameter local variable
     Obj *param = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
@@ -3554,8 +3641,10 @@ static Obj *collect_stray_body_local(Node *node, Obj *stray_locals, Obj *fn) {
 CC_BUILTIN(__builtin_ast_function_set_body, 2);
 void __builtin_ast_function_set_body(Obj *fn, Node *body) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !fn || !body)
+    if (!vm)
         return;
+    reflect_require(vm, fn, "FunctionSetBody: function");
+    reflect_require(vm, body, "FunctionSetBody: body");
 
     // #1242: a QuoteLazy() fragment passed directly to FunctionSetBody
     // (rather than spliced into an outer Quote()/QuoteLazy() template) is
@@ -3718,8 +3807,10 @@ void __builtin_ast_function_set_variadic(Obj *fn, bool is_variadic) {
 CC_BUILTIN(__builtin_ast_function_prototype, 2);
 Obj *__builtin_ast_function_prototype(const char *name, Type *return_type) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name || !return_type)
+    if (!vm)
         return NULL;
+    reflect_require(vm, name, "FunctionPrototype: name");
+    reflect_require(vm, return_type, "FunctionPrototype: return type");
 
     size_t name_len = strlen(name);
 
@@ -3786,8 +3877,10 @@ void __builtin_ast_add_build_target_attr(Obj *fn, const char *kind) {
 CC_BUILTIN(__builtin_ast_global_var, 2);
 Obj *__builtin_ast_global_var(const char *name, Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name || !ty)
+    if (!vm)
         return NULL;
+    reflect_require(vm, name, "GlobalVar: name");
+    reflect_require(vm, ty, "GlobalVar: type");
 
     size_t name_len = strlen(name);
 
@@ -6188,8 +6281,9 @@ static Node *copy_node_tree(CopyCtx *cx, Node *n) {
 CC_BUILTIN(__builtin_ast_copy_node, 1);
 Node *__builtin_ast_copy_node(Node *n) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !n)
+    if (!vm)
         return NULL;
+    reflect_require(vm, n, "CopyNode: node");
     CopyCtx cx = {.vm = vm};
     copy_node_check(&cx, n);
     for (int i = 0; i < cx.n_gotos; i++) {
@@ -6313,8 +6407,9 @@ static void reflect_push_typedef_scope(VirtualMachine *vm, const char *name,
 CC_BUILTIN(__builtin_ast_make_struct, 1);
 Type *__builtin_ast_make_struct(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return NULL;
+    reflect_require(vm, name, "MakeStruct: name");
     Type *ty       = struct_type(vm);
     int   name_len = (int)strlen(name);
     type_agg_mut(vm, ty)->struct_tag =
@@ -6329,8 +6424,9 @@ Type *__builtin_ast_make_struct(const char *name) {
 CC_BUILTIN(__builtin_ast_make_union, 1);
 Type *__builtin_ast_make_union(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return NULL;
+    reflect_require(vm, name, "MakeUnion: name");
     Type *ty       = union_type(vm);
     int   name_len = (int)strlen(name);
     type_agg_mut(vm, ty)->struct_tag =
@@ -6347,10 +6443,13 @@ CC_BUILTIN(__builtin_ast_struct_add_field, 3);
 Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
                                      Type *field_type) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty || !name || !field_type)
+    if (!vm)
         return NULL;
+    reflect_require(vm, ty, "StructAddField: struct type");
+    reflect_require(vm, name, "StructAddField: name");
+    reflect_require(vm, field_type, "StructAddField: field type");
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
-        return NULL;
+        reflect_link_error(vm, "StructAddField: type is not a struct or union");
     if (type_holds_by_value(field_type, ty))
         reflect_link_error(vm, "struct would contain itself");
 
@@ -6412,8 +6511,9 @@ Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
 CC_BUILTIN(__builtin_ast_make_enum, 1);
 Type *__builtin_ast_make_enum(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return NULL;
+    reflect_require(vm, name, "MakeEnum: name");
     Type *ty       = enum_type(vm);
     int   name_len = (int)strlen(name);
     type_agg_mut(vm, ty)->enum_tag =
@@ -6470,8 +6570,10 @@ void __builtin_ast_enum_add_constant(Type *ty, const char *name,
 CC_BUILTIN(__builtin_ast_make_typedef, 2);
 Type *__builtin_ast_make_typedef(const char *name, Type *underlying) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name || !underlying)
+    if (!vm)
         return NULL;
+    reflect_require(vm, name, "MakeTypedef: name");
+    reflect_require(vm, underlying, "MakeTypedef: type");
     int name_len = (int)strlen(name);
     Token *name_tok = reflect_make_name_token(vm, name, name_len);
     Type  *ty       = underlying;

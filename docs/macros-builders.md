@@ -2,6 +2,13 @@
 
 Construct functions, globals, locals and initializers programmatically.
 
+A builder given a NULL required argument, a name it cannot find or an input of
+the wrong kind stops the compile with a message naming the builder
+(`MakeBinary: left operand is NULL`). `NULL` stays valid where it means
+"none": `MakeReturn(NULL)`, the else of `MakeIf`, and the parts of `MakeFor`.
+Lookups (`FindType`, `FindGlobal`, `MakeVarRef`) return `NULL` on a miss, so
+check their result before passing it on.
+
 ## Function Generation
 
 Generated functions are `Obj *` values. Create the object, add parameters,
