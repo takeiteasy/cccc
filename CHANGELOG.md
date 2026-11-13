@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a function generated with a `long long` return type (`MakeFunction("f", GetType("long long"))`) agrees with a later `long long f(void);` prototype. It reported `conflicting types`.
 - Fixed: `MakeFuncCall()`, `MakeBlock()` and `NodeList()` report a NULL argument, statement or node (`MakeFuncCall: argument 2 is NULL`) instead of ending the list there, so a failed lookup no longer builds a shorter call. `MakeFuncCall()` also reports a callee that is not a function instead of returning NULL.
 - Fixed: `-c=generated` writes the float-to-integer helper a generated function's cast calls (`(int)(x * 2.0)` called an undeclared `__cccc_f2i64`).
 - Fixed: `-c=generated` writes the template function instances that generated code calls, with the types and bound-parameter constants they use. A generated function that called `twice__int` (from `InstantiateFunction()` or `Quote("@inst(int) twice(5)")`, at file scope or inside a function) was written without the instance, so the host compiler reported `call to undeclared function 'twice__int'`.

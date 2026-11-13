@@ -3978,8 +3978,9 @@ static int write_type_str(Type *ty, char *buf, int bufsize) {
                           ty->is_unsigned ? "unsigned " : "");
             break;
         case TY_LONG:
-            n += snprintf(buf + n, bufsize - n, "%slong",
-                          ty->is_unsigned ? "unsigned " : "");
+            n += snprintf(buf + n, bufsize - n, "%s%s",
+                          ty->is_unsigned ? "unsigned " : "",
+                          ty->is_long_long ? "long long" : "long");
             break;
         case TY_FLOAT:
             n += snprintf(buf + n, bufsize - n, "float");
