@@ -17,6 +17,26 @@ typedef struct {
     Tuple @(long, long) inner;
 } Outer;
 
+Tuple @(char, int) bytes;
+struct PlainSized {
+    char b[(sizeof(bytes.v) + ... + 0)];
+};
+@template(Ts...) struct OnlyMember {
+    char b[(sizeof(bytes.v) + ... + 0)];
+};
+@template(Ts...) struct MixedSized {
+    char b[(sizeof(Ts) + sizeof(bytes.v) + ...)];
+};
+@template(Ts...) union MixedUnion {
+    char b[(sizeof(Ts) + sizeof(bytes.v) + ...)];
+};
+@template(Ts...) struct NestedSized {
+    struct {
+        char b[(sizeof(Ts) * sizeof(bytes.v) + ...)];
+    } in;
+    int k;
+};
+
 static int calls;
 
 static int add0(void) {
@@ -268,4 +288,30 @@ void test_an_ordinary_member_in_a_pack_pattern(void) {
 void test_empty_mixed_packs(void) {
     Tuple @() t;
     AssertEq(none @()(t), 7);
+}
+
+[[cccc::test]]
+void test_member_pack_in_a_plain_struct_body(void) {
+    AssertEq(sizeof(struct PlainSized), 5);
+}
+
+[[cccc::test]]
+void test_member_pack_in_a_struct_template_body(void) {
+    AssertEq(sizeof(OnlyMember @(char)), 5);
+}
+
+[[cccc::test]]
+void test_template_pack_with_member_pack_in_a_struct_body(void) {
+    AssertEq(sizeof(MixedSized @(char, int)), (1 + 1) + (4 + 4));
+}
+
+[[cccc::test]]
+void test_template_pack_with_member_pack_in_a_union_body(void) {
+    AssertEq(sizeof(MixedUnion @(char, int)), 10);
+}
+
+[[cccc::test]]
+void test_template_pack_with_member_pack_in_a_nested_struct(void) {
+    NestedSized @(char, int) n;
+    AssertEq(sizeof(n.in), 1 * 1 + 4 * 4);
 }

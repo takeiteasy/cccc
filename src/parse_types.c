@@ -2452,6 +2452,8 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
             error_tok(vm, tok,
                       "#pragma pack changed inside a struct/union body is "
                       "not supported -- move it outside the declaration");
+        if (vm->compiler.saw_variadic_aggregate)
+            tok = cc_expand_member_packs(vm, tok);
         if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
             StaticAssertRecord *rec = arena_alloc(&vm->compiler.parser_arena,
                                                   sizeof(StaticAssertRecord));

@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `t.v...` expands in a struct or union body (a member's array length or initializer), and a struct or union template pattern may hold a template pack and an instance member pack together: `char b[(sizeof(Ts) + sizeof(g.v) + ...)]`. It stopped with `member pack 'v' must be expanded with '...'`.
 - Fixed: `cccc -E` prints template definitions and instances in their source spelling (`@template(T)`, `@specialize(A)`, `max@(int)(40, 42)`), each on one line, so its output compiles again. It printed the internal `__cccc_template(T)` and split an `@inst` over several lines.
 - Changed: a `CompileError` carries the bare message in `text` (no location, source line or caret) beside the rendered `message`.
 - Fixed: a `Quote()` template can use `@inst`, so a comptime macro can call a function template or declare a template struct (`Quote("@inst(int) max($1, $2)", a, b)`). It was rejected with `expected an expression, found '@'`, and an instance made while expanding a function body was left out of the program (`undefined function: max__int`).

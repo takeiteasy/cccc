@@ -1617,7 +1617,8 @@ static Token *expand_packs(VirtualMachine *vm, Template *t, Token *chain, int n,
     if (!ex.ntoks)
         return chain;
     ex.defer_members        = true;
-    ex.defer_mixed          = t->kind == TMPL_FUNC;
+    ex.defer_mixed =
+        t->kind == TMPL_FUNC || t->kind == TMPL_STRUCT || t->kind == TMPL_UNION;
 
     const TemplateParam *pp = &t->params[t->nparams - 1];
     ex.packs[ex.npacks++]   = (Pack){pp->name->loc, (int)pp->name->len, false};

@@ -53,6 +53,10 @@
 struct Plain {
     int v0, v1;
 };
+Tup @(long, long) pair_obj;
+@template(Ts...) struct MixedBody {
+    char b[(sizeof(Ts) + sizeof(pair_obj.v) + ...)];
+};
 static int pair(int a, int b) {
     return a + b;
 }
@@ -208,6 +212,12 @@ void test_member_pack_without_dots(void) {
 void test_template_pack_and_member_pack_of_different_lengths(void) {
     Tup @(long, long) t = {1, 2};
     mixed @(long, long, long)(t, 1, 2, 3);
+}
+
+[[cccc::test(
+    error = "the packs in one pattern have different lengths (1 and 2)")]]
+void test_struct_body_packs_of_different_lengths(void) {
+    MixedBody @(char) b;
 }
 
 [[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
