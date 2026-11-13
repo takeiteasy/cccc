@@ -2633,6 +2633,7 @@ typedef struct ObjFn {
     long long code_end_addr; // Address after function code in text segment
     Token    *def_begin, *def_end; // source span of a file-scope definition
     Token    *gen_site; // file-scope comptime call that generated this Obj
+    int       gen_input;   // index of the input whose call generated this Obj
     Token    *tmpl_origin; // is_tmpl_inst: start of the @template/@specialize
     // Hot reload (REPL / cc_redefine_function): a redefinition is a fresh Obj
     // whose reload_of is the Obj it replaces. The oldest Obj stays the
@@ -4269,6 +4270,7 @@ typedef struct Compiler {
     PreparseSeed
         *preparse_seeds;         // one per input; NULL without file-scope calls
     PreparseSeed    *parse_seed; // for the next runtime parse(), or NULL
+    int              cur_input;  // input whose calls run or whose text parses
     Scope       *runtime_file_scope;
     Scope       *tmpl_bindings;   // detached scope holding the type parameters
     Scope       *tmpl_anchor;     // scope in which tmpl_bindings is consulted

@@ -3173,6 +3173,13 @@ static bool superseded_by_reload(VirtualMachine *vm, const Obj *obj) {
            (obj_fn(obj)->gen_site || !obj->is_definition);
 }
 
+// Another input's generated object is not this input's to clash with: the
+// linker rejects a clash between external ones, and a static is private.
+static bool generated_for_other_input(VirtualMachine *vm, const Obj *obj) {
+    return obj_fn(obj)->gen_site &&
+           obj_fn(obj)->gen_input != vm->compiler.cur_input;
+}
+
 CC_BUILTIN(__builtin_ast_function, 2);
 Obj *__builtin_ast_function(const char *name, Type *return_type) {
     VirtualMachine *vm = __builtin_current_vm;
@@ -3184,11 +3191,11 @@ Obj *__builtin_ast_function(const char *name, Type *return_type) {
     Obj   *existing = NULL;
 
     Obj   *lists[]  = {vm->compiler.globals, vm->compiler.macro_globals};
-    // TODO: a static function another input's call generated is not a clash
-    // (#2051)
     for (int i = 0; i < 2 && !existing; i++) {
         for (Obj *obj = lists[i]; obj; obj = obj->next) {
             if (i == 0 && superseded_by_reload(vm, obj))
+                continue;
+            if (i == 1 && generated_for_other_input(vm, obj))
                 continue;
             if (obj->is_function && strlen(obj->name) == name_len &&
                 strncmp(obj->name, name, name_len) == 0) {
@@ -3693,6 +3700,8 @@ Obj *__builtin_ast_function_prototype(const char *name, Type *return_type) {
     Obj *lists[] = {vm->compiler.globals, vm->compiler.macro_globals};
     for (int i = 0; i < 2; i++) {
         for (Obj *obj = lists[i]; obj; obj = obj->next) {
+            if (i == 1 && generated_for_other_input(vm, obj))
+                continue;
             if (obj->is_function && strlen(obj->name) == name_len &&
                 strncmp(obj->name, name, name_len) == 0) {
                 return obj;
@@ -3754,6 +3763,15 @@ Obj *__builtin_ast_global_var(const char *name, Type *ty) {
         return NULL;
 
     size_t name_len = strlen(name);
+
+    // An earlier call of this input already drained its globals.
+    for (Obj *obj = vm->compiler.macro_globals; obj; obj = obj->next) {
+        if (!obj->is_function && obj->is_definition &&
+            !generated_for_other_input(vm, obj) && !strcmp(obj->name, name))
+            error("expected unique generated global name, got existing "
+                  "definition '%s'",
+                  name);
+    }
 
     // Reuse an existing forward declaration if present (same logic as
     // __builtin_ast_function).

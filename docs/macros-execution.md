@@ -44,7 +44,7 @@ What a file-scope call declares belongs to its own input file: the types and typ
 | `MakeFunction("made", ...)` | `int made(void);` is needed before a call |
 | An instance of a template both files include | The two instances merge at link time |
 
-Two inputs cannot generate a function of one name, even a `static` one (#2051).
+Generated names follow C linkage. A generated `static` function or variable (`FunctionSetStatic()`, `GlobalVarSetStatic()`) is private to its input, so each input generates its own `helper` and calls reach their own. Two inputs that each generate an external name stop at link time with `redefinition of 'helper'`. One input cannot generate a name twice: `MakeFunction()` and `GlobalVar()` report `expected unique generated function name` (or `global name`).
 
 ### Sharing `#define` macros
 

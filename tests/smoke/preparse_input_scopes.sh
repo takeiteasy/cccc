@@ -173,5 +173,95 @@ for x in p q; do
     } >dup_$x.c
 done
 expect_fail "$CCCC" dup_p.c dup_q.c
-grep -q "existing definition 'helper'" err.txt ||
+grep -q "redefinition of 'helper'" err.txt ||
     fail "no duplicate-name error: $(cat err.txt)"
+
+# Two external globals of one name are a link error as well.
+for x in p q; do
+    cat >dupg_$x.c <<EOS
+@comptime void gen_$x(void) { GlobalVar("counter", GetType("int")); }
+gen_$x();
+EOS
+done
+echo 'int main(void) { return 0; }' >>dupg_p.c
+expect_fail "$CCCC" dupg_p.c dupg_q.c
+grep -q "redefinition of 'counter'" err.txt ||
+    fail "no duplicate-global error: $(cat err.txt)"
+
+# One input cannot generate a name twice.
+cat >twice.c <<'EOS'
+@comptime void gen1(void) { MakeFunction("dup", GetType("int")); }
+@comptime void gen2(void) { MakeFunction("dup", GetType("int")); }
+gen1();
+gen2();
+int main(void) { return 0; }
+EOS
+expect_fail "$CCCC" twice.c
+grep -q "expected unique generated function name" err.txt ||
+    fail "no same-input duplicate error: $(cat err.txt)"
+cat >twiceg.c <<'EOS'
+@comptime void gen1(void) { GlobalVar("g", GetType("int")); }
+@comptime void gen2(void) { GlobalVar("g", GetType("int")); }
+gen1();
+gen2();
+int main(void) { return 0; }
+EOS
+expect_fail "$CCCC" twiceg.c
+grep -q "expected unique generated global name" err.txt ||
+    fail "no same-input duplicate global error: $(cat err.txt)"
+
+# A generated static is private to the input whose call made it.
+cat >s_one.c <<'EOS'
+@comptime void gen(void) {
+    Obj *fn = MakeFunction("helper", GetType("int"));
+    FunctionSetStatic(fn, true);
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));
+}
+gen();
+int main(void) { return helper(); }
+EOS
+expect_exit 42 "$CCCC" s_one.c
+for x in p q; do
+    v=40
+    [ $x = q ] && v=2
+    cat >st_$x.c <<EOS
+@comptime void gen_$x(void) {
+    Obj *fn = MakeFunction("helper", GetType("int"));
+    FunctionSetStatic(fn, true);
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral($v)));
+    Obj *v = GlobalVar("counter", GetType("int"));
+    GlobalVarSetStatic(v, true);
+}
+gen_$x();
+EOS
+done
+echo 'int from_q(void); int main(void) { counter = 40; return helper() + from_q() + counter; }' >>st_p.c
+echo 'int from_q(void) { counter = 2; return counter - 2; }' >>st_q.c
+expect_exit 80 "$CCCC" st_p.c st_q.c
+expect_exit 0 "$CCCC" -c=native -o st_out st_p.c st_q.c
+expect_exit 80 ./st_out
+
+# An external generated function and a static one of the same name.
+cat >mx_p.c <<'EOS'
+@comptime void gen_p(void) {
+    Obj *fn = MakeFunction("helper", GetType("int"));
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(40)));
+}
+gen_p();
+int from_q(void);
+int main(void) { return helper() + from_q(); }
+EOS
+cat >mx_q.c <<'EOS'
+@comptime void gen_q(void) {
+    Obj *fn = MakeFunction("helper", GetType("int"));
+    FunctionSetStatic(fn, true);
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(2)));
+}
+gen_q();
+int from_q(void) { return helper(); }
+EOS
+expect_exit 42 "$CCCC" mx_p.c mx_q.c
+expect_exit 0 "$CCCC" -c=native -o mx_out mx_p.c mx_q.c
+expect_exit 42 ./mx_out
+expect_exit 0 "$CCCC" -c=native -o mx_out2 mx_q.c mx_p.c
+expect_exit 42 ./mx_out2

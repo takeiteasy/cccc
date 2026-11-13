@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: with several input files, each input's file-scope calls may generate a `static` function or variable of the same name as another input's (`MakeFunction("helper", ...)` then `FunctionSetStatic()`). They stopped with `expected unique generated function name, got existing definition 'helper'`. Generated externals of one name are a link error (`redefinition of 'helper'`); one input still cannot generate a name twice.
+- Fixed: a `static` function a file-scope call generates is callable from its input (`undefined function: helper`), and a generated `static` variable is private to its input (two inputs shared one object). `-c=native` renames a generated static that shares a name with another.
+- Fixed: two inputs that each generate an external variable of one name crashed the linker (`Host C crash (SIGSEGV)`); they report `redefinition of 'counter'`.
+
 - Fixed: with several input files, what a file-scope generator call declares stays in its own file. Two inputs that instantiate a template from their calls link into one instance (they stopped with `redefinition of 'twice__int'`), and two different `Box` templates that each instantiate `Box__int` keep their own types (`incompatible redeclaration of struct 'Box__int'`).
 - Changed: a type, typedef or function prototype a file-scope generator call makes is visible in its own input file only. Another input declares a generated function itself (`int made(void);`) and no longer sees a generated typedef.
 - Fixed: a checked-pointer parameter bound that names a file global (`count(g)`) resolves in a file that has a file-scope generator call. It reported `undefined variable 'g'`.

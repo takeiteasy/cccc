@@ -803,7 +803,8 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
         any_real_include_replayed(vm) ? open_libc_handle_for_probe() : NULL;
 
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (obj->is_static || obj->is_macro_generated || obj->name[0] == '.')
+        if (obj->is_static || obj->name[0] == '.' ||
+            (obj->is_macro_generated && !obj_fn(obj)->gen_site))
             continue;
         bool is_defining =
             obj->is_function ? obj_fn(obj)->body != NULL : obj->is_definition;
@@ -814,7 +815,12 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
     }
 
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_static || obj->is_macro_generated || obj->name[0] == '.')
+        // A static a file-scope call generated may share its name with one
+        // another input's call generated, or with an external definition.
+        bool generated = obj->is_macro_generated;
+        if (generated && !obj_fn(obj)->gen_site)
+            continue;
+        if (!obj->is_static || obj->name[0] == '.')
             continue;
         // Only an Obj that actually reaches the output as a definition can
         // collide with another TU's same-named one -- a bodyless static
@@ -840,7 +846,7 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
         if (function_is_header_supplied(vm, ctx, obj))
             continue;
 
-        if (libc_handle && strcmp(obj->name, "main") != 0 &&
+        if (!generated && libc_handle && strcmp(obj->name, "main") != 0 &&
             dlsym(libc_handle, obj->name)) {
             serialize_rename_global(
                 obj, arena_format(vm, "%s__cccc_dup%d", obj->name,
@@ -875,7 +881,10 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
             first->tok && first->tok->file ? first->tok->file->name : NULL;
         const char *this_file =
             obj->tok && obj->tok->file ? obj->tok->file->name : NULL;
-        bool same_file       = files_are_same(first_file, this_file);
+        bool same_file =
+            obj_fn(obj)->gen_site && obj_fn(first)->gen_site
+                ? obj_fn(obj)->gen_input == obj_fn(first)->gen_input
+                : files_are_same(first_file, this_file);
         bool nested_involved = (obj->is_nested && !obj->is_block) ||
                                (first->is_nested && !first->is_block);
         // Same-named instances are from different TUs: one TU has one.

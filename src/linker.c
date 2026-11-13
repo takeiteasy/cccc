@@ -131,6 +131,15 @@ static bool same_template_origin(VirtualMachine *vm, Obj *a, Obj *b) {
                    cc_canonical_path_key(vm, tb->file->name));
 }
 
+// A generated definition has no token of its own: the call that made it is the
+// place to report.
+static void link_error_obj(VirtualMachine *vm, const Obj *obj, char *fmt) {
+    Token *at = obj->tok ? obj->tok : obj_fn(obj)->gen_site;
+    if (at)
+        error_tok(vm, at, fmt, obj->name);
+    error(fmt, obj->name);
+}
+
 Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
     if (!vm || !progs || count <= 0)
         error("cc_link_progs: invalid arguments");
@@ -181,10 +190,9 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                 if (both_def && obj->is_tmpl_inst && existing->is_tmpl_inst) {
                     // One instance per program, however many TUs made it.
                     if (!same_template_origin(vm, obj, existing))
-                        error_tok(vm, obj->tok,
-                                  "conflicting definitions of template "
-                                  "instance '%s'",
-                                  obj->name);
+                        link_error_obj(vm, obj,
+                                       "conflicting definitions of template "
+                                       "instance '%s'");
                 } else if (both_def && obj->is_function && obj->is_gnu_inline &&
                            existing->is_function) {
                     // A GNU inline-only body yields to a real definition,
@@ -195,7 +203,7 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                     hashmap_put(&symbol_map, obj->name, obj);
                 } else if (both_def) {
                     // Both are definitions - error
-                    error_tok(vm, obj->tok, "redefinition of '%s'", obj->name);
+                    link_error_obj(vm, obj, "redefinition of '%s'");
                 } else if (obj_is_def) {
                     // New one is definition, replace declaration
                     hashmap_put(&symbol_map, obj->name, obj);

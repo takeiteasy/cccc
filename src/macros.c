@@ -4008,6 +4008,9 @@ static Token *synthesize_forward_decl_tokens(VirtualMachine *vm, Obj *fn) {
     for (Type *pt = fn->ty->params; pt; pt = pt->next)
         install_tag_alias_for_reparse(vm, pt);
 
+    if (fn->is_static)
+        p += snprintf(p, end - p, "static ");
+
     // Return type
     p += write_type_str(fn->ty->return_ty, p, (int)(end - p));
 
@@ -4055,7 +4058,7 @@ static Token *synthesize_global_decl_tokens(VirtualMachine *vm, Obj *var) {
     char *p    = buf;
     char *end  = buf + sizeof(buf) - 2;
 
-    p         += snprintf(p, end - p, "extern ");
+    p          += snprintf(p, end - p, var->is_static ? "static " : "extern ");
 
     // #18: see synthesize_forward_decl_tokens's identical call.
     install_tag_alias_for_reparse(vm, var->ty);
@@ -4412,6 +4415,8 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
                             Obj *next_obj = o->next;
                             cc_record_emit_object(vm, o);
                             obj_fn_mut(vm, o)->gen_site = tok;
+                            obj_fn_mut(vm, o)->gen_input =
+                                vm->compiler.cur_input;
                             o->next = vm->compiler.macro_globals;
                             vm->compiler.macro_globals = o;
                             o                          = next_obj;
@@ -4730,6 +4735,7 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens,
         seed->scope->next               = root;
         vm->compiler.scope              = seed->scope;
         vm->compiler.runtime_file_scope = seed->scope;
+        vm->compiler.cur_input          = fi;
         Obj *generated_before           = vm->compiler.macro_globals;
         if (vm->compiler.saw_templates)
             register_input_templates(vm, fi);

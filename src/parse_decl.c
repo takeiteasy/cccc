@@ -535,6 +535,23 @@ static void merge_fn_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty,
         found->visible_ty = fn->ty;
 }
 
+// The prototype or declaration synthesized for a static object this input's
+// call generated names that object itself: a static is not found by name once
+// another input generated one too.
+static Obj *generated_static_for_decl(VirtualMachine *vm, const Token *name,
+                                      bool        is_function,
+                                      const char *synth_file) {
+    if (!name->file || strcmp(name->file->name, synth_file))
+        return NULL;
+    for (Obj *o = vm->compiler.macro_globals; o; o = o->next)
+        if (o->is_static && o->is_function == is_function &&
+            obj_fn(o)->gen_input == vm->compiler.cur_input &&
+            strlen(o->name) == (size_t)name->len &&
+            !strncmp(o->name, name->loc, (size_t)name->len))
+            return o;
+    return NULL;
+}
+
 static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
                                        DeclName dn, VarAttr *attr, Token *tok) {
     if (!dn.tok)
@@ -596,6 +613,10 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
             obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
         merge_redeclared_fn_type(vm, fn, found.visible_ty, ty, scoped, name_str,
                                  dn.tok->len);
+    } else if (attr->is_static &&
+               (fn = generated_static_for_decl(vm, dn.tok, true,
+                                               "<inline-macro-fwd>"))) {
+        push_scope(vm, name_str, dn.tok->len)->var = fn;
     } else {
         fn                = new_gvar_at(vm, dn.tok, ty);
         fn->is_function   = true;
@@ -916,6 +937,10 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
         merge_redeclared_fn_type(vm, fn, found.visible_ty, ty, scoped, name_str,
                                  dn.tok->len);
+    } else if (!defines_body && attr->is_static &&
+               (fn = generated_static_for_decl(vm, dn.tok, true,
+                                               "<inline-macro-fwd>"))) {
+        push_scope(vm, name_str, dn.tok->len)->var = fn;
     } else {
         fn                = new_gvar_at(vm, dn.tok, ty);
         fn->is_function   = true;
@@ -1598,14 +1623,22 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
         // codegen. (Global variable references are offset-based, unlike
         // function calls which are patched by name, so both the scope and
         // codegen must agree on the same Obj.)
-        if (attr->is_extern && vm->compiler.macro_globals &&
+        bool synth_static =
+            attr->is_static &&
+            generated_static_for_decl(vm, dn.tok, false, "<inline-macro-gvar>");
+        if ((attr->is_extern || synth_static) && vm->compiler.macro_globals &&
             !hashmap_get(&vm->compiler.global_decl_map, var_name)) {
+            // This input's own object, else any input's extern one.
             Obj *mg = NULL;
             for (Obj *o = vm->compiler.macro_globals; o; o = o->next) {
                 if (!o->is_function && (int)strlen(o->name) == var_name_len &&
                     strncmp(o->name, var_name, var_name_len) == 0) {
-                    mg = o;
-                    break;
+                    if (obj_fn(o)->gen_input == vm->compiler.cur_input) {
+                        mg = o;
+                        break;
+                    }
+                    if (!mg && !synth_static && !o->is_static)
+                        mg = o;
                 }
             }
             if (mg) {

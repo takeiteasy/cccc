@@ -3413,6 +3413,7 @@ int main(int argc, const char *argv[]) {
             cc_leave_top_file_scope(&vm);
         vm.compiler.opencl     = input_opencl[i];
         vm.compiler.parse_seed = cc_preparse_seed(&vm, i);
+        vm.compiler.cur_input  = i;
         input_progs[i]         = cc_parse(&vm, input_tokens[i]);
         // #999: parse() returning NULL is not on its own a failure -- its
         // own comment says outright it "returns NULL when no new globals
