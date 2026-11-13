@@ -2142,10 +2142,20 @@ static void node_scan_f2i_native(Node *node, F2ISynthNeed *need) {
     node_scan_f2i_native(node->next, need);
 }
 
-static void serialize_synth_f2i_helpers(FILE *f, Obj *prog) {
+// -c=generated emits the macro-generated objects and the template instances
+// they reach.
+static bool generated_only_skips(bool generated_only, SerializeContext *ctx,
+                                 Obj *obj) {
+    return generated_only && !obj->is_macro_generated &&
+           !obj_vec_contains(&ctx->tmpl_insts, obj);
+}
+
+static void serialize_synth_f2i_helpers(FILE *f, SerializeContext *ctx,
+                                        Obj *prog, bool generated_only) {
     F2ISynthNeed need = {0};
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj_fn(obj)->body)
+        if (!obj->is_function || !obj_fn(obj)->body ||
+            generated_only_skips(generated_only, ctx, obj))
             continue;
         node_scan_f2i_native(obj_fn(obj)->body, &need);
     }
@@ -5654,14 +5664,6 @@ static void serialize_feature_macros(FILE *f, VirtualMachine *vm) {
 #endif
 }
 
-// -c=generated emits the macro-generated objects and the template instances
-// they reach.
-static bool generated_only_skips(bool generated_only, SerializeContext *ctx,
-                                 Obj *obj) {
-    return generated_only && !obj->is_macro_generated &&
-           !obj_vec_contains(&ctx->tmpl_insts, obj);
-}
-
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                           bool generated_only, bool emit_test_harness,
                           bool no_emit_tests) {
@@ -5892,6 +5894,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         if (printed_any)
             fprintf(f, "\n");
 
+        serialize_synth_f2i_helpers(f, &ctx, prog, true);
         serialize_type_defs_for_owner(f, &ctx, NULL);
         serialize_threaded_shims(f, vm, prog, true); // #1368, #1394
         serialize_block_preamble(f, vm, &ctx, prog);
@@ -6061,8 +6064,6 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             if (inst->is_function && obj_fn(inst)->body)
                 serialize_function(f, vm, &ctx, inst);
         }
-        // TODO: serialize_synth_f2i_helpers() is not called here, so a
-        // generated float-to-int cast calls an undeclared __cccc_f2i64 (#2055).
         serialize_omp_lock_shims(f, vm, prog, true); // #1368
         serialize_type_stats_report(&ctx);           // #1283
         serialize_type_index_reset();                // #1283
@@ -6547,7 +6548,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // unconditionally (see serialize_expr's ND_CAST case), so
         // --emit-cccc output needs them defined too, or it calls an
         // undefined function.
-        serialize_synth_f2i_helpers(f, prog);
+        serialize_synth_f2i_helpers(f, &ctx, prog, false);
         // #1117: same unconditional-on-emit_cccc placement (#1068
         // reasoning) -- the bundled complex.h/tgmath.h macros expand plain
         // spelled accessors to cccc-internal names that need host-side
