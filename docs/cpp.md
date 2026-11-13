@@ -44,7 +44,9 @@ C++ checks non-dependent names at definition; CCCC checks everything at instanti
 An instance is an ordinary C name, so the generated code is usable from C, from other tools and from derive attributes:
 
 ```c
-@template(T) @equals struct Cell { T a, b; };
+@template(T)
+@equals
+struct Cell { T a, b; };
 @inst(int) Cell x = {1, 2}, y = {1, 2};
 _Bool same = Cell__int_equals(&x, &y);     // name derived from the instance
 ```
@@ -101,7 +103,9 @@ A method or operator written in a struct template's body belongs to every instan
     T dot(const struct Vec2 *self, const struct Vec2 *o) { return self->x * o->x + self->y * o->y; }
     struct Vec2 operator-(struct Vec2 a) { return (struct Vec2){-a.x, -a.y}; }
 };
-@template(T) [[cccc::operator(+)]] @inst(T) Vec2 vadd(@inst(T) Vec2 a, @inst(T) Vec2 b) {
+@template(T)
+[[cccc::operator(+)]]
+@inst(T) Vec2 vadd(@inst(T) Vec2 a, @inst(T) Vec2 b) {
     return (@inst(T) Vec2){a.x + b.x, a.y + b.y};
 }
 ```
@@ -156,7 +160,9 @@ C++ generates copy, move and destructor members implicitly, and `= default` requ
 | Serialisation | Library | `@to_json`, `@from_json`, `@serialize`, ... |
 
 ```c
-@equals @compare @ctor
+@equals
+@compare
+@ctor
 struct Version { int major, minor; };
 
 struct Version a = Version_new(1, 2), b = Version_new(1, 3);

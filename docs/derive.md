@@ -103,7 +103,9 @@ pointees themselves. `T_serialize_size` gives the size to allocate, and
 `T_serialize` returns the bytes written:
 
 ```c
-@serialize @deserialize @destroy
+@serialize
+@deserialize
+@destroy
 struct Config { int n; char *host @owned; int *ports @owned("n"); };
 
 unsigned long size = Config_serialize_size(&cfg);

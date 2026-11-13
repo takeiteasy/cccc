@@ -56,7 +56,9 @@ An `@owned` member (see [Owned memory](derive-owned.md#owned-memory)) is written
 content, and `T_from_json` allocates it with `malloc`:
 
 ```c
-@destroy @to_json @from_json
+@destroy
+@to_json
+@from_json
 struct Doc {
     char *title @owned;
     int   n;

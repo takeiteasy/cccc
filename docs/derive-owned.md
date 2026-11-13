@@ -12,7 +12,8 @@ Unmarked members are copied as they are, so a plain pointer is shared.
 #include <cccc/derive.h>
 #include <stdlib.h>
 
-@clone @destroy
+@clone
+@destroy
 struct Doc {
     char *title @owned;          // heap C string
     int   n;
@@ -52,12 +53,16 @@ lets two structs own pointers to each other. The forward-declared struct needs
 ```c
 struct Leaf;
 
-@clone @destroy struct Branch {
+@clone
+@destroy
+struct Branch {
     struct Leaf *leaves @owned("n");
     int          n;
 };
 
-@clone @destroy struct Leaf {
+@clone
+@destroy
+struct Leaf {
     struct Branch *up @owned;
 };
 ```

@@ -167,19 +167,33 @@ A partial specialization names its leading arguments, then a pack variable that 
 
 ```c
 @template(Ts...) struct Tuple { Ts... v; };
-@template(T, Ts...) @specialize(T *, Ts...) struct Tuple { T *head; Ts... tail; };  // first element a pointer
-@template(Ts...) @specialize(int, Ts...) struct Tuple { int first; };               // first element int
-@template(T) @specialize(T *) struct Tuple { T *only; };                            // exactly one pointer
-@template(T, int... Ms) @specialize(T, 0, Ms...) struct Nd { int rest[sizeof...(Ms) + 1]; };
+@template(T, Ts...)
+@specialize(T *, Ts...)
+struct Tuple { T *head; Ts... tail; };  // first element a pointer
+@template(Ts...)
+@specialize(int, Ts...)
+struct Tuple { int first; };  // first element int
+@template(T)
+@specialize(T *)
+struct Tuple { T *only; };  // exactly one pointer
+@template(T, int... Ms)
+@specialize(T, 0, Ms...)
+struct Nd { int rest[sizeof...(Ms) + 1]; };
 ```
 
 An element pattern before the `...` makes every argument of the tail match it, and the pack variable takes what each one matched (`Ts` is `int, char` for `int *, char *`).
 
 ```c
 @template(Ts...) struct Ptrs { char kind[1]; };
-@template(Ts...) @specialize(Ts *...) struct Ptrs { Ts... pointee; };            // every argument a pointer
-@template(Ts...) @specialize(Ts **...) struct Ptrs { Ts... pointee; };           // narrower: every argument a pointer to pointer
-@template(T, Ts...) @specialize(T, Pair@(T, Ts)...) struct Links { Ts... rest; }; // a leading variable may repeat
+@template(Ts...)
+@specialize(Ts *...)
+struct Ptrs { Ts... pointee; };  // every argument a pointer
+@template(Ts...)
+@specialize(Ts **...)
+struct Ptrs { Ts... pointee; };  // narrower: every argument a pointer to pointer
+@template(T, Ts...)
+@specialize(T, Pair@(T, Ts)...)
+struct Links { Ts... rest; }; // a leading variable may repeat
 ```
 
 A pack variable may appear more than once. It then matches only when every use takes the same arguments.
@@ -187,7 +201,9 @@ A pack variable may appear more than once. It then matches only when every use t
 ```c
 @template(Ts...) struct Pack { Ts... v; };
 @template(Ts...) struct Same { char kind; };
-@template(Ts...) @specialize(Pack@(Ts...), Ts...) struct Same { char kind[2]; };
+@template(Ts...)
+@specialize(Pack@(Ts...), Ts...)
+struct Same { char kind[2]; };
 
 Same@(Pack@(int, char), int, char) a;   // the partial: both uses are (int, char)
 Same@(Pack@(int, char), int, long) b;   // the primary: they differ

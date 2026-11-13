@@ -10,7 +10,9 @@ them, sets its inclusive bounds. `@validate` checks them; `@clamp` enforces them
 ```c
 typedef enum { LOW = 1, MID, HIGH } Level;
 
-@validate @clamp struct Cfg {
+@validate
+@clamp
+struct Cfg {
     int      port  @range(1, 65535);
     unsigned retry @range(0, MAX_RETRY);
     Level    lvl   @range(LOW, HIGH);
@@ -40,8 +42,12 @@ struct's own `T_validate` / `T_clamp`, found by the struct's tag with the same
 prefix, so the nested struct needs the attribute and is declared first:
 
 ```c
-@validate @clamp struct Inner { int a @range(0, 9); };
-@validate @clamp struct Outer {
+@validate
+@clamp
+struct Inner { int a @range(0, 9); };
+@validate
+@clamp
+struct Outer {
     struct Inner one;
     struct Inner many[2];    // Outer_validate checks all three
 };

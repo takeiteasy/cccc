@@ -221,13 +221,23 @@ A specialization in a header applies in every file that includes it.
 
 ```c
 @template(T) struct Vec { T *data; size_t len; };
-@template(T) @specialize(T *) struct Vec { T **slots; size_t n; };         // any pointer
-@template(T) @specialize(const T *) struct Vec { const T **ro; };          // a narrower pattern
+@template(T)
+@specialize(T *)
+struct Vec { T **slots; size_t n; };  // any pointer
+@template(T)
+@specialize(const T *)
+struct Vec { const T **ro; };  // a narrower pattern
 
 @template(T, int N) struct Arr { T v[N]; };
-@template(T) @specialize(T, 4) struct Arr { T a, b, c, d; };               // one length
-@template(int N) @specialize(char, N) struct Arr { char text[N + 1]; };    // N bound by the argument
-@template(T) @specialize(T, T) struct Two { T both[2]; };                  // repeated variable
+@template(T)
+@specialize(T, 4)
+struct Arr { T a, b, c, d; };  // one length
+@template(int N)
+@specialize(char, N)
+struct Arr { char text[N + 1]; };  // N bound by the argument
+@template(T)
+@specialize(T, T)
+struct Two { T both[2]; };  // repeated variable
 
 @inst(char *) Vec p;     // the T * partial: struct Vec__char_ptr
 @inst(const char *) Vec q;  // the const T * partial
@@ -237,11 +247,19 @@ A pattern may name an instance of a struct, union or enum template, and an array
 
 ```c
 @template(A, B) struct Pair { A a; B b; };
-@template(T, U) @specialize(Pair@(T, U)) struct Vec { T first; U second; };  // any Pair
-@template(T) @specialize(Pair@(T, T)) struct Vec { T both[2]; };            // a Pair of one type
+@template(T, U)
+@specialize(Pair@(T, U))
+struct Vec { T first; U second; };  // any Pair
+@template(T)
+@specialize(Pair@(T, T))
+struct Vec { T both[2]; };  // a Pair of one type
 
-@template(T, int N) @specialize(T[N]) struct Box { T items[N]; };           // any array length
-@template(T, int N) @specialize(T[N], N) struct Arr { T v[N]; };            // length and N agree
+@template(T, int N)
+@specialize(T[N])
+struct Box { T items[N]; };  // any array length
+@template(T, int N)
+@specialize(T[N], N)
+struct Arr { T v[N]; };  // length and N agree
 
 Vec@(Pair@(int, float)) a;   // the first partial
 Vec@(Pair@(int, int)) b;     // the second: it is the more specialised
@@ -327,7 +345,9 @@ A function instance whose arguments include a type declared inside a function is
 Attributes written on a template run on each instance, after instantiation. The generated functions carry the mangled name:
 
 ```c
-@template(T) @equals struct Cell { T a; T b; };
+@template(T)
+@equals
+struct Cell { T a; T b; };
 
 @inst(int) Cell x = {1, 2}, y = {1, 2};
 _Bool same = Cell__int_equals(&x, &y);
@@ -351,10 +371,14 @@ A function template with `[[cccc::operator(sym)]]` is instantiated from the oper
 ```c
 @template(T) struct Vec2 { T x, y; };
 
-@template(T) [[cccc::operator(+)]] @inst(T) Vec2 vadd(@inst(T) Vec2 a, @inst(T) Vec2 b) {
+@template(T)
+[[cccc::operator(+)]]
+@inst(T) Vec2 vadd(@inst(T) Vec2 a, @inst(T) Vec2 b) {
     return (@inst(T) Vec2){a.x + b.x, a.y + b.y};
 }
-@template(T) [[cccc::operator(*)]] @inst(T) Vec2 vscale(@inst(T) Vec2 a, T s) {
+@template(T)
+[[cccc::operator(*)]]
+@inst(T) Vec2 vscale(@inst(T) Vec2 a, T s) {
     return (@inst(T) Vec2){a.x * s, a.y * s};
 }
 
