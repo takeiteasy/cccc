@@ -2438,6 +2438,7 @@ static void link_hidden(VirtualMachine *vm, Obj *obj, const char *mangled,
                                         (int)p->name->len, p->name->loc)
                          : arena_format(vm, "__cccc_tp_%s__%.*s_%d", mangled,
                                         (int)p->name->len, p->name->loc, elem);
+    obj->is_tmpl_hidden = true;
     link_gvar(vm, obj);
 }
 

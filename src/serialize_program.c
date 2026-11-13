@@ -5654,6 +5654,14 @@ static void serialize_feature_macros(FILE *f, VirtualMachine *vm) {
 #endif
 }
 
+// -c=generated emits the macro-generated objects and the template instances
+// they reach.
+static bool generated_only_skips(bool generated_only, SerializeContext *ctx,
+                                 Obj *obj) {
+    return generated_only && !obj->is_macro_generated &&
+           !obj_vec_contains(&ctx->tmpl_insts, obj);
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                           bool generated_only, bool emit_test_harness,
                           bool no_emit_tests) {
@@ -5710,8 +5718,10 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     serialize_type_index_reset();
     same_type_memo_clear();
     collect_deferred_static_labels(vm, prog, &ctx); // #1044
+    if (generated_only)
+        collect_generated_tmpl_insts(prog, &ctx.tmpl_insts);
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (generated_only && !obj->is_macro_generated)
+        if (generated_only_skips(generated_only, &ctx, obj))
             continue;
         if (obj->is_function && !obj->is_definition && !obj_fn(obj)->body)
             continue;
@@ -6006,9 +6016,11 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 if (obj_fn(obj)->body) {
                     ObjVec needed = {0};
                     collect_generated_call_targets(obj_fn(obj)->body, &needed);
+                    collect_tmpl_refs(obj_fn(obj)->body, &needed);
                     for (int i = 0; i < needed.len; i++) {
                         Obj *callee = needed.data[i];
-                        if (obj_vec_contains(&declared, callee))
+                        if (!callee->is_function ||
+                            obj_vec_contains(&declared, callee))
                             continue;
                         serialize_function_signature(f, &ctx, callee, true);
                         fprintf(f, ";\n");
@@ -6031,6 +6043,26 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 serialize_global_var(f, vm, &ctx, obj);
             }
         }
+        // Template instances generated code reaches. Prototypes first so an
+        // instance can call another, then the constants, then the bodies.
+        for (int i = 0; i < ctx.tmpl_insts.len; i++) {
+            Obj *inst = ctx.tmpl_insts.data[i];
+            if (!inst->is_function || obj_vec_contains(&declared, inst))
+                continue;
+            serialize_function_signature(f, &ctx, inst, true);
+            fprintf(f, ";\n\n");
+            obj_vec_push(&declared, inst);
+        }
+        for (int i = 0; i < ctx.tmpl_insts.len; i++)
+            if (!ctx.tmpl_insts.data[i]->is_function)
+                serialize_global_var(f, vm, &ctx, ctx.tmpl_insts.data[i]);
+        for (int i = 0; i < ctx.tmpl_insts.len; i++) {
+            Obj *inst = ctx.tmpl_insts.data[i];
+            if (inst->is_function && obj_fn(inst)->body)
+                serialize_function(f, vm, &ctx, inst);
+        }
+        // TODO: serialize_synth_f2i_helpers() is not called here, so a
+        // generated float-to-int cast calls an undeclared __cccc_f2i64 (#2055).
         serialize_omp_lock_shims(f, vm, prog, true); // #1368
         serialize_type_stats_report(&ctx);           // #1283
         serialize_type_index_reset();                // #1283
@@ -6038,6 +6070,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         free(declared.data);
         free(ctx.seen.data);
         free(ctx.defs.data);
+        free(ctx.tmpl_insts.data);
         hashmap_deinit(&ctx.collected_aggs);
         free(ctx.tags);
         free(ctx.typedefs);
@@ -6640,7 +6673,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // Redundant for the (common) non-forward-referencing case, but a
     // duplicate `extern`/tentative-`static` declaration is always valid C.
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (generated_only && !obj->is_macro_generated)
+        if (generated_only_skips(generated_only, &ctx, obj))
             continue;
         if (obj->is_function || obj->name[0] == '.')
             continue;
@@ -6702,7 +6735,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     {
         ObjVec reloc_fns = {0};
         for (Obj *obj = prog; obj; obj = obj->next) {
-            if (generated_only && !obj->is_macro_generated)
+            if (generated_only_skips(generated_only, &ctx, obj))
                 continue;
             if (obj->is_function || obj->name[0] == '.')
                 continue;
@@ -6764,7 +6797,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
 
     // Serialize global variables
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (generated_only && !obj->is_macro_generated)
+        if (generated_only_skips(generated_only, &ctx, obj))
             continue;
         if (!obj->is_function)
             serialize_global_var(f, vm, &ctx, obj);
@@ -6773,7 +6806,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // Serialize function prototypes before bodies so generated C is valid when
     // a function is called before its definition appears in the Obj list.
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (generated_only && !obj->is_macro_generated)
+        if (generated_only_skips(generated_only, &ctx, obj))
             continue;
         if (!obj->is_function)
             continue;
@@ -6879,7 +6912,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
 
     // Serialize functions
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (generated_only && !obj->is_macro_generated)
+        if (generated_only_skips(generated_only, &ctx, obj))
             continue;
         if (!obj->is_function)
             continue;
@@ -6903,6 +6936,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
 
     free(ctx.seen.data);
     free(ctx.defs.data);
+    free(ctx.tmpl_insts.data);
     hashmap_deinit(&ctx.collected_aggs);
     free(ctx.tags);
     free(ctx.typedefs);

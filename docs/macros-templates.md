@@ -205,6 +205,26 @@ int main(void) { Box @(int) b = {1}; return box_size() + b.value; }
 
 Each input file has its own instances. Two inputs that include one template and instantiate it from their calls link into one instance; two different templates of one name that make the same instance name are an error at link time, as without file-scope calls.
 
+### In `-c=generated` output
+
+`-c=generated` writes the template function instances that generated code calls, each once as a `static` function after the generated code. The types in their signatures and the constants of bound float or pointer parameters come with them. An instance generated code never reaches stays out.[^instances]
+
+```c
+@template(T) T twice(T a) { return a + a; }
+
+@comptime void gen(void) {
+    Obj *ten = MakeFunction("ten", GetType("int"));
+    FunctionSetBody(ten, MakeReturn(Quote("@inst(int) twice(5)")));
+}
+gen();
+```
+
+```sh
+cccc -c=generated -o ten.gen.c ten.c   # ten.gen.c defines ten() and static twice__int()
+```
+
 [^filescope]: `Quote` with `@inst` follows the same rules.
+
+[^instances]: The instances are `static`, so C linked alongside the output cannot call them. An instance body that calls an ordinary function of the input needs that function from the input's own code, as generated code does.
 
 [^with]: Without the wrapper, the generated function's locals would be built while the caller is the active function context.

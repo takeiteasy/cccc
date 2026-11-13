@@ -2048,6 +2048,47 @@ void collect_generated_call_targets(Node *node, ObjVec *out) {
     collect_generated_call_targets(node->next, out);
 }
 
+// Walks a body for references to template function instances and the hidden
+// constants of their bound parameters.
+void collect_tmpl_refs(Node *node, ObjVec *out) {
+    if (!node)
+        return;
+
+    if (node->kind == ND_VAR && node->var &&
+        (node->var->is_tmpl_hidden ||
+         (node->var->is_function && node->var->is_tmpl_inst)))
+        obj_vec_push(out, node->var);
+
+    collect_tmpl_refs(node->lhs, out);
+    collect_tmpl_refs(node->rhs, out);
+    collect_tmpl_refs(node_ctl(node)->cond, out);
+    collect_tmpl_refs(node_ctl(node)->then, out);
+    collect_tmpl_refs(node_ctl(node)->els, out);
+    collect_tmpl_refs(node_ctl(node)->init, out);
+    collect_tmpl_refs(node_ctl(node)->inc, out);
+    collect_tmpl_refs(node->body, out);
+    collect_tmpl_refs(node->args, out);
+
+    collect_tmpl_refs(node->next, out);
+}
+
+// Every template instance (and hidden constant) that macro-generated code
+// reaches, directly or through another instance. -c=generated emits these
+// alongside the generated objects.
+void collect_generated_tmpl_insts(Obj *prog, ObjVec *out) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_macro_generated)
+            continue;
+        if (obj->is_function)
+            collect_tmpl_refs(obj_fn(obj)->body, out);
+    }
+    // The vector grows while it is walked, so an instance's own references
+    // join the closure.
+    for (int i = 0; i < out->len; i++)
+        if (out->data[i]->is_function)
+            collect_tmpl_refs(obj_fn(out->data[i])->body, out);
+}
+
 // #1031: defined near serialize_type_defs_for_owner (which shares
 // type_layout_is_host_owned's own from_include-suppression logic via
 // type_def_is_from_include_suppressed), forward-declared here so

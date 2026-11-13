@@ -2799,6 +2799,8 @@ struct Obj {
     bool is_gnu_inline   : 1; // GNU extern-inline definition: emitted only if
                               // called
     bool is_tmpl_inst    : 1; // function template instance (ObjFn.tmpl_origin)
+    bool is_tmpl_hidden  : 1; // constexpr object of a bound float/pointer
+                              // template parameter
     bool is_kernel_thunk : 1; // outlined cccc_launch body; a call to it
                               // serializes as __cccc_kernel_launch
     bool is_kernel_local_obj : 1; // [[cccc::local]] object in a kernel entry's

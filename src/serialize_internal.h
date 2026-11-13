@@ -10,6 +10,12 @@
 #include "./internal.h"
 
 typedef struct {
+    Obj **data;
+    int   len;
+    int   cap;
+} ObjVec;
+
+typedef struct {
     Type **data;
     int    len;
     int    cap;
@@ -318,13 +324,10 @@ typedef struct {
     int         patches_len;
     int         patches_cap;
     int         patch_seq;
+    // -c=generated: template instances and their hidden constants that
+    // generated code reaches.
+    ObjVec tmpl_insts;
 } SerializeContext;
-
-typedef struct {
-    Obj **data;
-    int   len;
-    int   cap;
-} ObjVec;
 
 // ========== Cross-file forward declarations ==========
 //
@@ -399,6 +402,8 @@ TypeName *find_generated_uncaptured_typedef(SerializeContext *ctx,
                                             Type             *ty); // #1241
 unsigned __int128 decode_wide_digits(const char *digits, int base);
 void collect_generated_call_targets(Node *node, ObjVec *out);
+void collect_tmpl_refs(Node *node, ObjVec *out);
+void collect_generated_tmpl_insts(Obj *prog, ObjVec *out);
 void collect_obj_types(SerializeContext *ctx, Obj *obj);
 void collect_static_assert_types(SerializeContext *ctx, Node *cond); // #1167
 void collect_scope_names(SerializeContext *ctx, VirtualMachine *vm);
