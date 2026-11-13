@@ -2519,27 +2519,6 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
         reject_stray_param_attrs(vm);
         run_pending_member_attrs(vm);
         run_pending_methods(vm);
-        // _Static_assert or static_assert (C23) - check before declspec
-        if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
-            Token *decl_tok = tok;
-            Node  *cond     = NULL;
-            char  *msg      = NULL;
-            int    msg_len  = 0;
-            tok = static_assert_decl(vm, tok, &cond, &msg, &msg_len);
-            // #1098: file scope leaves no Node to stash onto (unlike the
-            // block-scope arm in stmt()), so keep it in its own list on
-            // Compiler for serialize_program.c to re-emit -- see
-            // StaticAssertRecord's own comment.
-            StaticAssertRecord *rec     = calloc(1, sizeof(StaticAssertRecord));
-            rec->cond                   = cond;
-            rec->msg                    = msg;
-            rec->msg_len                = msg_len;
-            rec->tok                    = decl_tok;
-            rec->next                   = vm->compiler.static_asserts;
-            vm->compiler.static_asserts = rec;
-            continue;
-        }
-
         if (equal(tok, "__cccc_omp")) {
             tok = omp_file_scope(vm, tok);
             continue;
@@ -2562,6 +2541,30 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
                           "'%.*s@(args)' or '@inst(args) %.*s'",
                           tok->len, tok->loc, tok->len, tok->loc, tok->len,
                           tok->loc);
+        }
+
+        if (vm->compiler.saw_variadic_aggregate)
+            tok = cc_expand_member_packs(vm, tok);
+
+        // _Static_assert or static_assert (C23) - check before declspec
+        if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
+            Token *decl_tok = tok;
+            Node  *cond     = NULL;
+            char  *msg      = NULL;
+            int    msg_len  = 0;
+            tok = static_assert_decl(vm, tok, &cond, &msg, &msg_len);
+            // #1098: file scope leaves no Node to stash onto (unlike the
+            // block-scope arm in stmt()), so keep it in its own list on
+            // Compiler for serialize_program.c to re-emit -- see
+            // StaticAssertRecord's own comment.
+            StaticAssertRecord *rec     = calloc(1, sizeof(StaticAssertRecord));
+            rec->cond                   = cond;
+            rec->msg                    = msg;
+            rec->msg_len                = msg_len;
+            rec->tok                    = decl_tok;
+            rec->next                   = vm->compiler.static_asserts;
+            vm->compiler.static_asserts = rec;
+            continue;
         }
 
         if (is_file_scope_asm(tok)) {

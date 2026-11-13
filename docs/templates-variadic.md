@@ -131,6 +131,16 @@ Tuple@(char, int) bytes;
 };
 ```
 
+A declaration at file scope expands a member pack too, in an array length, an initializer list or a `_Static_assert`:
+
+```c
+Tuple@(char, int) bytes;
+
+char flat[(sizeof(bytes.v) + ... + 0)];      // 5 bytes
+int  widths[] = {sizeof(bytes.v)...};        // {1, 4}
+_Static_assert(sizeof...(bytes.v) == 2, "two members");
+```
+
 The object must be declared before the statement that expands it, so a `for (Tuple t = ...; ...; f(t.v...))` header cannot expand its own `t`. The condition of a `do ... while (f(t.v...));` is not expanded.
 
 ### Empty packs
@@ -208,6 +218,5 @@ An instance is `Name__Arg` for each argument, as for any template[^names].
 | Not supported | Result |
 |---|---|
 | A pack parameter in the middle of the list, or two packs | Compile error |
-| A member pack expansion in a declaration at file scope (`int n = (g.v + ... + 0);`) (#2041) | Compile error |
 
 [^names]: Two argument lists can mangle to one name, for example when an argument's own name contains `__`. The instance clash check compares the argument count and each argument, so such a pair is an error (`cannot name the instance`), not a silent merge.

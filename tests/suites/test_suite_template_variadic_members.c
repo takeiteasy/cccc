@@ -37,6 +37,17 @@ struct PlainSized {
     int k;
 };
 
+Tuple @(long, long) pair_g;
+char  flat[(sizeof(bytes.v) + ... + 0)];
+long *addrs[]  = {&pair_g.v...};
+int   widths[] = {sizeof(bytes.v)...};
+_Static_assert(sizeof...(bytes.v) == 2, "two members");
+typedef struct {
+    Tuple @(char, int) inner;
+} Holder;
+Holder     holder_g;
+char       nested_flat[(sizeof(holder_g.inner.v) + ... + 0)];
+
 static int calls;
 
 static int add0(void) {
@@ -314,4 +325,22 @@ void test_template_pack_with_member_pack_in_a_union_body(void) {
 void test_template_pack_with_member_pack_in_a_nested_struct(void) {
     NestedSized @(char, int) n;
     AssertEq(sizeof(n.in), 1 * 1 + 4 * 4);
+}
+
+[[cccc::test]]
+void test_member_pack_in_a_file_scope_array_length(void) {
+    AssertEq(sizeof(flat), 5);
+}
+
+[[cccc::test]]
+void test_member_pack_in_a_file_scope_initializer_list(void) {
+    AssertEq(widths[0], 1);
+    AssertEq(widths[1], 4);
+    Assert(addrs[0] == &pair_g.v0);
+    Assert(addrs[1] == &pair_g.v1);
+}
+
+[[cccc::test]]
+void test_member_pack_through_a_member_in_a_file_scope_declaration(void) {
+    AssertEq(sizeof(nested_flat), 5);
 }
