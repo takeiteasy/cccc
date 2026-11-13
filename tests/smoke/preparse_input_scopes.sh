@@ -265,3 +265,32 @@ expect_exit 0 "$CCCC" -c=native -o mx_out mx_p.c mx_q.c
 expect_exit 42 ./mx_out
 expect_exit 0 "$CCCC" -c=native -o mx_out2 mx_q.c mx_p.c
 expect_exit 42 ./mx_out2
+
+# Both inputs include one header that declares a function and each call builds
+# a call to it.
+cat >fn_h.h <<'EOS'
+int twice(int);
+EOS
+cat >fn_a.c <<'EOS'
+#include "fn_h.h"
+@comptime void gen_fa(void) {
+    Obj *fn = MakeFunction("fa", GetType("int"));
+    FunctionSetBody(fn, MakeReturn(MakeFuncCall(MakeVarRef("twice"), (Node *[]){MakeIntLiteral(20)}, 1)));
+}
+gen_fa();
+int fb(void);
+int twice(int x) { return x + x; }
+int main(void) { return fa() + fb() + 2 - 40; }
+EOS
+cat >fn_b.c <<'EOS'
+#include "fn_h.h"
+@comptime void gen_fb(void) {
+    Obj *fn = MakeFunction("fb", GetType("int"));
+    FunctionSetBody(fn, MakeReturn(MakeFuncCall(MakeVarRef("twice"), (Node *[]){MakeIntLiteral(20)}, 1)));
+}
+gen_fb();
+int fa(void);
+EOS
+expect_exit 42 "$CCCC" fn_a.c fn_b.c
+expect_exit 0 "$CCCC" -c=native -o fn_out fn_a.c fn_b.c
+expect_exit 42 ./fn_out
