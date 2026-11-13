@@ -4438,11 +4438,13 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
 }
 
 static void prepend_generated_decls(VirtualMachine *vm, Obj *generated,
-                                    Token **input_tokens, int count) {
+                                    Obj *stop, Token **input_tokens,
+                                    int count) {
     // Synthesize forward declarations for every generated function and
-    // extern declarations for every generated global variable, prepending
-    // them to all input token streams so the parser can resolve references.
-    for (Obj *o = generated; o; o = o->next) {
+    // extern declarations for every generated global variable (up to `stop`),
+    // prepending them to the given token streams so the parser can resolve
+    // references.
+    for (Obj *o = generated; o && o != stop; o = o->next) {
         // #928/#995: an anon gvar or a lifted block function (dotted
         // `.L..N` name -- reflect_new_anon_gvar/block_literal's
         // new_unique_name, reflection.c/parse.c) is referenced directly
@@ -4524,7 +4526,7 @@ Obj *cc_run_file_scope_calls(VirtualMachine *vm, Token **tok) {
         vm->compiler.in_macro_expansion     = false;
         cc_code_discard(vm, &mark);
         vm->error_jmp_buf = saved_jb;
-        prepend_generated_decls(vm, generated, tok, 1);
+        prepend_generated_decls(vm, generated, NULL, tok, 1);
         return generated;
     }
 
@@ -4571,7 +4573,7 @@ static void preparse_tokens_replaced(VirtualMachine *vm, Token *removed,
 }
 
 static void stash_input_templates(VirtualMachine *vm, int fi) {
-    TemplateSeed *seed   = &vm->compiler.template_seeds[fi];
+    PreparseSeed *seed   = &vm->compiler.preparse_seeds[fi];
     HashMap      *maps[] = {&seed->templates, &seed->insts, &seed->aggs,
                             &seed->scope_ords};
     HashMap      *live[] = {tmpl_templates(vm), tmpl_insts(vm), tmpl_aggs(vm),
@@ -4582,8 +4584,8 @@ static void stash_input_templates(VirtualMachine *vm, int fi) {
     }
 }
 
-TemplateSeed *cc_template_seed(VirtualMachine *vm, int fi) {
-    return vm->compiler.template_seeds ? &vm->compiler.template_seeds[fi]
+PreparseSeed *cc_preparse_seed(VirtualMachine *vm, int fi) {
+    return vm->compiler.preparse_seeds ? &vm->compiler.preparse_seeds[fi]
                                        : NULL;
 }
 
@@ -4709,33 +4711,37 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens,
     // macro_globals directly and restores globals after each call,
     // so no bulk-move is needed here.
     //
-    // The runtime templates of an input are registered for its calls, so
-    // InstantiateType() and `@inst` in a generator find them. The registry
-    // is kept for the parse of that input (cc_template_seed).
-    if (vm->compiler.saw_templates) {
-        vm->compiler.template_seeds =
-            arena_alloc(&vm->compiler.parser_arena,
-                        sizeof(TemplateSeed) * (count ? count : 1));
-        memset(vm->compiler.template_seeds, 0, sizeof(TemplateSeed) * count);
-        // TODO: every input's instances land in this one scope; give each
-        // input its own under a common root (#2048)
-        vm->compiler.runtime_file_scope = vm->compiler.scope;
-    }
+    // Each input's calls run in a scope of their own under the common root,
+    // so the types, instances and functions one input's calls declare stay out
+    // of the others. The parse of that input adopts the scope and the runtime
+    // templates registered for its calls (cc_preparse_seed), so
+    // InstantiateType() and `@inst` in a generator find the input's templates.
+    Scope *root                 = vm->compiler.scope;
+    vm->compiler.preparse_seeds = arena_alloc(
+        &vm->compiler.parser_arena, sizeof(PreparseSeed) * (count ? count : 1));
+    memset(vm->compiler.preparse_seeds, 0, sizeof(PreparseSeed) * count);
     vm->compiler.in_preparse_calls = true;
     for (int fi = 0; fi < count; fi++) {
         if (!input_tokens[fi])
             continue;
-        if (vm->compiler.template_seeds)
+        PreparseSeed *seed = &vm->compiler.preparse_seeds[fi];
+        seed->scope = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
+        memset(seed->scope, 0, sizeof(Scope));
+        seed->scope->next               = root;
+        vm->compiler.scope              = seed->scope;
+        vm->compiler.runtime_file_scope = seed->scope;
+        Obj *generated_before           = vm->compiler.macro_globals;
+        if (vm->compiler.saw_templates)
             register_input_templates(vm, fi);
         scan_and_execute_global_calls(vm, &input_tokens[fi]);
-        if (vm->compiler.template_seeds)
+        if (vm->compiler.saw_templates)
             stash_input_templates(vm, fi);
+        prepend_generated_decls(vm, vm->compiler.macro_globals,
+                                generated_before, &input_tokens[fi], 1);
     }
     vm->compiler.in_preparse_calls  = false;
     vm->compiler.runtime_file_scope = NULL;
-
-    prepend_generated_decls(vm, vm->compiler.macro_globals, input_tokens,
-                            count);
+    vm->compiler.scope              = root;
 
     if (vm->debug_vm)
         printf("Pre-parse global macro execution complete.\n");

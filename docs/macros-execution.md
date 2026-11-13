@@ -34,6 +34,18 @@ static const int g_max = 64;            // visible
 
 A name that is not visible gives `undefined variable`, with a hint at the ways to expose it.
 
+### Several input files
+
+What a file-scope call declares belongs to its own input file: the types and typedefs it makes, the template instances it instantiates, and the prototypes of the functions it generates. Another input does not see them and declares a generated function like any other C function. The definitions still link into one program.
+
+| In `a.c`, a file-scope call generates | In `b.c` |
+|---|---|
+| `MakeTypedef("MyInt", ...)` | `MyInt` is undefined |
+| `MakeFunction("made", ...)` | `int made(void);` is needed before a call |
+| An instance of a template both files include | The two instances merge at link time |
+
+Two inputs cannot generate a function of one name, even a `static` one (#2051).
+
 ### Sharing `#define` macros
 
 ```c

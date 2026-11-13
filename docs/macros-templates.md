@@ -204,6 +204,8 @@ int main(void) { Box @(int) b = {1}; return box_size() + b.value; }
 | Template argument is a type the file declares, and the file's own code names the same instance | Error: the call made the instance over its own copy of the type[^filetype] |
 | Template argument is a type the file declares, and only generated code uses the instance | Works |
 
+Each input file has its own instances. Two inputs that include one template and instantiate it from their calls link into one instance; two different templates of one name that make the same instance name are an error at link time, as without file-scope calls.
+
 [^filescope]: `Quote` with `@inst` follows the same rules.
 
 [^filetype]: A file-scope call runs before the file is parsed, so it works on its own copy of the file's types. Instantiate such a template only from generated code, or from a handler that runs during the parse.

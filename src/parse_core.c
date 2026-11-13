@@ -1743,6 +1743,15 @@ static void check_param_bounds_template(VirtualMachine *vm, Node *n,
     check_param_bounds_template(vm, node_ctl(n)->els, tok);
 }
 
+// The scope file-scope names are declared in: the file's own scope, which sits
+// under the scope its pre-parse calls declared into.
+static void walk_to_file_scope(VirtualMachine *vm) {
+    Scope *file =
+        vm->compiler.in_macro_mode ? NULL : vm->compiler.runtime_file_scope;
+    while (vm->compiler.scope->next && vm->compiler.scope != file)
+        vm->compiler.scope = vm->compiler.scope->next;
+}
+
 // #488: resolves a function type's checked-pointer PARAMETER bounds
 // expressions into a reusable TEMPLATE, once per distinct function Type, for
 // rewrite_checked_call_args() (src/parse_checked.c) to substitute at every
@@ -1787,8 +1796,7 @@ void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty) {
         return;
 
     Scope *saved_scope = vm->compiler.scope;
-    while (vm->compiler.scope->next)
-        vm->compiler.scope = vm->compiler.scope->next;
+    walk_to_file_scope(vm);
     enter_scope(vm);
 
     int idx = 0;
@@ -2217,8 +2225,7 @@ Obj *new_implicit_function(VirtualMachine *vm, Token *tok) {
     ty->is_unprototyped = true;
 
     Scope *saved_scope = vm->compiler.scope;
-    while (vm->compiler.scope->next)
-        vm->compiler.scope = vm->compiler.scope->next;
+    walk_to_file_scope(vm);
     Obj *fn = new_gvar(vm, arena_strndup(vm, tok->loc, tok->len), tok->len, ty);
     vm->compiler.scope = saved_scope;
 

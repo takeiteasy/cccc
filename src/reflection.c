@@ -3184,6 +3184,8 @@ Obj *__builtin_ast_function(const char *name, Type *return_type) {
     Obj   *existing = NULL;
 
     Obj   *lists[]  = {vm->compiler.globals, vm->compiler.macro_globals};
+    // TODO: a static function another input's call generated is not a clash
+    // (#2051)
     for (int i = 0; i < 2 && !existing; i++) {
         for (Obj *obj = lists[i]; obj; obj = obj->next) {
             if (i == 0 && superseded_by_reload(vm, obj))

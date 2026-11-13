@@ -66,7 +66,8 @@ static int compile_only_from_string(const char *src, size_t len) {
     cc_execute_inline_macros(&vm, tokens, 1);
 
     // Parse
-    Obj *prog = cc_parse(&vm, tok);
+    vm.compiler.parse_seed = cc_preparse_seed(&vm, 0);
+    Obj *prog              = cc_parse(&vm, tokens[0]);
     if (!prog) {
         free(buf);
         cc_destroy(&vm);

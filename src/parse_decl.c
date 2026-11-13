@@ -2748,6 +2748,13 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     vm->compiler.error_var.name = "<error>";
     vm->compiler.error_var.ty   = ty_error;
 
+    // The file-scope calls that ran before this parse declared their names in
+    // a scope of their own; the file scope sits under it.
+    PreparseSeed *seed =
+        vm->compiler.in_macro_mode ? NULL : vm->compiler.parse_seed;
+    if (seed && seed->scope)
+        vm->compiler.scope = seed->scope;
+
     // Initialize global scope
     enter_scope(vm);
 
@@ -2782,15 +2789,14 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     }
     // The file-scope calls that ran before this parse left their templates and
     // instances behind.
-    if (vm->compiler.parse_seed && !vm->compiler.in_macro_mode) {
-        TemplateSeed *seed = vm->compiler.parse_seed;
-        *registry[0]       = seed->templates;
-        *registry[1]       = seed->insts;
-        *registry[2]       = seed->aggs;
-        *registry[3]       = seed->scope_ords;
+    if (seed) {
+        *registry[0] = seed->templates;
+        *registry[1] = seed->insts;
+        *registry[2] = seed->aggs;
+        *registry[3] = seed->scope_ords;
         memset(seed, 0, sizeof *seed);
+        vm->compiler.parse_seed = NULL;
     }
-    vm->compiler.parse_seed = NULL;
 
     tok = parse_file_scope_decls(vm, tok);
 

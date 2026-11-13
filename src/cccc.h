@@ -4221,11 +4221,13 @@ typedef struct PreparseTemplate {
     struct PreparseTemplate *next;
 } PreparseTemplate;
 
-// The runtime template registry a file-scope call left behind. The parse of
-// the same input adopts it, so the instances those calls made are kept.
-typedef struct TemplateSeed {
+// What an input's file-scope calls left behind: the scope their names were
+// declared in and the runtime template registry. The parse of the same input
+// adopts both, so the names and instances those calls made are kept.
+typedef struct PreparseSeed {
+    Scope  *scope;
     HashMap templates, insts, aggs, scope_ords;
-} TemplateSeed;
+} PreparseSeed;
 
 typedef enum {
     TI_SPECIALIZED, // hand-written, parsed on first use
@@ -4264,8 +4266,9 @@ typedef struct Compiler {
     PreparseTemplate *preparse_templates, **preparse_templates_tail;
     Template         *captured; // the template the last capture registered
     bool              in_preparse_calls; // file-scope calls are running
-    TemplateSeed     *template_seeds;    // one per input; NULL before any call
-    TemplateSeed     *parse_seed;     // for the next runtime parse(), or NULL
+    PreparseSeed
+        *preparse_seeds;         // one per input; NULL without file-scope calls
+    PreparseSeed    *parse_seed; // for the next runtime parse(), or NULL
     Scope       *runtime_file_scope;
     Scope       *tmpl_bindings;   // detached scope holding the type parameters
     Scope       *tmpl_anchor;     // scope in which tmpl_bindings is consulted
@@ -6018,7 +6021,7 @@ Type *cc_instantiate_type_text(VirtualMachine *vm, const char *name,
 Obj *cc_instantiate_function_text(VirtualMachine *vm, const char *name,
                                   const char *args);
 // macros.c: the registry seed for input `fi`, or NULL when none was made.
-TemplateSeed *cc_template_seed(VirtualMachine *vm, int fi);
+PreparseSeed *cc_preparse_seed(VirtualMachine *vm, int fi);
 Type *cc_instantiate_type_args(VirtualMachine *vm, const char *name,
                                const TemplateArgument *args, int n);
 Obj *cc_instantiate_function_args(VirtualMachine *vm, const char *name,

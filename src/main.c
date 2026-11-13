@@ -3412,7 +3412,7 @@ int main(int argc, const char *argv[]) {
         if (i > 0)
             cc_leave_top_file_scope(&vm);
         vm.compiler.opencl     = input_opencl[i];
-        vm.compiler.parse_seed = cc_template_seed(&vm, i);
+        vm.compiler.parse_seed = cc_preparse_seed(&vm, i);
         input_progs[i]         = cc_parse(&vm, input_tokens[i]);
         // #999: parse() returning NULL is not on its own a failure -- its
         // own comment says outright it "returns NULL when no new globals
@@ -3431,7 +3431,8 @@ int main(int argc, const char *argv[]) {
         // same as if this TU had never been linked at all), and any real
         // error is caught with its actual message and exit_code = 1 by the
         // cc_has_errors() check immediately below this loop.
-        if (!input_progs[i] && vm.compiler.macro_globals)
+        if (!input_progs[i] && vm.compiler.macro_globals &&
+            input_files_count == 1)
             input_progs[i] = vm.compiler.macro_globals;
     }
 
@@ -3482,8 +3483,21 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
-    // Link all programs together
-    Obj *merged_prog = cc_link_progs(&vm, input_progs, input_files_count);
+    // Link all programs together. With several inputs the generated
+    // definitions are linked as a program of their own, so the linker merges
+    // template instances and rejects a second definition like it does for the
+    // inputs.
+    bool  generated_linked = input_files_count > 1 && vm.compiler.macro_globals;
+    Obj **link_in          = input_progs;
+    if (generated_linked) {
+        link_in    = malloc(sizeof(Obj *) * (input_files_count + 1));
+        link_in[0] = vm.compiler.macro_globals;
+        memcpy(link_in + 1, input_progs, sizeof(Obj *) * input_files_count);
+    }
+    Obj *merged_prog =
+        cc_link_progs(&vm, link_in, input_files_count + generated_linked);
+    if (generated_linked)
+        free(link_in);
     // #1266: cc_link_progs returns NULL when every input TU parsed to an
     // empty global list -- an all-comptime file that publishes nothing and
     // defines no ordinary function. For -m / -c=generated that is a valid
@@ -3507,7 +3521,8 @@ int main(int argc, const char *argv[]) {
     // call-patcher can resolve calls to them by name.
     // If macro_globals IS the main program (parse() returned it because no
     // new globals were created), don't double-prepend it.
-    if (vm.compiler.macro_globals && merged_prog != vm.compiler.macro_globals) {
+    if (!generated_linked && vm.compiler.macro_globals &&
+        merged_prog != vm.compiler.macro_globals) {
         Obj *tail = vm.compiler.macro_globals;
         while (tail->next)
             tail = tail->next;
