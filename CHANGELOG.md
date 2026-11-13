@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-13
+
 - Added: `docs/cpp.md` compares CCCC's templates, operators, methods, compile-time code, derived members and safety with their C++ counterparts.
 - Changed: the README examples show a generic `Vec2` template with derive attributes, an operator and a method, and a comptime function that instantiates a template.
 - Fixed: `-c=native` and `-m` no longer replay a header that uses the `@attribute` spelling (`struct P {...} @equals;`) or includes `<cccc/derive.h>`, `<cccc/json.h>` or `<cccc/text.h>`; the host compiler failed on `expected ';' after struct` or `'cccc/derive.h' file not found`. The header's types and functions come from the generated C.
