@@ -268,25 +268,23 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
                 VarAttr attr     = {};
                 Type   *param_ty = declspec(vm, &tok, tok, &attr);
                 cc_reject_checked_scope_here(vm, &attr);
-                param_ty         = declarator(vm, &tok, tok, param_ty);
+                DeclName dn;
+                param_ty         = declarator(vm, &tok, tok, param_ty, &dn);
                 param_ty         = apply_var_attrs_to_type(vm, param_ty, &attr);
                 if (has_custom_attrs(param_ty, &attr))
-                    error_tok(vm, param_ty->name ? param_ty->name : tok,
+                    error_tok(vm, dn.tok ? dn.tok : tok,
                               "custom attributes are only supported on "
                               "file-scope declarations");
 
                 // Convert array and function parameters to pointers
-                if (param_ty->kind == TY_ARRAY) {
-                    Token *name    = param_ty->name;
-                    param_ty       = pointer_to(vm, param_ty->base);
-                    param_ty->name = name;
-                } else if (param_ty->kind == TY_FUNC) {
-                    Token *name    = param_ty->name;
-                    param_ty       = pointer_to(vm, param_ty);
-                    param_ty->name = name;
-                }
+                if (param_ty->kind == TY_ARRAY)
+                    param_ty = pointer_to(vm, param_ty->base);
+                else if (param_ty->kind == TY_FUNC)
+                    param_ty = pointer_to(vm, param_ty);
 
                 cur = cur->next = copy_type(vm, param_ty);
+                cur->param_name     = dn.tok;
+                cur->param_name_pos = dn.pos;
             }
             params = head.next;
         }
@@ -360,9 +358,9 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // Add user params in reverse order (last first)
     for (int i = param_count - 1; i >= 0; i--) {
         Type *p = param_array[i];
-        if (p->name) {
-            drop_cleanup_attr(vm, p, NULL, p->name);
-            Obj *param = new_lvar(vm, get_ident(vm, p->name), p->name->len, p);
+        if (p->param_name) {
+            drop_cleanup_attr(vm, p, NULL, p->param_name);
+            Obj *param      = new_lvar_at(vm, p->param_name, p);
             param->is_param = true;
         }
     }

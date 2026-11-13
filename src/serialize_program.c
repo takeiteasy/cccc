@@ -142,10 +142,10 @@ static void rename_anon_globals(VirtualMachine *vm, Obj *prog,
                               : "anon";
         serialize_rename_global(obj, arena_format(vm, "__cccc_%s_%d", tag,
                                                   ctx->anon_global_counter++));
-        // #1286: this object has no declaration of its own -- ty->name (a
-        // compound literal, via postfix()) or nothing at all (a reflection-
-        // API anon global, reflect_new_anon_gvar()) is all obj->tok can
-        // point at, and neither names a real declaration site. Whatever
+        // #1286: this object has no declaration of its own -- obj->tok is a
+        // compound literal's token (via postfix()) or nothing at all (a
+        // reflection-API anon global, reflect_new_anon_gvar()), and neither
+        // names a real declaration site. Whatever
         // file that token happens to sit in (often a header, if the *type*
         // is header-declared) is not this object's provenance --
         // global_is_header_supplied() must not read it as "already
@@ -6777,8 +6777,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             continue;
         // #965: __cccc_block_copy_impl is a VM-only FFI shim (its real
         // implementation is host-side, src/stdlib/stdlib.c) -- it has no
-        // obj->tok (ty->name was never set for this builtin prototype, see
-        // its registration in parse.c), so the from_primary check just
+        // obj->tok (none is set for this builtin prototype, see its
+        // registration in parse.c), so the from_primary check just
         // below already leaves it unemitted here in practice. Skip it
         // explicitly regardless, so a native replacement is only ever
         // supplied by serialize_block_preamble's own static definition

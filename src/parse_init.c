@@ -115,11 +115,12 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
         if (i++ > 0)
             tok = skip(vm, tok, ",");
 
-        Type *ty = declarator(vm, &tok, tok, basety);
+        DeclName dn;
+        Type    *ty = declarator(vm, &tok, tok, basety, &dn);
 
         if (has_custom_attrs(ty, attr) ||
             (basety && type_attrs(basety)->custom_attrs))
-            error_tok(vm, ty->name ? ty->name : tok,
+            error_tok(vm, dn.tok ? dn.tok : tok,
                       "custom attributes are only supported on file-scope "
                       "declarations");
 
@@ -137,9 +138,9 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             error_tok(vm, tok, "variable declared void");
         }
 
-        if (!ty->name) {
+        if (!dn.tok) {
             if (vm->collect_errors &&
-                error_tok_recover(vm, ty->name_pos, "variable name omitted")) {
+                error_tok_recover(vm, dn.pos, "variable name omitted")) {
                 // Skip to next declarator or end of declaration
                 tok = skip_to_decl_boundary(vm, tok);
                 if (equal(tok, ";"))
@@ -148,29 +149,30 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                     continue;
                 break;
             }
-            error_tok(vm, ty->name_pos, "variable name omitted");
+            error_tok(vm, dn.pos, "variable name omitted");
         }
 
         if (attr && attr->is_tls && !attr->is_static)
-            error_tok(vm, ty->name,
+            error_tok(vm, dn.tok,
                       "function-scope '%.*s' implicitly auto and declared "
                       "'_Thread_local'",
-                      (int)ty->name->len, ty->name->loc);
+                      (int)dn.tok->len, dn.tok->loc);
 
         // #485: reject an unchecked pointer local in a checked region.
-        cc_check_checked_scope_decl(vm, ty, ty->name, "local variable");
+        cc_check_checked_scope_decl(vm, ty, dn.tok, "local variable");
         resolve_type_checked_bounds(vm, ty);
 
         if (attr && attr->is_constexpr && ty->kind == TY_VLA)
             error_tok(
-                vm, ty->name,
+                vm, dn.tok,
                 "constexpr object may not have variable length array type");
 
         // C23 auto / GNU __auto_type inference
         if (attr && attr->is_auto) {
-            Token *name_tok = ty->name;
+            Token *name_tok = dn.tok;
             int    decl_depth =
-                check_auto_declarator(vm, attr, ty, /*is_extra_declarator=*/i > 1);
+                check_auto_declarator(vm, attr, ty, dn.tok,
+                                      /*is_extra_declarator=*/i > 1);
             if (!equal(tok, "="))
                 error_tok(vm, name_tok,
                           attr->is_gnu_auto_type
@@ -225,8 +227,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 continue;
             }
 
-            Obj *var =
-                new_lvar(vm, get_ident(vm, name_tok), name_tok->len, deduced);
+            Obj *var = new_lvar_at(vm, name_tok, deduced);
             decl_vars_add(vm, &dv, var);
             // #1160: also honor GNU aligned(N), not just _Alignas.
             var->align = effective_decl_align(vm, name_tok, deduced, attr);
@@ -250,12 +251,12 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
 
         if (attr && attr->is_static) {
             // static local variable
-            warn_if_shadowing(vm, ty->name);
-            drop_cleanup_attr(vm, ty, attr, ty->name);
+            warn_if_shadowing(vm, dn.tok);
+            drop_cleanup_attr(vm, ty, attr, dn.tok);
             Obj *var             = new_anon_gvar(vm, ty);
             decl_vars_add(vm, &dv, var);
-            var->tok             = ty->name;
-            var->display_name    = get_ident(vm, ty->name);
+            var->tok                             = dn.tok;
+            var->display_name                    = get_ident(vm, dn.tok);
             var->is_local_symbol = true;
             var->is_tls          = attr->is_tls;
             obj_fn_mut(vm, var)->static_owner    = vm->compiler.current_fn;
@@ -263,13 +264,13 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             var->is_maybe_unused = ty->is_maybe_unused;
             var->is_deprecated   = ty->is_deprecated;
             obj_set_deprecated_msg(vm, var, type_attrs(ty)->deprecated_msg);
-            push_scope(vm, get_ident(vm, ty->name), ty->name->len)->var = var;
+            push_scope(vm, get_ident(vm, dn.tok), dn.tok->len)->var = var;
             if (var->checked_kind != CHECKED_NONE)
                 resolve_checked_bounds(vm, var);
             if (equal(tok, "="))
                 gvar_initializer(vm, &tok, tok->next, var);
             else if (attr->is_constexpr)
-                error_tok(vm, ty->name,
+                error_tok(vm, dn.tok,
                           "constexpr object requires an initializer");
             continue;
         }
@@ -284,12 +285,12 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             // Variable length arrays (VLAs) are translated to alloca() calls.
             // For example, `int x[n+2]` is translated to `tmp = n + 2,
             // x = alloca(tmp)`.
-            Obj *var = new_lvar(vm, get_ident(vm, ty->name), ty->name->len, ty);
+            Obj *var = new_lvar_at(vm, dn.tok, ty);
             decl_vars_add(vm, &dv, var);
             claim_cleanup(vm, var, attr);
             if (var->checked_kind != CHECKED_NONE)
                 resolve_checked_bounds(vm, var);
-            Token *tok_local = ty->name;
+            Token *tok_local = dn.tok;
             Node  *expr      = new_binary(
                 vm, ND_ASSIGN, new_vla_ptr(vm, var, tok_local),
                 new_alloca(vm,
@@ -347,15 +348,15 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             continue;
         }
 
-        Obj *var = new_lvar(vm, get_ident(vm, ty->name), ty->name->len, ty);
+        Obj *var = new_lvar_at(vm, dn.tok, ty);
         decl_vars_add(vm, &dv, var);
         if (attr && attr->is_constexpr) {
             var->is_constexpr = true;
         }
         // #1160: also honor GNU aligned(N), not just _Alignas. attr can be
         // NULL at this call site; effective_decl_align() tolerates that.
-        var->align = effective_decl_align(vm, ty->name, ty, attr);
-        claim_kernel_local(vm, var, ty->name);
+        var->align = effective_decl_align(vm, dn.tok, ty, attr);
+        claim_kernel_local(vm, var, dn.tok);
         if (var->is_kernel_local_obj && equal(tok, "="))
             error_tok(vm, tok,
                       "a [[cccc::local]] object cannot have an initializer");
@@ -364,7 +365,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
         claim_cleanup(vm, var, attr);
         Node *marker = NULL;
         if (obj_attr(var)->cleanup_fn)
-            marker = cur = cur->next = new_cleanup_decl(vm, var, ty->name);
+            marker = cur = cur->next = new_cleanup_decl(vm, var, dn.tok);
         // Resolve checked-pointer bounds (#770/#483) now that this local is
         // itself in scope, so a bound may reference any prior sibling local.
         if (var->checked_kind != CHECKED_NONE)
@@ -481,27 +482,26 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 expr->lhs->kind == ND_VAR && expr->lhs->var == var)
                 obj_chk_mut(vm, var)->checked_prop_init_assign = expr;
         } else if (var->is_constexpr) {
-            error_tok(vm, ty->name, "constexpr object requires an initializer");
+            error_tok(vm, dn.tok, "constexpr object requires an initializer");
         }
 
         if (var->ty->size < 0) {
             if (vm->collect_errors &&
-                error_tok_recover(vm, ty->name,
-                                  "variable has incomplete type")) {
+                error_tok_recover(vm, dn.tok, "variable has incomplete type")) {
                 // Set a default size to allow parsing to continue
                 var->ty->size = 1;
                 continue;
             }
-            error_tok(vm, ty->name, "variable has incomplete type");
+            error_tok(vm, dn.tok, "variable has incomplete type");
         }
 
         if (var->ty->kind == TY_VOID) {
             if (vm->collect_errors &&
-                error_tok_recover(vm, ty->name, "variable declared void")) {
+                error_tok_recover(vm, dn.tok, "variable declared void")) {
                 // Already reported earlier, just continue
                 continue;
             }
-            error_tok(vm, ty->name, "variable declared void");
+            error_tok(vm, dn.tok, "variable declared void");
         }
     }
 

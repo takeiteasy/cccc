@@ -1488,11 +1488,6 @@ static Obj *debugger_capture_proxy(ProxyMap *m, Obj *var, Token *tok) {
                   var->is_block_var ? "__block variable" : "array", var->name);
 
     Type *ty = unqualified(m->vm, var->ty);
-    if (ty->name) {
-        ty           = copy_type(m->vm, ty);
-        ty->name     = NULL;
-        ty->name_pos = NULL;
-    }
     Obj *proxy = new_lvar(m->vm, "", 0, ty);
     if (m->n == m->cap) {
         m->cap   = m->cap ? m->cap * 2 : 4;

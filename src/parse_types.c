@@ -787,7 +787,8 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
         Token  *param_tok = tok;
         Type   *ty2       = declspec(vm, &tok, tok, &attr);
         cc_reject_checked_scope_here(vm, &attr);
-        ty2               = declarator(vm, &tok, tok, ty2);
+        DeclName dn;
+        ty2 = declarator(vm, &tok, tok, ty2, &dn);
         // A @comptime body is captured unrewritten, so `@name` stays an `@`.
         if (vm->compiler.in_macro_mode && equal(tok, "@") &&
             tok->next->kind != TK_EOF)
@@ -796,11 +797,11 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
                       "function",
                       tok->next->len, tok->next->loc);
         ty2 = apply_var_attrs_to_type(vm, ty2, &attr);
-        drop_cleanup_attr(vm, ty2, &attr, ty2->name ? ty2->name : param_tok);
+        drop_cleanup_attr(vm, ty2, &attr, dn.tok ? dn.tok : param_tok);
         CustomAttrUse *param_uses = NULL;
         if (has_custom_attrs(ty2, &attr) && !vm->compiler.in_type_lookahead) {
             if (vm->compiler.current_fn)
-                error_tok(vm, ty2->name ? ty2->name : tok,
+                error_tok(vm, dn.tok ? dn.tok : tok,
                           "custom attributes on parameters are only supported "
                           "on a function declaration at file scope");
             param_uses = clone_custom_attr_list(vm, attr.custom_attrs);
@@ -811,7 +812,7 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
                 attrs_tok = param_uses->tok;
         }
 
-        Token *name = ty2->name;
+        Token *name = dn.tok;
 
         if (ty2->kind == TY_ARRAY) {
             // "array of T" is converted to "pointer to T" only in the parameter
@@ -837,7 +838,6 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             CheckedBoundsForm saved_bounds_form  = type_chk(ty2)->form;
             int saved_array_extent = type_chk(ty2)->checked_array_extent;
             ty2                                  = pointer_to(vm, ty2->base);
-            ty2->name                            = name;
             type_arr_mut(vm, ty2)->static_min    = saved_static_min;
             ty2->is_const                        = saved_is_const;
             ty2->is_volatile                     = saved_is_volatile;
@@ -859,7 +859,6 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             CheckedBoundsForm saved_bounds_form  = type_chk(ty2)->form;
             Token            *saved_extent_tok = type_chk(ty2)->vla_extent_tok;
             ty2                    = pointer_to(vm, ty2->base);
-            ty2->name              = name;
             ty2->is_const          = saved_is_const;
             ty2->is_volatile       = saved_is_volatile;
             ty2->is_restrict       = saved_is_restrict;
@@ -870,8 +869,7 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
         } else if (ty2->kind == TY_FUNC) {
             // Likewise, a function is converted to a pointer to a function
             // only in the parameter context.
-            ty2       = pointer_to(vm, ty2);
-            ty2->name = name;
+            ty2 = pointer_to(vm, ty2);
         }
 
         // Register this parameter in the prototype scope so subsequent
@@ -888,6 +886,8 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
         }
 
         cur = cur->next = copy_type(vm, ty2);
+        cur->param_name     = dn.tok;
+        cur->param_name_pos = dn.pos;
         if (param_uses)
             type_attrs_mut(vm, cur)->custom_attrs = param_uses;
     }
@@ -1276,8 +1276,10 @@ static Type *declarator_suffix(VirtualMachine *vm, Token **rest, Token *tok,
 
         char *label = NULL;
         tok         = asm_label(vm, tok, &label);
-        if (label)
+        if (label) {
+            ty                                = copy_type(vm, ty);
             type_attrs_mut(vm, ty)->asm_label = label;
+        }
         if (tok == before)
             break;
     }
@@ -1394,7 +1396,10 @@ static Type *apply_checked_array(VirtualMachine *vm, Type *ty,
     return ty;
 }
 
-Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
+Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
+                 DeclName *dn) {
+    if (dn)
+        *dn = (DeclName){};
     // Handle __attribute__ before declarator
     VarAttr prefix_attr = {};
     tok                 = attribute_list(vm, tok, NULL, &prefix_attr);
@@ -1456,8 +1461,8 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         block_ty->is_variadic = func_ty->is_variadic;
         block_ty->is_unprototyped = func_ty->is_unprototyped;
         inherit_semantic_attrs(vm, block_ty, ty);
-        block_ty->name       = name;
-        block_ty->name_pos   = name_pos;
+        if (dn)
+            *dn = (DeclName){name, name_pos};
         type_attrs_mut(vm, block_ty)->cleanup_fn = cleanup_fn;
 
         return block_ty;
@@ -1466,7 +1471,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     if (equal(tok, "(")) {
         Token *start = tok;
         Type   dummy = {};
-        declarator(vm, &tok, start->next, &dummy);
+        declarator(vm, &tok, start->next, &dummy, NULL);
         tok = skip(vm, tok, ")");
         ty  = type_suffix(vm, rest, tok, ty);
 
@@ -1478,7 +1483,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         ty = with_custom_attrs(vm, ty, type_attr.custom_attrs);
         ty = apply_var_attrs_to_type(vm, ty, &type_attr);
 
-        ty = declarator(vm, &tok, start->next, ty);
+        ty                = declarator(vm, &tok, start->next, ty, dn);
         ty = declarator_suffix(vm, rest, after, ty);
         return with_cleanup(vm, ty, cleanup_fn);
     }
@@ -1515,9 +1520,9 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     ty           = declarator_suffix(vm, &tok, *rest, ty);
     ty           = with_cleanup(vm, ty, cleanup_fn);
 
-    ty->name     = name;
-    ty->name_pos = name_pos;
-    *rest        = tok;
+    if (dn)
+        *dn = (DeclName){name, name_pos};
+    *rest = tok;
     return ty;
 }
 
@@ -1640,7 +1645,8 @@ static bool same_type_exact(Type *a, Type *b) {
         case TY_UNION:
         case TY_ENUM:
             return a == b ||
-                   (a->name && b->name && same_optional_name(a->name, b->name));
+                   (type_tag_token(a) && type_tag_token(b) &&
+                    same_optional_name(type_tag_token(a), type_tag_token(b)));
         case TY_COMPLEX:
             return same_type_exact(a->base, b->base);
         case TY_BITINT:
@@ -1845,8 +1851,6 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,
     Token *tag = NULL;
     if (tok->kind == TK_IDENT) {
         tag          = tok;
-        ty->name     = tag;
-        ty->name_pos = tag;
         type_agg_mut(vm, ty)->enum_tag = tag;
         tok          = tok->next;
     }
@@ -2180,8 +2184,6 @@ Type *auto_declared_type(VirtualMachine *vm, Type *decl, Type *deduced) {
         !type_attrs(decl)->asm_label)
         return deduced;
     deduced                 = copy_type(vm, deduced);
-    deduced->name           = decl->name;
-    deduced->name_pos       = decl->name_pos;
     deduced->is_maybe_unused = decl->is_maybe_unused;
     deduced->is_deprecated  = decl->is_deprecated;
     type_attrs_mut(vm, deduced)->deprecated_msg =
@@ -2214,21 +2216,20 @@ int count_auto_ptr_depth(Type *ty) {
 // type. gcc rejects them, so -Wauto-declarator flags them unless
 // --compiler-family=clang.
 int check_auto_declarator(VirtualMachine *vm, VarAttr *attr, Type *ty,
-                          bool is_extra_declarator) {
+                          Token *name, bool is_extra_declarator) {
     const char *spelling = attr->is_gnu_auto_type ? "__auto_type" : "auto";
     int         depth    = count_auto_ptr_depth(ty);
     if (depth < 0)
-        error_tok(vm, ty->name,
-                  "cannot use '%s' with array or function declarator",
+        error_tok(vm, name, "cannot use '%s' with array or function declarator",
                   spelling);
     if (vm->compiler.compiler_family != CCCC_COMPILER_FAMILY_GCC)
         return depth;
     if (is_extra_declarator)
-        warn_tok(vm, ty->name, CCCC_WARN_AUTO_DECLARATOR,
+        warn_tok(vm, name, CCCC_WARN_AUTO_DECLARATOR,
                  "'%s' may only be used with a single declarator in gcc",
                  spelling);
     if (depth > 0)
-        warn_tok(vm, ty->name, CCCC_WARN_AUTO_DECLARATOR,
+        warn_tok(vm, name, CCCC_WARN_AUTO_DECLARATOR,
                  attr->is_gnu_auto_type
                      ? "'__auto_type' requires a plain identifier as "
                        "declarator in gcc"
@@ -2538,8 +2539,9 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
             Member *mem =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(Member));
             memset(mem, 0, sizeof(Member));
-            mem->ty                        = declarator(vm, &tok, tok, basety);
-            mem->name = mem->ty->name;
+            DeclName dn;
+            mem->ty   = declarator(vm, &tok, tok, basety, &dn);
+            mem->name = dn.tok;
             mem->idx  = idx++;
             CustomAttrUse *mem_extra_attrs = NULL;
 
@@ -3797,19 +3799,8 @@ Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
 // is_definition reports whether this call parsed a `{ ... }` member-list
 // (a genuine definition) as opposed to a bare reference/forward-declaration
 // to an existing or not-yet-defined tag. struct_decl/union_decl use it to
-// avoid re-running install_tag_definition on every *reference* to a tag,
-// which used to (a) redundantly recompute member offsets on an already-
-// complete type and (b) call install_tag_definition with `ty->name` -- for
-// the reference branch below `ty` is a *fresh, throwaway* Type whose ->name
-// was never installed anywhere, but for the same-named "install into
-// caller's scope" bug that mattered here, the real hazard is: the returned
-// `ty2` is the canonical, shared Type for the tag, and declarator()
-// overwrites *its* ->name with each declarator's own identifier (the
-// hazard #892's Type.struct_tag field was added to survive). Running
-// install_tag_definition again after such an overwrite used `ty->name`
-// (by then some unrelated parameter/variable name) as the tag, silently
-// re-registering the type under the wrong name in the *referencing
-// function's* scope -- see #897.
+// avoid re-running install_tag_definition on every *reference* to a tag, which
+// would recompute member offsets on an already-complete type.
 static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
                                TypeKind kind, bool *is_definition,
                                bool bare_decl) {
@@ -3829,10 +3820,7 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
     Token *tag = NULL;
     if (tok->kind == TK_IDENT) {
         tag            = tok;
-        ty->name       = tag;
-        ty->name_pos   = tag;
-        type_agg_mut(vm, ty)->struct_tag =
-            tag; // #892: survives declarator name-overwrite
+        type_agg_mut(vm, ty)->struct_tag = tag;
         tok            = tok->next;
     }
 
@@ -3911,10 +3899,7 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok,
 
     // A bare reference to an already-complete tag (not a `{ ... }`
     // definition) -- nothing new to install. Re-running the block below
-    // would both needlessly recompute member offsets and re-install the
-    // tag under whatever name `ty->name` (the *shared* canonical type's
-    // name field, mutated by every declarator that has since reused it)
-    // currently happens to hold; see the struct_union_decl comment (#897).
+    // would needlessly recompute member offsets.
     if (!is_definition)
         return ty;
 

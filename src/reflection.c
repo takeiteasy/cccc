@@ -655,10 +655,10 @@ const char *__builtin_ast_type_name(Type *ty) {
 // __builtin_ast_type_c_name: returns a valid C identifier fragment for a type,
 // suitable for naming generated functions like sum_<T>/map_<T>.
 // For builtin scalar types, we always use the kind-based name (e.g. "int",
-// "ulong") regardless of ty->name, because typedef aliases (e.g.
-// `typedef int wchar_t`) mutate the singleton type's name field and would
-// otherwise produce misleading names like `sum_wchar_t` for `int`.
-// For non-scalar named types (structs, enums, user typedefs), ty->name is used.
+// "ulong"), so a typedef alias (e.g. `typedef int wchar_t`) never produces a
+// misleading name like `sum_wchar_t` for `int`.
+// For non-scalar named types (structs, enums, user typedefs) the tag or
+// typedef name is used.
 CC_BUILTIN_CSTR(__builtin_ast_type_c_name, 1);
 const char *__builtin_ast_type_c_name(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
@@ -3333,7 +3333,7 @@ void __builtin_ast_function_add_param(Obj *fn, const char *name, Type *type) {
     Type *param_type = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     type_assign(vm, param_type, type);
     param_type->next = NULL;
-    param_type->name = __builtin_ast_synthetic_token(param->name);
+    param_type->param_name = __builtin_ast_synthetic_token(param->name);
     if (fn->ty->params == NULL) {
         fn->ty->params = param_type;
     } else {
@@ -6253,9 +6253,8 @@ Type *__builtin_ast_make_struct(const char *name) {
         return NULL;
     Type *ty       = struct_type(vm);
     int   name_len = (int)strlen(name);
-    ty->name       = reflect_make_name_token(vm, name, name_len);
     type_agg_mut(vm, ty)->struct_tag =
-        ty->name; // #900: survives any later declarator name-overwrite
+        reflect_make_name_token(vm, name, name_len);
     ty->size  = 0;
     ty->align = 1;
     reflect_push_tag_scope(vm, name, name_len, ty);
@@ -6270,9 +6269,8 @@ Type *__builtin_ast_make_union(const char *name) {
         return NULL;
     Type *ty       = union_type(vm);
     int   name_len = (int)strlen(name);
-    ty->name       = reflect_make_name_token(vm, name, name_len);
     type_agg_mut(vm, ty)->struct_tag =
-        ty->name; // #900: survives any later declarator name-overwrite
+        reflect_make_name_token(vm, name, name_len);
     ty->size  = 0;
     ty->align = 1;
     reflect_push_tag_scope(vm, name, name_len, ty);
@@ -6354,9 +6352,8 @@ Type *__builtin_ast_make_enum(const char *name) {
         return NULL;
     Type *ty       = enum_type(vm);
     int   name_len = (int)strlen(name);
-    ty->name       = reflect_make_name_token(vm, name, name_len);
     type_agg_mut(vm, ty)->enum_tag =
-        ty->name; // #900: survives any later declarator name-overwrite
+        reflect_make_name_token(vm, name, name_len);
     reflect_push_tag_scope(vm, name, name_len, ty);
     return ty;
 }
@@ -6412,11 +6409,18 @@ Type *__builtin_ast_make_typedef(const char *name, Type *underlying) {
     if (!vm || !name || !underlying)
         return NULL;
     int name_len = (int)strlen(name);
-    // Give the underlying type this name if it has none
-    if (!underlying->name)
-        underlying->name = reflect_make_name_token(vm, name, name_len);
-    reflect_push_typedef_scope(vm, name, name_len, underlying);
-    return underlying;
+    Token *name_tok = reflect_make_name_token(vm, name, name_len);
+    Type  *ty       = underlying;
+    // Same shape as parse_typedef: a scalar alias gets its own Type so the
+    // shared singleton keeps no name; an aggregate keeps its identity.
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM) {
+        ty                                 = copy_type(vm, ty);
+        type_agg_mut(vm, ty)->typedef_name = name_tok;
+    } else if (!type_tag_token(ty) && !type_agg(ty)->typedef_name) {
+        type_agg_mut(vm, ty)->typedef_name = name_tok;
+    }
+    reflect_push_typedef_scope(vm, name, name_len, ty);
+    return ty;
 }
 
 // ============================================================================

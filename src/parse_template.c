@@ -2154,9 +2154,10 @@ static Type *param_type(VirtualMachine *vm, Template *t, int i) {
     Token *rest;
     Token *toks = clone_range_skip(vm, p->type_start, p->decl_end, p->dots);
     Type  *ty   = declspec(vm, &rest, toks, NULL);
-    ty          = declarator(vm, &rest, rest, ty);
-    if (rest->kind != TK_EOF || !ty->name || ty->name->len != p->name->len ||
-        strncmp(ty->name->loc, p->name->loc, p->name->len))
+    DeclName dn;
+    ty = declarator(vm, &rest, rest, ty, &dn);
+    if (rest->kind != TK_EOF || !dn.tok || dn.tok->len != p->name->len ||
+        strncmp(dn.tok->loc, p->name->loc, p->name->len))
         error_tok(vm, p->name, "malformed constant template parameter '%.*s'",
                   (int)p->name->len, p->name->loc);
     if (ty->kind == TY_LDOUBLE)
@@ -3716,7 +3717,6 @@ static Type *pattern_inst_type(VirtualMachine *vm, Token **rest, Token *tok) {
     Type *ph                         = struct_type(vm);
     ph->size                         = 1;
     type_agg_mut(vm, ph)->struct_tag = t->name_tok;
-    ph->name                         = t->name_tok;
     InstPat *ip   = arena_alloc(&vm->compiler.parser_arena, sizeof(*ip));
     *ip           = (InstPat){pt->inst_pats, ph, t, pl};
     pt->inst_pats = ip;
@@ -3823,7 +3823,6 @@ static void register_partial(VirtualMachine *vm, Template *pt) {
         Type *ph                         = struct_type(vm);
         ph->size                         = 1;
         type_agg_mut(vm, ph)->struct_tag = pt->params[k].name;
-        ph->name                         = pt->params[k].name;
         pt->vars[k]                      = ph;
         Obj *unused                      = NULL;
         bind_param(vm, pt, k, ph, NULL, bindings, &unused);

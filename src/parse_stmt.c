@@ -489,7 +489,9 @@ static void for_init_declaration(VirtualMachine *vm, Token **rest, Token *start,
         bool saved                     = vm->compiler.in_type_lookahead;
         vm->compiler.in_type_lookahead = true;
         Token *probe                   = tok;
-        fn_name = declarator(vm, &probe, tok, copy_type(vm, basety))->name;
+        DeclName fn_dn;
+        declarator(vm, &probe, tok, copy_type(vm, basety), &fn_dn);
+        fn_name                        = fn_dn.tok;
         vm->compiler.in_type_lookahead = saved;
     }
 

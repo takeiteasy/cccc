@@ -3425,11 +3425,10 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
         const char *owner_kind =
             target->owner && target->owner->kind == TY_UNION ? "union"
                                                              : "struct";
+        Token *owner_tag = target->owner ? type_tag_token(target->owner) : NULL;
         const char *owner_name =
-            target->owner && target->owner->name
-                ? arena_strndup(vm, target->owner->name->loc,
-                                target->owner->name->len)
-                : NULL;
+            owner_tag ? arena_strndup(vm, owner_tag->loc, owner_tag->len)
+                      : NULL;
         target_desc = owner_name
                           ? arena_format(vm, "member %s of %s %s", target->name,
                                          owner_kind, owner_name)
@@ -3821,13 +3820,9 @@ static void init_vm_segments_for_macros(VirtualMachine *vm) {
 // return type or param it always has to be spelled `struct %s`/`union %s`
 // (a tag forward-reference is legal C before the tag's own definition; a
 // bare typedef name is not yet visible at that position, since the file's
-// typedef hasn't been parsed yet). write_type_str() below has always used
-// `ty->name` for that spelling. That is correct for a genuinely tagged
-// struct (nothing else can overwrite a definition's own name), but for
-// `typedef struct { ... } Pair;` -- no tag at all -- `ty->name` is the
-// *typedef* name, overwritten onto this Type object by declarator()
-// (parse_types.c) the same way it would overwrite any other declarator's
-// name. Spelling that as `struct Pair` synthesizes a reference to a tag
+// typedef hasn't been parsed yet). write_type_str() below spells it from the
+// tag, or for `typedef struct { ... } Pair;` -- no tag at all -- from the
+// typedef name. Spelling that as `struct Pair` synthesizes a reference to a tag
 // that was never declared; the reparse dutifully mints a brand new,
 // forever-incomplete `struct Pair` unrelated to the real (complete)
 // anonymous struct, and every site typed from the generated function's
@@ -3863,6 +3858,13 @@ static void init_vm_segments_for_macros(VirtualMachine *vm) {
 // standalone `typedef struct Pair Pair;` -- three disagreeing spellings of
 // one Type for three emitters that each now thought they owned it.
 // Deliberately not repeated here.
+// The name a reparsed `struct`/`union`/`enum` spelling uses: its tag, else the
+// typedef name that install_tag_alias_for_reparse() registers as a tag alias.
+static Token *reparse_tag_name(Type *ty) {
+    Token *tag = type_tag_token(ty);
+    return tag ? tag : type_agg(ty)->typedef_name;
+}
+
 static void install_tag_alias_for_reparse(VirtualMachine *vm, Type *ty) {
     if (!vm || !ty || !vm->compiler.scope)
         return;
@@ -3870,22 +3872,23 @@ static void install_tag_alias_for_reparse(VirtualMachine *vm, Type *ty) {
         ty = ty->base;
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
         return;
-    if (type_agg(ty)->struct_tag || !ty->name)
+    Token *name = type_agg(ty)->typedef_name;
+    if (type_tag_token(ty) || !name)
         return; // already tagged, or no name at all to reference by
 
     // #997-style redefinition guard: if a distinct tag of this name already
     // exists in the current scope (vanishingly unlikely -- it would mean
     // the source itself declares e.g. both `struct Pair {...};` and
-    // `typedef struct {...} Pair;` -- but cheap to check), leave ty->name
+    // `typedef struct {...} Pair;` -- but cheap to check), leave it
     // alone; the existing #18 bug (an incomplete synthesized tag) is a far
     // smaller problem than corrupting an unrelated tag's scope entry.
-    if (find_tag_in_current_scope(vm, ty->name))
+    if (find_tag_in_current_scope(vm, name))
         return;
 
     TagScopeNode *node =
         arena_alloc(&vm->compiler.parser_arena, sizeof(TagScopeNode));
-    node->name               = ty->name->loc;
-    node->name_len           = ty->name->len;
+    node->name               = name->loc;
+    node->name_len           = name->len;
     node->ty                 = ty;
     node->next               = vm->compiler.scope->tags;
     vm->compiler.scope->tags = node;
@@ -3945,23 +3948,26 @@ static int write_type_str(Type *ty, char *buf, int bufsize) {
             n += snprintf(buf + n, bufsize - n, "void *");
             break;
         case TY_STRUCT:
-            if (ty->name)
+            if (reparse_tag_name(ty))
                 n += snprintf(buf + n, bufsize - n, "struct %.*s",
-                              ty->name->len, ty->name->loc);
+                              reparse_tag_name(ty)->len,
+                              reparse_tag_name(ty)->loc);
             else
                 n += snprintf(buf + n, bufsize - n, "void /*anon struct*/");
             break;
         case TY_UNION:
-            if (ty->name)
-                n += snprintf(buf + n, bufsize - n, "union %.*s", ty->name->len,
-                              ty->name->loc);
+            if (reparse_tag_name(ty))
+                n += snprintf(buf + n, bufsize - n, "union %.*s",
+                              reparse_tag_name(ty)->len,
+                              reparse_tag_name(ty)->loc);
             else
                 n += snprintf(buf + n, bufsize - n, "void /*anon union*/");
             break;
         case TY_ENUM:
-            if (ty->name)
-                n += snprintf(buf + n, bufsize - n, "enum %.*s", ty->name->len,
-                              ty->name->loc);
+            if (reparse_tag_name(ty))
+                n += snprintf(buf + n, bufsize - n, "enum %.*s",
+                              reparse_tag_name(ty)->len,
+                              reparse_tag_name(ty)->loc);
             else
                 n += snprintf(buf + n, bufsize - n, "int");
             break;

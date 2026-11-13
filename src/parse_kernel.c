@@ -106,11 +106,13 @@ static AddrSpace pointee_space(Type *ty) {
 }
 
 static Obj *find_param(Obj *fn, Type *param) {
-    if (!param->name)
+    if (!param->param_name)
         return NULL;
     for (Obj *local = obj_fn(fn)->locals; local; local = local->next)
-        if (local->is_param && (int)strlen(local->name) == param->name->len &&
-            !memcmp(local->name, param->name->loc, param->name->len))
+        if (local->is_param &&
+            (int)strlen(local->name) == param->param_name->len &&
+            !memcmp(local->name, param->param_name->loc,
+                    param->param_name->len))
             return local;
     return NULL;
 }
@@ -500,7 +502,8 @@ static void seed_entry_params(KernelCtx *ctx, Obj *fn) {
             snprintf(what, sizeof(what),
                      "a %s pointer parameter on a kernel entry",
                      space_name(space));
-            kernel_error(ctx, param->name ? param->name : fn->tok, what);
+            kernel_error(ctx, param->param_name ? param->param_name : fn->tok,
+                         what);
         } else if (space == AS_NONE) {
             Obj *local = find_param(fn, param);
             if (local)
@@ -521,7 +524,7 @@ static void check_fn(KernelCtx *ctx, Obj *fn) {
 
     bool saved_float       = ctx->fn_reported_float;
     ctx->fn_reported_float = false;
-    Token *tok             = fn->ty && fn->ty->name ? fn->ty->name : fn->tok;
+    Token *tok             = fn->tok;
 
     if (fn->ty && fn->ty->is_variadic)
         kernel_error(ctx, tok, "a variadic function");

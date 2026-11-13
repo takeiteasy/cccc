@@ -1819,8 +1819,9 @@ struct Type {
     // "kind", so "array of T" is handled as "pointer to T".
     struct Type *
         base; /**< For pointer/array types: the referenced element/base type. */
-    Token       *name;
-    Token       *name_pos;
+    // Set only on function parameter Types, which are owned copies.
+    Token       *param_name;
+    Token       *param_name_pos;
     struct Type *return_ty;
     struct Type *params;
     struct Type *next;

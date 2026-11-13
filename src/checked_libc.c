@@ -240,7 +240,7 @@ static void apply_row(VirtualMachine *vm, Obj *fn, int row) {
     Token  *tok    = tokenize_string(vm, "<checked-libc>", ROWS[row].proto);
     VarAttr attr   = {0};
     Type   *base   = declspec(vm, &tok, tok, &attr);
-    Type   *ty     = declarator(vm, &tok, tok, base);
+    Type   *ty     = declarator(vm, &tok, tok, base, NULL);
     Type   *before = fn->ty;
     merge_checked_interface_defaults(vm, fn, ty);
     if (fn->ty == before)

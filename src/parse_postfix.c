@@ -1251,10 +1251,10 @@ static Node *check_call_arg(VirtualMachine *vm, CheckedCallWatch *watch,
 static void report_missing_args(VirtualMachine *vm, Token *tok, Type *param_ty,
                                 Node *cur) {
     const char *missing = "too few arguments";
-    if (param_ty->name)
+    if (param_ty->param_name)
         missing = arena_format(
             vm, "too few arguments: no argument for parameter '%.*s'",
-            param_ty->name->len, param_ty->name->loc);
+            param_ty->param_name->len, param_ty->param_name->loc);
     if (!vm->collect_errors || !error_tok_recover(vm, tok, "%s", missing))
         error_tok(vm, tok, "%s", missing);
     for (; param_ty; param_ty = param_ty->next) {
@@ -1446,7 +1446,7 @@ int param_default_scan(CustomAttrUse *use, Type *params, int pos, Token **bad,
             continue;
         int i = 1;
         for (Type *p = params; p; p = p->next, i++) {
-            if (!token_is_name(tok, p->name))
+            if (!token_is_name(tok, p->param_name))
                 continue;
             if (i > highest)
                 highest = i;
@@ -1470,7 +1470,7 @@ static int default_hoist_extent(KeyedArg *keyed, Type *param, int pos,
     int extent = 0;
     for (; param; param = param->next, pos++) {
         KeyedArg *k = keyed;
-        while (k && !token_is_name(k->key, param->name))
+        while (k && !token_is_name(k->key, param->param_name))
             k = k->next;
         if (k)
             continue;
@@ -1508,7 +1508,6 @@ static void bind_temp(VirtualMachine *vm, Obj **temp, Node *arg, Token *tok) {
     Type *ty        = copy_type(vm, arg->ty);
     ty->is_const    = false;
     ty->is_volatile = false;
-    ty->name        = NULL;
     *temp           = default_temp(vm, ty, tok);
 }
 
@@ -1694,7 +1693,7 @@ static bool hoists_param(VirtualMachine *vm, Type *param, bool named,
         error_tok(vm, tok,
                   "a @default cannot name the checked pointer parameter "
                   "'%.*s'",
-                  param->name->len, param->name->loc);
+                  param->param_name->len, param->param_name->loc);
     return false;
 }
 
@@ -1712,14 +1711,15 @@ static Node *parse_param_default(VirtualMachine *vm, CustomAttrUse *use,
     bool bound       = false;
     int  i           = 1;
     for (Type *p = use->params; p && i < pos; p = p->next, i++)
-        bound |= p->name && temps[i];
+        bound |= p->param_name && temps[i];
     vm->compiler.scope = file;
     if (in_function || bound)
         enter_scope(vm);
     i = 1;
     for (Type *p = use->params; p && i < pos; p = p->next, i++)
-        if (p->name && temps[i])
-            push_scope(vm, p->name->loc, p->name->len)->var = temps[i];
+        if (p->param_name && temps[i])
+            push_scope(vm, p->param_name->loc, p->param_name->len)->var =
+                temps[i];
 
     Token *tok = use->tok->next->next;
     Node  *arg = assign(vm, &tok, tok);
@@ -1749,7 +1749,7 @@ static void fill_omitted_args(VirtualMachine *vm, CheckedCallWatch *watch,
     for (KeyedArg *k = keyed; k; k = k->next) {
         int   pos = 0;
         Type *p   = ty->params;
-        for (; p && !token_is_name(k->key, p->name); p = p->next)
+        for (; p && !token_is_name(k->key, p->param_name); p = p->next)
             pos++;
         if (!p)
             error_tok(vm, k->key, "no parameter named '%.*s'", k->key->len,
@@ -1789,7 +1789,7 @@ static void fill_omitted_args(VirtualMachine *vm, CheckedCallWatch *watch,
         int   pos = *index;
         Node *arg = NULL;
         for (KeyedArg *k = keyed; k && !arg; k = k->next)
-            if (token_is_name(k->key, (*param_ty)->name))
+            if (token_is_name(k->key, (*param_ty)->param_name))
                 arg = k->value;
         if (!arg && direct) {
             CustomAttrUse *use = param_default_use(*param_ty);

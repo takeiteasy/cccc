@@ -384,7 +384,7 @@ Node *assign(VirtualMachine *vm, Token **rest, Token *tok);
 Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr);
 Type *auto_deduced_type(VirtualMachine *vm, Type *ty);
 int check_auto_declarator(VirtualMachine *vm, VarAttr *attr, Type *ty,
-                          bool is_extra_declarator);
+                          Token *name, bool is_extra_declarator);
 Type *auto_declared_type(VirtualMachine *vm, Type *decl, Type *deduced);
 Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok);
 Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
@@ -474,7 +474,15 @@ int count_auto_ptr_depth(Type *ty);
 int count_ptr_depth(Type *ty);
 Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                   VarAttr *attr);
-Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty);
+// The identifier a declarator declares, and where it would sit when omitted.
+typedef struct {
+    Token *tok;
+    Token *pos;
+} DeclName;
+
+// `dn` (optional) receives the declared name; it is never stored on `ty`.
+Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
+                 DeclName *dn);
 Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr);
 DeclKw declspec_kw(Token *tok);
 void enter_scope(VirtualMachine *vm);
@@ -560,6 +568,8 @@ Node *new_binary(VirtualMachine *vm, NodeKind kind, Node *lhs, Node *rhs,
 Node *new_complex_node(VirtualMachine *vm, Node *real, Node *imag, Type *ty,
                        Token *tok);
 Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty);
+// The `_at` variants name the object after `tok`, the declared identifier.
+Obj *new_gvar_at(VirtualMachine *vm, Token *tok, Type *ty);
 void link_gvar(VirtualMachine *vm, Obj *var);
 void link_hidden_builtin(VirtualMachine *vm, Obj *fn);
 void claim_cleanup(VirtualMachine *vm, Obj *var, VarAttr *attr);
@@ -569,6 +579,7 @@ Obj *new_implicit_function(VirtualMachine *vm, Token *tok);
 Initializer *new_initializer(VirtualMachine *vm, Type *ty, bool is_flexible);
 Node *new_long(VirtualMachine *vm, int64_t val, Token *tok);
 Obj *new_lvar(VirtualMachine *vm, char *name, int name_len, Type *ty);
+Obj *new_lvar_at(VirtualMachine *vm, Token *tok, Type *ty);
 Node *new_node(VirtualMachine *vm, NodeKind kind, Token *tok);
 Node *new_num(VirtualMachine *vm, int64_t val, Token *tok);
 Obj *new_private_func_obj(VirtualMachine *vm, const char *name, Type *ty);
@@ -578,6 +589,7 @@ Node *new_ulong(VirtualMachine *vm, long val, Token *tok);
 Node *new_unary(VirtualMachine *vm, NodeKind kind, Node *expr, Token *tok);
 char *new_unique_name(VirtualMachine *vm);
 Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty);
+Obj *new_var_at(VirtualMachine *vm, Token *tok, Type *ty);
 Node *new_var_node(VirtualMachine *vm, Obj *var, Token *tok);
 Node *new_cleanup_decl(VirtualMachine *vm, Obj *var, Token *tok);
 void cleanup_open_after(VirtualMachine *vm, Obj *var, Node *marker, Node *last);
@@ -616,7 +628,8 @@ void cc_check_checked_scope_compound_literal(VirtualMachine *vm, Type *ty,
                                              Token *tok);
 void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty);
 void resolve_type_checked_bounds(VirtualMachine *vm, Type *ty);
-void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty);
+void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty,
+                             Token *new_tok);
 void merge_checked_interface_defaults(VirtualMachine *vm, Obj *fn, Type *ty);
 unsigned adopt_checked_definition_bounds(VirtualMachine *vm, Obj *fn,
                                          Type *def_ty);

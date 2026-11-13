@@ -154,14 +154,15 @@ void serialize_type_json(FILE *f, Type *ty, int indent) {
     }
 
     // Struct/Union name and members
-    if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && ty->name) {
+    Token *tag = type_tag_token(ty);
+    if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && tag) {
         fprintf(f, ",\n");
         print_indent(f, indent + 1);
         fprintf(f, "\"name\": ");
         // Extract name from token
-        int   name_len = ty->name->len;
+        int   name_len = tag->len;
         char *name     = malloc(name_len + 1);
-        strncpy(name, ty->name->loc, name_len);
+        strncpy(name, tag->loc, name_len);
         name[name_len] = '\0';
         print_escaped_string(f, name);
         free(name);
@@ -229,13 +230,14 @@ void serialize_type_json(FILE *f, Type *ty, int indent) {
 
     // Enum name and constants
     if (ty->kind == TY_ENUM) {
-        if (ty->name) {
+        Token *tag = type_tag_token(ty);
+        if (tag) {
             fprintf(f, ",\n");
             print_indent(f, indent + 1);
             fprintf(f, "\"name\": ");
-            int   name_len = ty->name->len;
+            int   name_len = tag->len;
             char *name     = malloc(name_len + 1);
-            strncpy(name, ty->name->loc, name_len);
+            strncpy(name, tag->loc, name_len);
             name[name_len] = '\0';
             print_escaped_string(f, name);
             free(name);
@@ -266,10 +268,10 @@ void serialize_type_json(FILE *f, Type *ty, int indent) {
                 // Parameter name (if available)
                 print_indent(f, indent + 3);
                 fprintf(f, "\"name\": ");
-                if (p->name) {
-                    int   p_name_len = p->name->len;
+                if (p->param_name) {
+                    int   p_name_len = p->param_name->len;
                     char *p_name     = malloc(p_name_len + 1);
-                    strncpy(p_name, p->name->loc, p_name_len);
+                    strncpy(p_name, p->param_name->loc, p_name_len);
                     p_name[p_name_len] = '\0';
                     print_escaped_string(f, p_name);
                     free(p_name);
@@ -341,10 +343,11 @@ static void serialize_aggregate_json(FILE *f, Type *ty, int indent,
     // Name
     print_indent(f, indent + 1);
     fprintf(f, "\"name\": ");
-    if (ty->name) {
-        int   name_len = ty->name->len;
+    Token *tag = type_tag_token(ty);
+    if (tag) {
+        int   name_len = tag->len;
         char *name     = malloc(name_len + 1);
-        strncpy(name, ty->name->loc, name_len);
+        strncpy(name, tag->loc, name_len);
         name[name_len] = '\0';
         print_escaped_string(f, name);
         free(name);
@@ -431,10 +434,11 @@ static void serialize_enum_json(FILE *f, Type *ty, int indent) {
     // Name
     print_indent(f, indent + 1);
     fprintf(f, "\"name\": ");
-    if (ty->name) {
-        int   name_len = ty->name->len;
+    Token *tag = type_tag_token(ty);
+    if (tag) {
+        int   name_len = tag->len;
         char *name     = malloc(name_len + 1);
-        strncpy(name, ty->name->loc, name_len);
+        strncpy(name, tag->loc, name_len);
         name[name_len] = '\0';
         print_escaped_string(f, name);
         free(name);

@@ -631,8 +631,8 @@ void merge_param_names(Obj *fn, Type *decl_ty) {
         return;
     Type *cp = fn->ty->params;
     for (Type *p = decl_ty->params; p && cp; p = p->next, cp = cp->next)
-        if (!cp->name && p->name)
-            cp->name = p->name;
+        if (!cp->param_name && p->param_name)
+            cp->param_name = p->param_name;
 }
 
 // Takes the queued attributes of `decl_ty`'s parameter list for the function
@@ -683,10 +683,12 @@ void run_param_custom_attrs(VirtualMachine *vm, Obj *fn, Type *decl_ty) {
         CustomAttrUse *uses = type_attrs(p)->custom_attrs;
         if (!uses)
             continue;
-        char *name =
-            cp->name ? arena_strndup(vm, cp->name->loc, cp->name->len) : NULL;
+        char *name = cp->param_name ? arena_strndup(vm, cp->param_name->loc,
+                                                    cp->param_name->len)
+                                    : NULL;
         run_custom_attrs(vm, uses, ATTR_TARGET_PARAM, name, cp, NULL,
-                         cp->name ? cp->name : uses->tok, NULL, fn->ty, index);
+                         cp->param_name ? cp->param_name : uses->tok, NULL,
+                         fn->ty, index);
     }
     vm->compiler.draining_member_attrs = false;
 }
@@ -1276,15 +1278,15 @@ Initializer *new_initializer(VirtualMachine *vm, Type *ty, bool is_flexible) {
     return init;
 }
 
-Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
+static Obj *new_var_impl(VirtualMachine *vm, char *name, int name_len,
+                         Token *tok, Type *ty) {
     Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(var, 0, sizeof(Obj));
     var->name      = name;
     var->ty        = ty;
     var->align     = ty->align;
-    var->tok       = ty->name;
-    var->display_name =
-        ty->name ? arena_strndup(vm, ty->name->loc, ty->name->len) : name;
+    var->tok             = tok;
+    var->display_name    = tok ? arena_strndup(vm, tok->loc, tok->len) : name;
     var->is_maybe_unused = ty->is_maybe_unused;
     var->is_deprecated   = ty->is_deprecated;
     var->is_noreturn     = ty->is_noreturn;
@@ -1320,14 +1322,31 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
-Obj *new_lvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
-    warn_if_shadowing(vm, ty->name);
-    Obj *var             = new_var(vm, name, name_len, ty);
+Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
+    return new_var_impl(vm, name, name_len, NULL, ty);
+}
+
+Obj *new_var_at(VirtualMachine *vm, Token *tok, Type *ty) {
+    return new_var_impl(vm, get_ident(vm, tok), tok->len, tok, ty);
+}
+
+static Obj *new_lvar_impl(VirtualMachine *vm, char *name, int name_len,
+                          Token *tok, Type *ty) {
+    warn_if_shadowing(vm, tok);
+    Obj *var             = new_var_impl(vm, name, name_len, tok, ty);
     var->is_local        = true;
-    var->is_local_symbol = ty->name && name_len > 0;
+    var->is_local_symbol = tok && name_len > 0;
     var->next            = vm->compiler.locals;
     vm->compiler.locals  = var;
     return var;
+}
+
+Obj *new_lvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
+    return new_lvar_impl(vm, name, name_len, NULL, ty);
+}
+
+Obj *new_lvar_at(VirtualMachine *vm, Token *tok, Type *ty) {
+    return new_lvar_impl(vm, get_ident(vm, tok), tok->len, tok, ty);
 }
 
 // A declarator's cleanup rides on its own Type copy (see
@@ -1379,11 +1398,20 @@ void link_gvar(VirtualMachine *vm, Obj *var) {
     vm->compiler.globals         = var;
 }
 
-Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
-    drop_cleanup_attr(vm, ty, NULL, ty->name);
-    Obj *var = new_var(vm, name, name_len, ty);
+static Obj *new_gvar_impl(VirtualMachine *vm, char *name, int name_len,
+                          Token *tok, Type *ty) {
+    drop_cleanup_attr(vm, ty, NULL, tok);
+    Obj *var = new_var_impl(vm, name, name_len, tok, ty);
     link_gvar(vm, var);
     return var;
+}
+
+Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
+    return new_gvar_impl(vm, name, name_len, NULL, ty);
+}
+
+Obj *new_gvar_at(VirtualMachine *vm, Token *tok, Type *ty) {
+    return new_gvar_impl(vm, get_ident(vm, tok), tok->len, tok, ty);
 }
 
 // Side-effect check for a checked-pointer bounds expression (#770/#483):
@@ -1522,8 +1550,8 @@ Node *checked_vla_extent(VirtualMachine *vm, Type *ty, Token *tok) {
 // untouched) for CB_NONE/CB_UNKNOWN -- callers are expected to have already
 // skipped those forms via their own cheaper check, this is just a second
 // line of defense.
-static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
-                                  Node **out_hi) {
+static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Token *name,
+                                  Node **out_lo, Node **out_hi) {
     if (type_chk(ty)->form == CB_NONE || type_chk(ty)->form == CB_UNKNOWN)
         return;
 
@@ -1535,7 +1563,7 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
     // already-resolved element count instead (see its comment in src/cccc.h).
     // No side-effect check is needed: a plain integer literal can't have one.
     if (!type_chk(ty)->arg1 && type_chk(ty)->checked_array_extent > 0) {
-        *out_hi = new_long(vm, type_chk(ty)->checked_array_extent, ty->name);
+        *out_hi = new_long(vm, type_chk(ty)->checked_array_extent, name);
         return;
     }
 
@@ -1544,7 +1572,7 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
     // A VLA parameter has checked_bounds_arg1 and takes the path below.
     if (ty->kind == TY_VLA && !type_chk(ty)->arg1 &&
         type_chk(ty)->vla_extent_tok) {
-        *out_hi = checked_vla_extent(vm, ty, ty->name);
+        *out_hi = checked_vla_extent(vm, ty, name);
         return;
     }
 
@@ -1594,7 +1622,8 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
 }
 
 void resolve_checked_bounds(VirtualMachine *vm, Obj *var) {
-    resolve_bounds_tokens(vm, var->ty, &obj_chk_mut(vm, var)->checked_bounds_lo,
+    resolve_bounds_tokens(vm, var->ty, var->tok,
+                          &obj_chk_mut(vm, var)->checked_bounds_lo,
                           &obj_chk_mut(vm, var)->checked_bounds_hi);
 }
 
@@ -1676,7 +1705,7 @@ void resolve_member_checked_bounds(VirtualMachine *vm, Member *members) {
         if (!mem->name || type_chk(mem->ty)->form == CB_NONE ||
             type_chk(mem->ty)->form == CB_UNKNOWN)
             continue;
-        resolve_bounds_tokens(vm, mem->ty, &mem->checked_bounds_lo,
+        resolve_bounds_tokens(vm, mem->ty, mem->name, &mem->checked_bounds_lo,
                               &mem->checked_bounds_hi);
         check_member_bounds_template(vm, mem->checked_bounds_lo, mem->name);
         check_member_bounds_template(vm, mem->checked_bounds_hi, mem->name);
@@ -1765,22 +1794,25 @@ void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty) {
     int idx = 0;
     for (Type *p = fn_ty->params; p; p = p->next) {
         idx++;
-        if (!p->name)
+        if (!p->param_name)
             continue;
         Obj *placeholder = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
         memset(placeholder, 0, sizeof(Obj));
-        placeholder->name = arena_strndup(vm, p->name->loc, p->name->len);
+        placeholder->name =
+            arena_strndup(vm, p->param_name->loc, p->param_name->len);
         placeholder->display_name                       = placeholder->name;
         placeholder->ty                                 = p;
         obj_chk_mut(vm, placeholder)->checked_self_param_idx             = idx;
-        push_scope(vm, p->name->loc, p->name->len)->var = placeholder;
+        push_scope(vm, p->param_name->loc, p->param_name->len)->var =
+            placeholder;
     }
 
     for (Type *p = fn_ty->params; p; p = p->next) {
         if (type_chk(p)->form == CB_NONE || type_chk(p)->form == CB_UNKNOWN)
             continue;
-        Token *err_tok = p->name ? p->name : type_chk(p)->arg1;
-        resolve_bounds_tokens(vm, p, &type_chk_mut(vm, p)->param_bounds_lo,
+        Token *err_tok = p->param_name ? p->param_name : type_chk(p)->arg1;
+        resolve_bounds_tokens(vm, p, p->param_name,
+                              &type_chk_mut(vm, p)->param_bounds_lo,
                               &type_chk_mut(vm, p)->param_bounds_hi);
         check_param_bounds_template(vm, type_chk(p)->param_bounds_lo, err_tok);
         check_param_bounds_template(vm, type_chk(p)->param_bounds_hi, err_tok);
@@ -1788,7 +1820,8 @@ void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty) {
 
     if (ret_has_bounds) {
         Token *err_tok = type_chk(ret)->arg1;
-        resolve_bounds_tokens(vm, ret, &type_chk_mut(vm, fn_ty)->ret_bounds_lo,
+        resolve_bounds_tokens(vm, ret, NULL,
+                              &type_chk_mut(vm, fn_ty)->ret_bounds_lo,
                               &type_chk_mut(vm, fn_ty)->ret_bounds_hi);
         check_param_bounds_template(vm, type_chk(fn_ty)->ret_bounds_lo,
                                     err_tok);
@@ -1879,7 +1912,7 @@ static bool checked_bounds_conflict(Type *o, Node *o_lo, Node *o_hi, Type *n,
 static void checked_conflict_error(VirtualMachine *vm, Type *n, Token *new_tok,
                                    Token *old_tok, const char *name,
                                    const char *what) {
-    Token *at = n->name ? n->name : type_chk(n)->arg1;
+    Token *at = n->param_name ? n->param_name : type_chk(n)->arg1;
     if (!at)
         at = new_tok;
     error_tok(vm, at,
@@ -1953,7 +1986,7 @@ static void checked_adopt(VirtualMachine *vm, Type *dst, Type *src) {
 // it only fills pointer parameters that spell neither a kind nor bounds, and
 // never reports a conflict, so a user's own annotation always wins.
 static void merge_checked_interface_impl(VirtualMachine *vm, Obj *fn, Type *ty,
-                                         bool defaults) {
+                                         Token *new_tok, bool defaults) {
     Type *old_ty = fn->ty;
     if (!old_ty || old_ty == ty || old_ty->kind != TY_FUNC ||
         ty->kind != TY_FUNC || vm->compiler.in_type_lookahead)
@@ -1997,8 +2030,7 @@ static void merge_checked_interface_impl(VirtualMachine *vm, Obj *fn, Type *ty,
         resolve_param_checked_bounds(vm, ty);
     } else
         check_checked_iface_conflict(vm, old_ty, ty, fn->name,
-                                     old_ty->name ? old_ty->name : ty->name,
-                                     ty->name);
+                                     fn->tok ? fn->tok : new_tok, new_tok);
 
     bool ret_adopt = !defaults && old_ty->return_ty && ty->return_ty &&
                      old_ty->return_ty->kind == TY_PTR &&
@@ -2041,12 +2073,13 @@ static void merge_checked_interface_impl(VirtualMachine *vm, Obj *fn, Type *ty,
 // against them. fn->ty is copied first because a typedef may share it.
 // Adoption is top-level only: callers never see a callback parameter's own
 // bounds, so adopting them into fn->ty would change nothing.
-void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty) {
-    merge_checked_interface_impl(vm, fn, ty, false);
+void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty,
+                             Token *new_tok) {
+    merge_checked_interface_impl(vm, fn, ty, new_tok, false);
 }
 
 void merge_checked_interface_defaults(VirtualMachine *vm, Obj *fn, Type *ty) {
-    merge_checked_interface_impl(vm, fn, ty, true);
+    merge_checked_interface_impl(vm, fn, ty, NULL, true);
 }
 
 // A copy of `def_fn` carrying the bounds only `proto_fn` spells, or NULL when

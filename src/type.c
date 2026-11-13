@@ -598,6 +598,18 @@ void type_assign(VirtualMachine *vm, Type *dst, const Type *src) {
 #undef DUP
 }
 
+Token *type_tag_token(const Type *ty) {
+    switch (ty->kind) {
+        case TY_ENUM:
+            return type_agg(ty)->enum_tag;
+        case TY_STRUCT:
+        case TY_UNION:
+            return type_agg(ty)->struct_tag;
+        default:
+            return NULL;
+    }
+}
+
 Type *copy_type(VirtualMachine *vm, Type *ty) {
     Type *ret = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     type_assign(vm, ret, ty);

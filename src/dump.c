@@ -242,13 +242,8 @@ static void dump_type_simple(FILE *f, Type *ty) {
         case TY_STRUCT:
         case TY_UNION: {
             fprintf(f, "%s", type_kind_name(ty->kind));
-            // Prefer the tag name (struct_tag survives declarator
-            // name-overwrite, #892) over ty->name, which is the *declarator*
-            // being typed against this struct/union type -- e.g. `struct P p;`
-            // set ty->name to "p", not "P", so printing ty->name here
-            // mis-spelled every tagged-type REPL result (#666).
-            Token *tag =
-                type_agg(ty)->struct_tag ? type_agg(ty)->struct_tag : ty->name;
+            Token *tag = type_agg(ty)->struct_tag ? type_agg(ty)->struct_tag
+                                                  : type_agg(ty)->typedef_name;
             if (tag) {
                 fprintf(f, " ");
                 fprintf(f, "%.*s", tag->len, tag->loc);
@@ -257,8 +252,8 @@ static void dump_type_simple(FILE *f, Type *ty) {
         }
         case TY_ENUM: {
             fprintf(f, "%s", type_kind_name(ty->kind));
-            Token *tag =
-                type_agg(ty)->enum_tag ? type_agg(ty)->enum_tag : ty->name;
+            Token *tag = type_agg(ty)->enum_tag ? type_agg(ty)->enum_tag
+                                                : type_agg(ty)->typedef_name;
             if (tag) {
                 fprintf(f, " ");
                 fprintf(f, "%.*s", tag->len, tag->loc);

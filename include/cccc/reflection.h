@@ -3282,7 +3282,8 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 //   StructAddField(s, "y", GetType("int"));
 //
 // StructAddField works for both struct and union types.
-// MakeTypedef registers name as an alias for underlying and returns it.
+// MakeTypedef registers name as an alias for underlying and returns the aliased
+// type (a scalar gets its own copy; an aggregate keeps its identity).
 // EnumAddConstant adds a constant to the enum AND to scope (usable as int).
 /*! @def MakeStruct
  * @brief Create and expose a new named struct type.

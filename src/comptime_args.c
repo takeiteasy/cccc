@@ -669,7 +669,7 @@ static int handle_kind_of_type(const Type *ty) {
         return CC_H_NONE;
     const Token *tag = type_agg(pointee)->struct_tag
                            ? type_agg(pointee)->struct_tag
-                           : pointee->name;
+                           : type_agg(pointee)->typedef_name;
     if (!tag)
         return CC_H_NONE;
     const char *text = tag->loc;

@@ -1458,7 +1458,7 @@ Obj *declare_runtime_fn(VirtualMachine *vm, const char *name,
     VarAttr attr = {};
     convert_pp_tokens(vm, tok);
     Type *base        = declspec(vm, &tok, tok, &attr);
-    Type *ty          = declarator(vm, &tok, tok, base);
+    Type *ty          = declarator(vm, &tok, tok, base, NULL);
     Obj  *fn          = new_gvar(vm, (char *)name, strlen(name), ty);
     fn->is_function   = true;
     fn->is_definition = false;
@@ -1627,8 +1627,9 @@ static Token *loop_header(VirtualMachine *vm, Token *tok, OmpLoopLevel *lv) {
     if (is_typename(vm, tok)) {
         VarAttr attr = {};
         Type   *base = declspec(vm, &tok, tok, &attr);
-        lv->ty       = declarator(vm, &tok, tok, base);
-        name         = lv->ty->name;
+        DeclName dn;
+        lv->ty       = declarator(vm, &tok, tok, base, &dn);
+        name         = dn.tok;
         lv->declared = true;
     } else {
         tok = tok->next;

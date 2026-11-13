@@ -38,24 +38,24 @@ static bool typedef_declared_in_system_header(VirtualMachine *vm, char *name,
 // 6.7p3). A clash between two system headers (cccc's bundled header vs the
 // SDK's under --use-system-headers) is a warning so the SDK still builds.
 static void check_typedef_redefinition(VirtualMachine *vm, Type *ty,
-                                       char *name) {
+                                       Token *name_tok, char *name) {
     if (vm->compiler.allow_fn_redefinition)
         return;
-    VarScope *old = find_var_in_current_scope(vm, name, ty->name->len);
+    VarScope *old = find_var_in_current_scope(vm, name, name_tok->len);
     if (!old)
         return;
     bool old_is_typedef = old->type_def != NULL;
     if (old_is_typedef && is_compatible_qualified_strict(old->type_def, ty))
         return;
-    bool  system = ty->name->file && ty->name->file->is_system_header &&
-                   typedef_declared_in_system_header(vm, name, ty->name->len);
+    bool  system = name_tok->file && name_tok->file->is_system_header &&
+                   typedef_declared_in_system_header(vm, name, name_tok->len);
     char *fmt    = old_is_typedef
                        ? "typedef redefinition with different types: '%s'"
                        : "'%s' redeclared as a different kind of symbol";
     if (system)
-        warn_tok(vm, ty->name, CCCC_WARN_PEDANTIC, fmt, name);
+        warn_tok(vm, name_tok, CCCC_WARN_PEDANTIC, fmt, name);
     else
-        error_tok(vm, ty->name, fmt, name);
+        error_tok(vm, name_tok, fmt, name);
 }
 
 // Attributes run once, where the tag or typedef is declared; later uses of the
@@ -74,9 +74,10 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
             tok = skip(vm, tok, ",");
         first    = false;
 
-        Type *ty = declarator(vm, &tok, tok, basety);
-        if (!ty->name)
-            error_tok(vm, ty->name_pos, "typedef name omitted");
+        DeclName dn;
+        Type    *ty = declarator(vm, &tok, tok, basety, &dn);
+        if (!dn.tok)
+            error_tok(vm, dn.pos, "typedef name omitted");
         // #999: for a plain typedef of a builtin scalar (`typedef unsigned
         // long DyValue;`), declarator() above returns `basety` itself
         // unmodified (type_suffix() is a no-op with no `[`/`(` following
@@ -117,30 +118,30 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
         if (ty->kind != TY_STRUCT && ty->kind != TY_UNION &&
             ty->kind != TY_ENUM)
             ty = copy_type(vm, ty);
-        if (ty->kind == TY_ARRAY && ty->name->file &&
-            !cc_file_is_command_line_input(vm, ty->name->file->name))
+        if (ty->kind == TY_ARRAY && dn.tok->file &&
+            !cc_file_is_command_line_input(vm, dn.tok->file->name))
             ty->header_array_typedef = true;
-        drop_cleanup_attr(vm, ty, attr, ty->name);
+        drop_cleanup_attr(vm, ty, attr, dn.tok);
         resolve_type_checked_bounds(vm, ty);
         if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
             !type_agg(ty)->struct_tag && !type_agg(ty)->typedef_name)
-            type_agg_mut(vm, ty)->typedef_name = ty->name;
+            type_agg_mut(vm, ty)->typedef_name = dn.tok;
         else if (ty->kind == TY_ENUM && !type_agg(ty)->enum_tag &&
                  !type_agg(ty)->typedef_name)
-            type_agg_mut(vm, ty)->typedef_name = ty->name;
+            type_agg_mut(vm, ty)->typedef_name = dn.tok;
         else if (ty->kind != TY_STRUCT && ty->kind != TY_UNION &&
                  ty->kind != TY_ENUM)
-            type_agg_mut(vm, ty)->typedef_name = ty->name;
+            type_agg_mut(vm, ty)->typedef_name = dn.tok;
         assign_scope_ord(vm, ty);
-        char *name = get_ident(vm, ty->name);
-        check_typedef_redefinition(vm, ty, name);
-        VarScope *sc       = push_scope(vm, name, ty->name->len);
+        char *name = get_ident(vm, dn.tok);
+        check_typedef_redefinition(vm, ty, dn.tok, name);
+        VarScope *sc       = push_scope(vm, name, dn.tok->len);
         sc->type_def       = ty;
         sc->is_deprecated  = ty->is_deprecated;
         sc->deprecated_msg = type_attrs(ty)->deprecated_msg;
-        record_type_name(vm, ty, name, ty->name->len, false, ty->name);
+        record_type_name(vm, ty, name, dn.tok->len, false, dn.tok);
         run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_TYPEDEF, name, ty, NULL,
-                              ty->name);
+                              dn.tok);
         // A tag body's attributes (ty == basety) run for each declarator and
         // are detached after the loop.
         if (ty != basety)
@@ -149,7 +150,7 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
         // lengths here, when the declaration is reached.
         if (cur && type_contains_vla(ty))
             *cur = (*cur)->next = new_unary(
-                vm, ND_EXPR_STMT, compute_vla_size(vm, ty, ty->name), ty->name);
+                vm, ND_EXPR_STMT, compute_vla_size(vm, ty, dn.tok), dn.tok);
     }
     detach_type_custom_attrs(vm, basety);
     return tok;
@@ -182,9 +183,8 @@ static Node *param_vla_init_stmts(VirtualMachine *vm, Obj *params) {
             continue;
         p->vla_extent_impure = type_vla_extent_impure(p->ty);
         p->ty                = rebind_param_vla(vm, p->ty);
-        cur                  = cur->next =
-            new_unary(vm, ND_EXPR_STMT,
-                      compute_vla_size(vm, p->ty, p->ty->name), p->ty->name);
+        cur = cur->next = new_unary(
+            vm, ND_EXPR_STMT, compute_vla_size(vm, p->ty, p->tok), p->tok);
         cur->var = p;
         add_type(vm, cur);
     }
@@ -204,16 +204,15 @@ static void prepend_stmts(Node *body, Node *stmts) {
 static void create_param_lvars(VirtualMachine *vm, Type *param) {
     if (param) {
         create_param_lvars(vm, param->next);
-        if (!param->name)
-            error_tok(vm, param->name_pos, "parameter name omitted");
+        if (!param->param_name)
+            error_tok(vm, param->param_name_pos, "parameter name omitted");
         // #485: reject an unchecked pointer parameter in a checked region.
         // vm->compiler.checked_scope_attr was already seeded from this
         // function's own attribute by the time create_param_lvars() runs
         // (function(), src/parse_decl.c).
-        cc_check_checked_scope_decl(vm, param, param->name, "parameter");
-        drop_cleanup_attr(vm, param, NULL, param->name);
-        Obj *var =
-            new_lvar(vm, get_ident(vm, param->name), param->name->len, param);
+        cc_check_checked_scope_decl(vm, param, param->param_name, "parameter");
+        drop_cleanup_attr(vm, param, NULL, param->param_name);
+        Obj *var      = new_lvar_at(vm, param->param_name, param);
         var->is_param = true;
     }
 }
@@ -410,10 +409,10 @@ static FnDecl find_fn_decl(VirtualMachine *vm, char *name, int name_len,
 // variadic function -- warn (under -Wattributes, matching GCC) when it's
 // applied to one that isn't, instead of silently relying on
 // validate_sentinel_call()'s per-call-site bounds guard to notice.
-static void check_sentinel_variadic(VirtualMachine *vm, Type *ty) {
+static void check_sentinel_variadic(VirtualMachine *vm, Type *ty, Token *name) {
     if (ty && ty->kind == TY_FUNC && ty->is_sentinel && !ty->is_variadic &&
         (vm->compiler.warnings & CCCC_WARN_ATTRIBUTES))
-        warn_tok(vm, ty->name, CCCC_WARN_ATTRIBUTES,
+        warn_tok(vm, name, CCCC_WARN_ATTRIBUTES,
                  "sentinel attribute only applies to variadic functions");
 }
 
@@ -430,11 +429,11 @@ void link_hidden_builtin(VirtualMachine *vm, Obj *fn) {
 }
 
 static bool adopt_hidden_builtin(VirtualMachine *vm, Obj *fn, Type *ty,
-                                 VarAttr *attr) {
+                                 Token *name, VarAttr *attr) {
     if (!fn || !fn->is_hidden_builtin)
         return false;
     link_hidden_builtin(vm, fn);
-    fn->tok          = ty->name;
+    fn->tok          = name;
     fn->display_name = fn->name;
     fn->is_static    = attr->is_static || (attr->is_inline && !attr->is_extern);
     fn->is_inline    = attr->is_inline;
@@ -485,16 +484,16 @@ static Type *fn_composite(VirtualMachine *vm, Type *prior, Type *ty) {
 }
 
 static void check_fn_redecl(VirtualMachine *vm, Obj *fn, Type *old_ty,
-                            bool old_def, Type *ty, bool new_def) {
+                            bool old_def, Type *ty, Token *name, bool new_def) {
     // The respelled prototype of a generated function drops qualifiers.
-    bool synthesized = ty->name && ty->name->file &&
-                       !strcmp(ty->name->file->name, "<inline-macro-fwd>");
+    bool synthesized =
+        name && name->file && !strcmp(name->file->name, "<inline-macro-fwd>");
     if (synthesized || !old_ty || old_ty->kind != TY_FUNC ||
         is_error_type(old_ty) ||
         is_compatible_fn_redecl(old_ty, old_def, ty, new_def,
                                 vm->compiler.compiler_family))
         return;
-    error_tok(vm, ty->name, "conflicting types for '%s'", fn->name);
+    error_tok(vm, name, "conflicting types for '%s'", fn->name);
 }
 
 // Folds redeclaration `ty` into `fn`. A file-scope declaration sets the type
@@ -529,20 +528,20 @@ static void merge_redeclared_fn_type(VirtualMachine *vm, Obj *fn, Type *visible,
 // merge_checked_interface() may swap fn->ty for a copy that adopted bounds;
 // the visible type follows it.
 static void merge_fn_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty,
-                                       FnDecl *found) {
+                                       Token *name, FnDecl *found) {
     Type *before = fn->ty;
-    merge_checked_interface(vm, fn, ty);
+    merge_checked_interface(vm, fn, ty, name);
     if (found->visible_ty == before)
         found->visible_ty = fn->ty;
 }
 
 static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
-                                       VarAttr *attr, Token *tok) {
-    if (!ty->name)
-        error_tok(vm, ty->name_pos, "function name omitted");
+                                       DeclName dn, VarAttr *attr, Token *tok) {
+    if (!dn.tok)
+        error_tok(vm, dn.pos, "function name omitted");
 
-    char *name_str = get_ident(vm, ty->name);
-    check_sentinel_variadic(vm, ty);
+    char *name_str = get_ident(vm, dn.tok);
+    check_sentinel_variadic(vm, ty, dn.tok);
     resolve_type_checked_bounds(vm, ty);
 
     if (attr->is_noreturn && ty->kind == TY_FUNC)
@@ -558,15 +557,15 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
     // body (see the matching, larger comment in function()).
     bool   scoped = vm->compiler.current_fn && !attr->is_static;
     FnDecl found =
-        find_fn_decl(vm, name_str, ty->name->len, attr->is_static, tok);
+        find_fn_decl(vm, name_str, dn.tok->len, attr->is_static, tok);
     Obj *fn      = found.fn;
-    bool adopted = adopt_hidden_builtin(vm, fn, ty, attr);
+    bool adopted = adopt_hidden_builtin(vm, fn, ty, dn.tok, attr);
     if (fn) {
         if (!fn->is_function)
             error_tok(vm, tok, "redeclared as a different kind of symbol");
         if (!fn->is_implicit && !adopted)
             check_fn_redecl(vm, fn, link_type(fn), fn->is_definition, ty,
-                            false);
+                            dn.tok, false);
         if (fn->is_implicit) {
             fn->ty          = ty;
             fn->is_implicit = false;
@@ -574,7 +573,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
             if (obj_fn(fn)->link_ty)
                 obj_fn_mut(vm, fn)->link_ty = NULL;
         } else if (!adopted) {
-            merge_fn_checked_interface(vm, fn, ty, &found);
+            merge_fn_checked_interface(vm, fn, ty, dn.tok, &found);
         }
         if (!fn->is_static && attr->is_static)
             error_tok(vm, tok,
@@ -582,7 +581,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         if (!adopted && !fn->is_implicit && !fn->is_definition &&
             found.visible_ty &&
             (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
-            warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
+            warn_tok(vm, dn.tok, CCCC_WARN_REDUNDANT_DECLS,
                      "redundant redeclaration of '%s'", fn->name);
         fn->is_maybe_unused |= ty->is_maybe_unused;
         fn->is_deprecated   |= ty->is_deprecated;
@@ -596,9 +595,9 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         if (type_attrs(ty)->deprecated_msg)
             obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
         merge_redeclared_fn_type(vm, fn, found.visible_ty, ty, scoped, name_str,
-                                 ty->name->len);
+                                 dn.tok->len);
     } else {
-        fn                = new_gvar(vm, name_str, ty->name->len, ty);
+        fn                = new_gvar_at(vm, dn.tok, ty);
         fn->is_function   = true;
         fn->is_definition = false;
         fn->is_static =
@@ -613,7 +612,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
     if (type_attrs(ty)->method_of)
         register_method(vm, fn, ty, tok);
 
-    apply_checked_libc_bounds(vm, fn, ty->name);
+    apply_checked_libc_bounds(vm, fn, dn.tok);
     fn->is_root = !obj_is_inline_only(fn);
     merge_param_names(fn, ty);
     claim_param_attrs(vm, fn, ty);
@@ -632,14 +631,15 @@ Token *function_declaration_list(VirtualMachine *vm, Token *tok, Type *basety,
             tok = skip(vm, tok, ",");
         first    = false;
 
-        Type *ty = declarator(vm, &tok, tok, basety);
-        ty       = apply_var_attrs_to_type(vm, ty, attr);
+        DeclName dn;
+        Type    *ty = declarator(vm, &tok, tok, basety, &dn);
+        ty          = apply_var_attrs_to_type(vm, ty, attr);
         if (ty->kind != TY_FUNC)
-            error_tok(vm, ty->name ? ty->name : tok,
+            error_tok(vm, dn.tok ? dn.tok : tok,
                       "expected function declaration");
-        cc_check_checked_scope_decl(vm, ty->return_ty, ty->name,
+        cc_check_checked_scope_decl(vm, ty->return_ty, dn.tok,
                                     "return type of function");
-        declare_function_prototype(vm, ty, attr, tok);
+        declare_function_prototype(vm, ty, dn, attr, tok);
     }
 
     return tok;
@@ -757,12 +757,12 @@ static void validate_main_signature(VirtualMachine *vm, Obj *fn) {
 
     Type *first = fn->ty->params;
     if (warn && first && !is_plain_signed_int(first))
-        warn_tok(vm, first->name_pos ? first->name_pos : fn->tok,
+        warn_tok(vm, first->param_name_pos ? first->param_name_pos : fn->tok,
                  CCCC_WARN_MAIN, "first parameter of 'main' should be 'int'");
 
     Type *second = first ? first->next : NULL;
     if (warn && second && !is_char_ptr_ptr(second))
-        warn_tok(vm, second->name_pos ? second->name_pos : fn->tok,
+        warn_tok(vm, second->param_name_pos ? second->param_name_pos : fn->tok,
                  CCCC_WARN_MAIN,
                  "second parameter of 'main' should be 'char **'");
 }
@@ -772,11 +772,12 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         error_tok(vm, tok,
                   "constexpr is only supported for object definitions");
 
-    Type *ty = declarator(vm, &tok, tok, basety);
-    ty       = apply_var_attrs_to_type(vm, ty, attr);
-    if (!ty->name)
-        error_tok(vm, ty->name_pos, "function name omitted");
-    char *name_str = get_ident(vm, ty->name);
+    DeclName dn;
+    Type    *ty = declarator(vm, &tok, tok, basety, &dn);
+    ty          = apply_var_attrs_to_type(vm, ty, attr);
+    if (!dn.tok)
+        error_tok(vm, dn.pos, "function name omitted");
+    char *name_str = get_ident(vm, dn.tok);
 
     // `void f(void) _Checked { ... }`
     CheckedScope suffix_scope = cc_checked_scope_keyword(tok);
@@ -784,7 +785,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         cc_set_checked_scope(vm, attr, suffix_scope, tok);
         tok = tok->next;
     }
-    check_sentinel_variadic(vm, ty);
+    check_sentinel_variadic(vm, ty, dn.tok);
 
     // Propagate noreturn from attribute to function type
     if (attr->is_noreturn && ty->kind == TY_FUNC)
@@ -824,10 +825,10 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     bool   defines_body = !equal(tok, ";");
     bool   scoped       = is_nested && !defines_body && !attr->is_static;
     FnDecl found =
-        find_fn_decl(vm, name_str, ty->name->len,
-                     attr->is_static || (is_nested && defines_body), ty->name);
+        find_fn_decl(vm, name_str, dn.tok->len,
+                     attr->is_static || (is_nested && defines_body), dn.tok);
     Obj *fn           = found.fn;
-    bool adopted      = adopt_hidden_builtin(vm, fn, ty, attr);
+    bool adopted      = adopt_hidden_builtin(vm, fn, ty, dn.tok, attr);
     // Save prototype state before the if/else can mutate fn->is_implicit.
     bool had_prior_decl = (fn != NULL) && !fn->is_implicit && !adopted;
     bool had_full_proto =
@@ -847,11 +848,11 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         if (!is_compatible_qualified_strict(fn->ty, ty) ||
             fn->ty->is_variadic != ty->is_variadic ||
             fn->is_static != new_static)
-            error_tok(vm, ty->name,
+            error_tok(vm, dn.tok,
                       "redefinition of '%s' with a different signature",
                       name_str);
         Obj *replaced     = fn;
-        fn                = new_gvar(vm, name_str, ty->name->len, ty);
+        fn                = new_gvar_at(vm, dn.tok, ty);
         fn->is_function   = true;
         fn->is_definition = true;
         fn->is_static     = new_static;
@@ -871,7 +872,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                 knr_old_def = fn->is_definition;
             } else {
                 check_fn_redecl(vm, fn, link_type(fn), fn->is_definition, ty,
-                                defines_body);
+                                dn.tok, defines_body);
             }
         }
         if (fn->is_implicit) {
@@ -881,7 +882,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             if (obj_fn(fn)->link_ty)
                 obj_fn_mut(vm, fn)->link_ty = NULL;
         } else if (!adopted) {
-            merge_fn_checked_interface(vm, fn, ty, &found);
+            merge_fn_checked_interface(vm, fn, ty, dn.tok, &found);
         }
         // GNU lets a non-inline definition replace a gnu_inline one.
         bool replaces_gnu_inline = fn->is_definition && fn->is_gnu_inline &&
@@ -899,7 +900,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         if (!adopted && !fn->is_implicit && !fn->is_definition &&
             found.visible_ty && !equal(tok, "{") &&
             (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
-            warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
+            warn_tok(vm, dn.tok, CCCC_WARN_REDUNDANT_DECLS,
                      "redundant redeclaration of '%s'", fn->name);
         fn->is_definition    = fn->is_definition || equal(tok, "{");
         fn->is_maybe_unused |= ty->is_maybe_unused;
@@ -914,9 +915,9 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         if (type_attrs(ty)->deprecated_msg)
             obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
         merge_redeclared_fn_type(vm, fn, found.visible_ty, ty, scoped, name_str,
-                                 ty->name->len);
+                                 dn.tok->len);
     } else {
-        fn                = new_gvar(vm, name_str, ty->name->len, ty);
+        fn                = new_gvar_at(vm, dn.tok, ty);
         fn->is_function   = true;
         fn->is_definition = equal(tok, "{");
         fn->is_static =
@@ -941,11 +942,11 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                             (ty->is_gnu_inline || attr->is_gnu_inline ||
                              vm->compiler.c_std < CCCC_STD_C99);
 
-    apply_checked_libc_bounds(vm, fn, ty->name);
+    apply_checked_libc_bounds(vm, fn, dn.tok);
     fn->is_root = !obj_is_inline_only(fn);
 
-    if (fn->ty && ty->name && ty->name->file)
-        cccc_builtin_note_signature(name_str, fn->ty, ty->name->file->name);
+    if (fn->ty && dn.tok && dn.tok->file)
+        cccc_builtin_note_signature(name_str, fn->ty, dn.tok->file->name);
 
     if (consume(vm, &tok, tok, ";")) {
         resolve_type_checked_bounds(vm, ty);
@@ -953,11 +954,11 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         // function's *body* -- a bodyless declaration has nothing for it to
         // take effect over.
         if (attr->checked_scope != CHECKED_SCOPE_UNSET)
-            error_tok(vm, ty->name,
+            error_tok(vm, dn.tok,
                       "'checked'/'unchecked' on a function declaration has "
                       "no effect -- it applies to a function definition's "
                       "body");
-        cc_check_checked_scope_decl(vm, ty->return_ty, ty->name,
+        cc_check_checked_scope_decl(vm, ty->return_ty, dn.tok,
                                     "return type of function");
         run_param_custom_attrs(vm, fn, ty);
         run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
@@ -968,10 +969,11 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     obj_attr_mut(vm, fn)->def_ty = ty;
 
     if (is_float16(fn->ty->return_ty))
-        error_float16_unsupported(vm, ty->name);
+        error_float16_unsupported(vm, dn.tok);
     for (Type *p = fn->ty->params; p; p = p->next)
         if (is_float16(p))
-            error_float16_unsupported(vm, p->name ? p->name : ty->name);
+            error_float16_unsupported(vm,
+                                      p->param_name ? p->param_name : dn.tok);
 
     // #1056: nested-function tracking must only apply when a body actually
     // follows (checked above, via the early "no body" return) -- not to a
@@ -1029,11 +1031,11 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         if (!is_main) {
             if ((vm->compiler.warnings & CCCC_WARN_MISSING_DECLARATIONS) &&
                 !had_prior_decl && !fn->is_inline)
-                warn_tok(vm, ty->name, CCCC_WARN_MISSING_DECLARATIONS,
+                warn_tok(vm, dn.tok, CCCC_WARN_MISSING_DECLARATIONS,
                          "no previous declaration for '%s'", fn->name);
             if ((vm->compiler.warnings & CCCC_WARN_MISSING_PROTOTYPES) &&
                 !had_full_proto)
-                warn_tok(vm, ty->name, CCCC_WARN_MISSING_PROTOTYPES,
+                warn_tok(vm, dn.tok, CCCC_WARN_MISSING_PROTOTYPES,
                          "no previous prototype for '%s'", fn->name);
         }
     }
@@ -1061,7 +1063,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // single restore point below, after the neg_rec/normal if/else merges).
     CheckedScope saved_checked_scope_attr = vm->compiler.checked_scope_attr;
     vm->compiler.checked_scope_attr       = attr->checked_scope;
-    cc_check_checked_scope_decl(vm, ty->return_ty, ty->name,
+    cc_check_checked_scope_decl(vm, ty->return_ty, dn.tok,
                                 "return type of function");
 
     // K&R declaration-list: type declarations between ')' and '{' that give
@@ -1080,17 +1082,20 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         Type   *basety   = declspec(vm, &tok, tok, &knr_attr);
         cc_reject_checked_scope_here(vm, &knr_attr);
         for (;;) {
-            Type *decl_ty = declarator(vm, &tok, tok, basety);
-            if (decl_ty->name) {
-                char *pname = decl_ty->name->loc;
-                int   plen  = decl_ty->name->len;
+            DeclName knr_dn;
+            Type    *decl_ty = declarator(vm, &tok, tok, basety, &knr_dn);
+            if (knr_dn.tok) {
+                char *pname = knr_dn.tok->loc;
+                int   plen  = knr_dn.tok->len;
                 for (Type *p = ty->params; p; p = p->next) {
-                    if (p->name && p->name->len == plen &&
-                        !memcmp(p->name->loc, pname, plen)) {
-                        Token *saved_name = p->name;
+                    if (p->param_name && p->param_name->len == plen &&
+                        !memcmp(p->param_name->loc, pname, plen)) {
+                        Token *saved_name = p->param_name;
+                        Token *saved_pos  = p->param_name_pos;
                         Type  *saved_next = p->next;
                         type_assign(vm, p, decl_ty);
-                        p->name           = saved_name;
+                        p->param_name     = saved_name;
+                        p->param_name_pos = saved_pos;
                         p->next           = saved_next;
                         break;
                     }
@@ -1105,12 +1110,12 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     if (had_knr_list) {
         ty->is_knr_def = true;
         if (knr_old_ty)
-            check_fn_redecl(vm, fn, knr_old_ty, knr_old_def, ty, true);
+            check_fn_redecl(vm, fn, knr_old_ty, knr_old_def, ty, dn.tok, true);
     }
 
     for (Type *p = ty->params; p; p = p->next)
         if (type_has_unspecified_vla(p))
-            error_tok(vm, p->name ? p->name : fn->tok,
+            error_tok(vm, p->param_name ? p->param_name : fn->tok,
                       "star modifier used outside of function prototype");
 
     validate_main_signature(vm, fn);
@@ -1226,8 +1231,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
 
         if (setjmp(neg_jmp_buf) == 0) {
             obj_fn_mut(vm, fn)->body = compound_stmt(vm, &tok, tok, &close_brace);
-            append_implicit_return(vm, fn,
-                                   close_brace ? close_brace : ty->name);
+            append_implicit_return(vm, fn, close_brace ? close_brace : dn.tok);
             obj_fn_mut(vm, fn)->locals = vm->compiler.locals;
             leave_scope(vm);
             // Diagnostics here are rolled back below; nothing to defer.
@@ -1332,7 +1336,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     } else {
         obj_fn_mut(vm, fn)->body = compound_stmt(vm, &tok, tok, &close_brace);
         prepend_stmts(obj_fn(fn)->body, param_vla_inits);
-        append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
+        append_implicit_return(vm, fn, close_brace ? close_brace : dn.tok);
         if (!is_nested) {
             obj_fn_mut(vm, fn)->def_begin = attr->decl_start;
             obj_fn_mut(vm, fn)->def_end   = close_brace;
@@ -1504,35 +1508,37 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
             tok = skip(vm, tok, ",");
         first    = false;
 
-        Type *ty = declarator(vm, &tok, tok, basety);
-        if (!ty->name)
-            error_tok(vm, ty->name_pos, "variable name omitted");
+        DeclName dn;
+        Type    *ty = declarator(vm, &tok, tok, basety, &dn);
+        if (!dn.tok)
+            error_tok(vm, dn.pos, "variable name omitted");
 
-        char *var_name     = get_ident(vm, ty->name);
-        int   var_name_len = (int)ty->name->len;
+        char *var_name     = get_ident(vm, dn.tok);
+        int   var_name_len = (int)dn.tok->len;
 
         // #485: reject an unchecked pointer global in a checked region.
-        cc_check_checked_scope_decl(vm, ty, ty->name, "global variable");
-        drop_cleanup_attr(vm, ty, attr, attr->is_extern ? NULL : ty->name);
+        cc_check_checked_scope_decl(vm, ty, dn.tok, "global variable");
+        drop_cleanup_attr(vm, ty, attr, attr->is_extern ? NULL : dn.tok);
         resolve_type_checked_bounds(vm, ty);
 
         if (type_has_vla(ty))
-            error_tok(vm, ty->name, "variably modified '%s' at file scope",
+            error_tok(vm, dn.tok, "variably modified '%s' at file scope",
                       var_name);
 
         // C23 auto type inference for global variables
         if (attr->is_auto) {
             if (attr->is_extern)
-                error_tok(vm, ty->name, "cannot use 'auto' with 'extern'");
-            int decl_depth = check_auto_declarator(vm, attr, ty, is_extra_declarator);
+                error_tok(vm, dn.tok, "cannot use 'auto' with 'extern'");
+            int decl_depth = check_auto_declarator(vm, attr, ty, dn.tok,
+                                                   is_extra_declarator);
             if (!equal(tok, "="))
-                error_tok(vm, ty->name,
+                error_tok(vm, dn.tok,
                           attr->is_gnu_auto_type
                               ? "'__auto_type' requires an initialized data "
                                 "declaration"
                               : "declaration of variable '%.*s' with deduced "
                                 "type 'auto' requires an initializer",
-                          (int)ty->name->len, ty->name->loc);
+                          (int)dn.tok->len, dn.tok->loc);
             if (equal(tok->next, "{"))
                 error_tok(vm, tok->next, "cannot use 'auto' with array in C");
 
@@ -1548,10 +1554,10 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                 char stars[16] = "";
                 for (int i = 0; i < decl_depth && i < 15; i++)
                     stars[i] = '*';
-                error_tok(vm, ty->name,
+                error_tok(vm, dn.tok,
                           "variable '%.*s' with type 'auto%s%s' has "
                           "incompatible initializer",
-                          (int)ty->name->len, ty->name->loc,
+                          (int)dn.tok->len, dn.tok->loc,
                           decl_depth > 0 ? " " : "", stars);
             }
 
@@ -1559,15 +1565,15 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
             Obj *var;
             if (prev) {
                 if (prev->init_data)
-                    error_tok(vm, ty->name, "redefinition of '%s'", var_name);
-                merge_global_decl(vm, prev, deduced, attr, ty->name);
+                    error_tok(vm, dn.tok, "redefinition of '%s'", var_name);
+                merge_global_decl(vm, prev, deduced, attr, dn.tok);
                 push_scope(vm, var_name, var_name_len)->var = prev;
                 var                                         = prev;
             } else {
-                var            = new_gvar(vm, var_name, var_name_len, deduced);
+                var            = new_gvar_at(vm, dn.tok, deduced);
                 var->is_static = attr->is_static;
                 // #1160: also honor GNU aligned(N), not just _Alignas.
-                var->align = effective_decl_align(vm, ty->name, deduced, attr);
+                var->align = effective_decl_align(vm, dn.tok, deduced, attr);
                 if (var->checked_kind != CHECKED_NONE)
                     resolve_checked_bounds(vm, var);
                 hashmap_put(&vm->compiler.global_decl_map, var_name, var);
@@ -1617,11 +1623,11 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
         // state (find_var, a scope-visibility question, not a linkage
         // question) -- evaluating it after merge_global_decl below would
         // always see is_definition already folded in and never fire.
-        VarScope *previous = find_var(vm, ty->name);
+        VarScope *previous = find_var(vm, dn.tok);
         if (previous && previous->var && !previous->var->is_function &&
             !previous->var->is_definition && attr->is_extern &&
             (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
-            warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
+            warn_tok(vm, dn.tok, CCCC_WARN_REDUNDANT_DECLS,
                      "redundant redeclaration of '%s'", var_name);
 
         // #957: canonicalize by name within this translation unit so every
@@ -1631,24 +1637,24 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
         Obj *var;
         if (prev) {
             if (equal(tok, "=") && prev->init_data)
-                error_tok(vm, ty->name, "redefinition of '%s'", var_name);
-            merge_global_decl(vm, prev, ty, attr, ty->name);
+                error_tok(vm, dn.tok, "redefinition of '%s'", var_name);
+            merge_global_decl(vm, prev, ty, attr, dn.tok);
             push_scope(vm, var_name, var_name_len)->var = prev;
             var                                         = prev;
         } else {
-            var                = new_gvar(vm, var_name, var_name_len, ty);
+            var                = new_gvar_at(vm, dn.tok, ty);
             var->is_definition = !attr->is_extern;
             var->is_static     = attr->is_static;
             var->is_tls        = attr->is_tls;
             var->is_constexpr  = attr->is_constexpr;
             // #1160: also honor GNU aligned(N), not just _Alignas.
-            var->align = effective_decl_align(vm, ty->name, ty, attr);
+            var->align = effective_decl_align(vm, dn.tok, ty, attr);
             if (var->checked_kind != CHECKED_NONE)
                 resolve_checked_bounds(vm, var);
 
             if (var->is_constexpr) {
                 if (attr->is_extern || attr->is_tls)
-                    error_tok(vm, ty->name,
+                    error_tok(vm, dn.tok,
                               "constexpr object must be a definition with "
                               "internal storage");
                 var->is_static = true;
@@ -1659,7 +1665,7 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
         if (equal(tok, "="))
             gvar_initializer(vm, &tok, tok->next, var);
         else if (var->is_constexpr)
-            error_tok(vm, ty->name, "constexpr object requires an initializer");
+            error_tok(vm, dn.tok, "constexpr object requires an initializer");
         else if (!attr->is_extern && !attr->is_tls && !var->init_data)
             var->is_tentative = true;
 
@@ -1678,8 +1684,8 @@ bool is_function(VirtualMachine *vm, Token *tok, Type *basety) {
     Type dummy                     = {};
     bool saved_lookahead           = vm->compiler.in_type_lookahead;
     vm->compiler.in_type_lookahead = true;
-    Type *ty =
-        declarator(vm, &tok, tok, basety ? copy_type(vm, basety) : &dummy);
+    Type *ty = declarator(vm, &tok, tok,
+                          basety ? copy_type(vm, basety) : &dummy, NULL);
     vm->compiler.in_type_lookahead = saved_lookahead;
     return ty->kind == TY_FUNC;
 }
@@ -1688,8 +1694,8 @@ bool is_function_decl_list(VirtualMachine *vm, Token *tok, Type *basety) {
     Type dummy                     = {};
     bool saved_lookahead           = vm->compiler.in_type_lookahead;
     vm->compiler.in_type_lookahead = true;
-    Type *ty =
-        declarator(vm, &tok, tok, basety ? copy_type(vm, basety) : &dummy);
+    Type *ty = declarator(vm, &tok, tok,
+                          basety ? copy_type(vm, basety) : &dummy, NULL);
     vm->compiler.in_type_lookahead = saved_lookahead;
     return ty->kind == TY_FUNC && equal(tok, ",");
 }
@@ -2030,7 +2036,8 @@ Obj *chk_builtin_stub(VirtualMachine *vm, const char *name, int len) {
     Token  *tok   = tokenize_string(vm, "<builtin-chk>", CHK_ROWS[row].proto);
     VarAttr attr  = {0};
     Type   *base  = declspec(vm, &tok, tok, &attr);
-    Type   *ty    = declarator(vm, &tok, tok, base);
+    DeclName dn;
+    Type    *ty        = declarator(vm, &tok, tok, base, &dn);
     vm->compiler.scope = saved;
 
     if (CHK_ROWS[row].fmt) {
@@ -2039,7 +2046,7 @@ Obj *chk_builtin_stub(VirtualMachine *vm, const char *name, int len) {
         type_attrs_mut(vm, ty)->format_fmt_first_arg = CHK_ROWS[row].fmt + 1;
     }
     const char *fn_name =
-        ty->name->loc ? arena_strndup(vm, ty->name->loc, ty->name->len) : NULL;
+        dn.tok->loc ? arena_strndup(vm, dn.tok->loc, dn.tok->len) : NULL;
     Obj *stub = new_private_func_obj(vm, fn_name, ty);
     obj_attr_mut(vm, stub)->builtin_spelling =
         arena_format(vm, "__builtin___%s_chk", CHK_ROWS[row].suffix);
@@ -2513,7 +2520,8 @@ void run_pending_methods(VirtualMachine *vm) {
 }
 
 static char *type_tag_name(VirtualMachine *vm, Type *ty) {
-    return ty->name ? arena_strndup(vm, ty->name->loc, ty->name->len) : NULL;
+    Token *tag = type_tag_token(ty);
+    return tag ? arena_strndup(vm, tag->loc, tag->len) : NULL;
 }
 
 static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
@@ -2628,7 +2636,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
             if (has_custom_attrs(basety, &attr)) {
                 run_decl_custom_attrs(vm, basety, &attr, ATTR_TARGET_TYPE,
                                       type_tag_name(vm, basety), basety, NULL,
-                                      basety->name);
+                                      type_tag_token(basety));
                 if (attr.defines_tag)
                     detach_type_custom_attrs(vm, basety);
             }
@@ -2641,7 +2649,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
             VarAttr none = {};
             run_decl_custom_attrs(vm, basety, &none, ATTR_TARGET_TYPE,
                                   type_tag_name(vm, basety), basety, NULL,
-                                  basety->name);
+                                  type_tag_token(basety));
             detach_type_custom_attrs(vm, basety);
         }
 

@@ -2640,7 +2640,7 @@ void resolve_checked_template_bounds(VirtualMachine *vm, Obj **params,
     Node **arg_by_idx = arena_alloc(&vm->compiler.parser_arena,
                                     sizeof(Node *) * (nparams + 1));
     for (int i = 0; i < nparams; i++) {
-        arg_by_idx[i] = new_var_node(vm, params[i], params[i]->ty->name);
+        arg_by_idx[i] = new_var_node(vm, params[i], params[i]->tok);
         add_type(vm, arg_by_idx[i]);
     }
     Obj *self = self_idx ? params[self_idx - 1] : NULL;
@@ -2651,12 +2651,8 @@ void resolve_checked_template_bounds(VirtualMachine *vm, Obj **params,
 }
 
 // Allocates the hidden `__ca` local this rewrite assigns each qualifying
-// argument through. Deliberately bypasses new_lvar() -- new_lvar() calls
-// warn_if_shadowing(vm, ty->name), and `ty` here is the CALLEE's parameter
-// Type, whose ->name is the callee's own parameter identifier (e.g. `n`);
-// checking that name for shadowing against the CALLER's scope would be
-// meaningless at best and a spurious "shadows a variable" warning at
-// worst. Same "" name / direct vm->compiler.locals prepend pattern as
+// argument through. It is unnamed and bypasses new_lvar()'s scope handling.
+// Same "" name / direct vm->compiler.locals prepend pattern as
 // checked_cast_desugar()'s `__cv` (#486) and new_checked_prop_temp()'s
 // phase-B temps (#941) -- new_var() alone still copies checked_kind/
 // checked_bounds_form off `ty`, which is what makes the result an ordinary
@@ -5521,7 +5517,7 @@ void declare_checked_return_var(VirtualMachine *vm, Obj *fn) {
     int count = 0;
     retarget_ret_params(vm, fn, obj_chk(var)->checked_bounds_lo, map, &count);
     retarget_ret_params(vm, fn, obj_chk(var)->checked_bounds_hi, map, &count);
-    Token *tok   = fn->ty->name;
+    Token *tok   = fn->tok;
     Node  *chain = NULL;
     for (int i = 0; i < count; i++) {
         Node *dst = new_var_node(vm, map[i].copy, tok);

@@ -146,11 +146,8 @@ static const char *knr_param_shim_name(char *buf, size_t bufsz,
 // native C, which clang then rejected as an incomplete/undeclared type. The
 // serializer was innocent: the real bug was in struct_union_decl/
 // struct_decl/union_decl (src/parse.c) re-running install_tag_definition()
-// on a bare *reference* to an already-defined tag, which re-registered the
-// shared Type under whatever name declarator() had most recently written to
-// ty->name (a previous parameter's own identifier) -- fixed by reporting
-// whether an actual `{ ... }` body was parsed and installing via
-// ty->struct_tag (immune to the overwrite) instead of ty->name.
+// on a bare *reference* to an already-defined tag; a reference now installs
+// nothing and a definition installs via ty->struct_tag.
 void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
                                   bool with_asm_label) {
     // #1025/#1039: an asm("symbol")-labeled block-scope declaration (`Put
@@ -263,10 +260,10 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
             // A length naming an earlier parameter is spelled from the
             // prototype's own type: by name in a definition, `*` elsewhere.
             if (proto_param && type_has_proto_vla(proto_param) &&
-                proto_param->name && param->name &&
-                proto_param->name->len == (int)strlen(param->name) &&
-                !strncmp(proto_param->name->loc, param->name,
-                         proto_param->name->len)) {
+                proto_param->param_name && param->name &&
+                proto_param->param_name->len == (int)strlen(param->name) &&
+                !strncmp(proto_param->param_name->loc, param->name,
+                         proto_param->param_name->len)) {
                 ctx->name_proto_params = obj_fn(fn)->body && !with_asm_label;
                 serialize_type_decl(df, ctx, proto_param, param->name);
                 ctx->name_proto_params = false;
@@ -299,11 +296,11 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
                 fprintf(df, ", ");
             first = false;
             char buf[64];
-            if (param->name) {
-                int len = param->name->len;
+            if (param->param_name) {
+                int len = param->param_name->len;
                 if (len > (int)sizeof(buf) - 1)
                     len = (int)sizeof(buf) - 1;
-                memcpy(buf, param->name->loc, len);
+                memcpy(buf, param->param_name->loc, len);
                 buf[len] = '\0';
             } else {
                 snprintf(buf, sizeof buf, "__a%d", anon++);
