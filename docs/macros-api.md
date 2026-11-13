@@ -95,7 +95,7 @@ Lookup tables for the comptime API.
 | `QuoteN(tmpl, nodes, count)` | Array-form `Quote`; validates the splice count |
 | `QuoteLazy(tmpl, ...)` | Capture a template and its splice arguments without parsing; parsed only once spliced in, at the splice site's own scope/loop context |
 | `QuoteLazyN(tmpl, nodes, count)` | Array-form `QuoteLazy` |
-| `NodeList(arr, count)` | Build a `->next`-linked node chain from an array for use as a `$@k` splice argument |
+| `NodeList(arr, count)` | Build a `->next`-linked node chain from an array for use as a `$@k` splice argument; none of the `count` nodes may be NULL |
 | `MakeBinary(op, l, r)` | Binary expression |
 | `MakeUnary(op, operand)` | Unary expression |
 | `MakeCast(expr, ty)` | Cast expression |
@@ -105,10 +105,10 @@ Lookup tables for the comptime API.
 | `CompoundLiteral(ty, ...)` | Positional compound literal; stack-local in function scope, static global outside `WithFn` |
 | `InitArray(elem_ty, ...)` | Array compound literal with explicit element type; length inferred from argument count |
 | `InitStruct(ty, fields, values, n)` | Designated struct/union init; unspecified members are zero |
-| `MakeFuncCall(callee, args, n)` | Function call expression |
+| `MakeFuncCall(callee, args, n)` | Function call expression; the callee must be a function and none of the `n` arguments may be NULL |
 | `VarargAsArray()` | Borrowed inline variadic argument array for forwarding |
 | `MakeReturn(expr)` | Return statement |
-| `MakeBlock(stmts, count)` | Compound statement |
+| `MakeBlock(stmts, count)` | Compound statement; none of the `count` statements may be NULL |
 | `BlockAddStmt(block, stmt)` / `BlockAddStmt(stmt)` | Append a statement to a block; shorthand form uses `WithBlock` |
 | `MakeIf(cond, then_body, else_body)` | If statement |
 | `MakeSwitch(cond)` | Switch statement |

@@ -519,8 +519,8 @@ Node *__builtin_quote_lazy_n(const char *tmpl, Node **nodes, int count);
 
 /*! @brief Build a `->next`-linked node chain from an array, returning the
  *           head.  Use the result as the argument to a `$@k` list splice.
- * @param nodes Array of Node* to link together.  Linking stops at the first
- *              NULL element or at count, whichever comes first.
+ * @param nodes Array of Node* to link together.  Every one of the `count`
+ *              elements must be non-NULL.
  * @param count Number of elements in the array.
  * @return Head of the chain, or NULL if count == 0 or nodes is NULL.
  * @details A single node is a valid chain of length 1.  An existing
@@ -1679,7 +1679,8 @@ Node *__builtin_ast_comma(Node *lhs, Node *rhs);
 Node *__builtin_ast_return(Node *expr);
 
 /*! @brief Build a block (compound statement) node.
- * @param stmts Array of statement nodes, or NULL if count is 0.
+ * @param stmts Array of statement nodes, or NULL if count is 0.  Every one of
+ *              the `count` elements must be non-NULL.
  * @param count Number of statements in the array.
  * @return An NK_BLOCK node.
  * @details Convenience wrapper: MakeBlock(stmts, count).
@@ -1788,9 +1789,10 @@ Node *__builtin_ast_member(Node *obj, const char *name);
 /*! @brief Create a function call node.
  * @param callee An expression node that evaluates to a function (or function
  *               pointer). The callee's lhs field holds this expression.
- * @param args Array of argument nodes (may be NULL if n == 0).
+ * @param args Array of argument nodes (may be NULL if n == 0).  Every one of
+ *             the `n` elements must be non-NULL.
  * @param n Number of arguments.
- * @return A NK_FUNCALL node, or NULL on error.
+ * @return A NK_FUNCALL node.
  * @details Convenience wrapper: MakeFuncCall(callee, args, n).
  */
 Node *__builtin_ast_funcall(Node *callee, Node **args, int n);
@@ -2503,7 +2505,8 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 #define MakeReturn(expr) __builtin_ast_return(expr)
 /*! @def MakeBlock
  * @brief Build a block (compound statement) node.
- * @param stmts Array of statement nodes, or NULL if count is 0.
+ * @param stmts Array of statement nodes, or NULL if count is 0.  Every one of
+ * the `count` elements must be non-NULL.
  * @param count Number of statements in the array. */
 #define MakeBlock(stmts, count) __builtin_ast_block(stmts, count)
 #define __builtin_block_add_stmt_1(stmt, _ignored)                             \
@@ -2588,7 +2591,8 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Create a function call node.
  * @param callee An expression node that evaluates to a function (or function
  * pointer).
- * @param args Array of argument nodes (may be NULL if n == 0).
+ * @param args Array of argument nodes (may be NULL if n == 0).  Every one of
+ * the `n` elements must be non-NULL.
  * @param n Number of arguments. */
 #define MakeFuncCall(callee, args, n) __builtin_ast_funcall(callee, args, n)
 

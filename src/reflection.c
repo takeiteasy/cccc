@@ -66,6 +66,24 @@ static void reflect_link_error(VirtualMachine *vm, const char *msg) {
     reflect_link_error_at(vm, NULL, msg);
 }
 
+// A builder handed a NULL entry (usually a lookup that missed) fails at the
+// call instead of building a shorter list.
+static void reflect_null_entry_error(VirtualMachine *vm, const char *what,
+                                     int index) {
+    char msg[128];
+    snprintf(msg, sizeof msg, "%s %d is NULL", what, index + 1);
+    reflect_link_error(vm, msg);
+}
+
+static void reflect_check_no_null(VirtualMachine *vm, Node **nodes, int count,
+                                  const char *what) {
+    if (count > 0 && !nodes)
+        reflect_null_entry_error(vm, what, 0);
+    for (int i = 0; i < count; i++)
+        if (!nodes[i])
+            reflect_null_entry_error(vm, what, i);
+}
+
 typedef struct {
     const Node *target;
     bool        hit;
@@ -97,9 +115,8 @@ static int node_ptr_cmp(const void *a, const void *b) {
 }
 
 // Rejects a list that names one node twice; chaining it through `next` would
-// close a loop. A NULL ends the list when `stop_at_null`, else it is skipped.
-static void reflect_check_unique(VirtualMachine *vm, Node **nodes, int count,
-                                 bool stop_at_null) {
+// close a loop. A NULL entry is skipped.
+static void reflect_check_unique(VirtualMachine *vm, Node **nodes, int count) {
     if (!nodes || count < 2)
         return;
     Node **copy = malloc((size_t)count * sizeof *copy);
@@ -107,8 +124,6 @@ static void reflect_check_unique(VirtualMachine *vm, Node **nodes, int count,
         return;
     int n = 0;
     for (int i = 0; i < count; i++) {
-        if (!nodes[i] && stop_at_null)
-            break;
         if (nodes[i])
             copy[n++] = nodes[i];
     }
@@ -2024,11 +2039,12 @@ Node *__builtin_ast_block(Node **stmts, int count) {
 
     Node *node = alloc_node(vm, ND_BLOCK);
 
-    reflect_check_unique(vm, stmts, count, true);
+    reflect_check_no_null(vm, stmts, count, "MakeBlock: statement");
+    reflect_check_unique(vm, stmts, count);
     // Link statements together
     Node  head = {};
     Node *cur  = &head;
-    for (int i = 0; i < count && stmts[i]; i++) {
+    for (int i = 0; i < count; i++) {
         reflect_link(vm, stmts[i]);
         cur = cur->next = stmts[i];
     }
@@ -2312,22 +2328,21 @@ Node *__builtin_ast_member(Node *obj, const char *name) {
 CC_BUILTIN(__builtin_ast_funcall, 3);
 Node *__builtin_ast_funcall(Node *callee, Node **args, int n) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !callee)
+    if (!vm)
         return NULL;
+    if (!callee)
+        reflect_link_error(vm, "MakeFuncCall: callee is NULL");
 
     // Ensure callee's type is resolved (mirrors funcall() in parse.c:3967)
     add_type(vm, callee);
 
     Type *ty = callee->ty;
-    if (!ty)
-        return NULL;
-
     // Unwrap pointer-to-function (mirrors parse.c:3973)
-    if (ty->kind == TY_PTR && ty->base && ty->base->kind == TY_FUNC)
+    if (ty && ty->kind == TY_PTR && ty->base && ty->base->kind == TY_FUNC)
         ty = ty->base;
 
-    if (ty->kind != TY_FUNC)
-        return NULL; // callee is not a function type
+    if (!ty || ty->kind != TY_FUNC)
+        reflect_link_error(vm, "MakeFuncCall: callee is not a function");
 
     Node *node    = alloc_node(vm, ND_FUNCALL);
     node->lhs     = callee;
@@ -2340,10 +2355,11 @@ Node *__builtin_ast_funcall(Node *callee, Node **args, int n) {
     // For a paramless/variadic callee or a struct/union param `arg` is chained
     // WITHOUT a cast, so its ->next is written in place; reflect_link rejects
     // such a node once another list holds it.
+    reflect_check_no_null(vm, args, n, "MakeFuncCall: argument");
     Type *param_ty = ty->params;
     Node  head     = {};
     Node *cur      = &head;
-    for (int i = 0; i < n && args[i]; i++) {
+    for (int i = 0; i < n; i++) {
         Node *arg = args[i];
         add_type(vm, arg);
         if (param_ty) {
@@ -2690,7 +2706,7 @@ Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n) {
     zero->var           = var;
 
     Node *chain         = NULL;
-    reflect_check_unique(vm, inits, n, false);
+    reflect_check_unique(vm, inits, n);
     if (n > 0 && inits) {
         for (int i = 0; i < n; i++)
             if (inits[i])
@@ -5724,19 +5740,17 @@ Node *__builtin_node_list(Node **nodes, int count) {
     if (!vm || !nodes || count <= 0)
         return NULL;
 
-    reflect_check_unique(vm, nodes, count, true);
-    for (int i = 0; i < count && nodes[i]; i++)
+    reflect_check_no_null(vm, nodes, count, "NodeList: node");
+    reflect_check_unique(vm, nodes, count);
+    for (int i = 0; i < count; i++)
         reflect_claim(vm, nodes[i], LINK_PENDING, false);
     Node *head = nodes[0];
     Node *cur  = head;
     for (int i = 1; i < count; i++) {
-        if (!nodes[i])
-            break;
         cur->next = nodes[i];
         cur       = cur->next;
     }
-    if (cur)
-        cur->next = NULL;
+    cur->next = NULL;
     return head;
 }
 
