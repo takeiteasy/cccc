@@ -3078,8 +3078,6 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                              (!x != !y || (x && strcmp(x->name, y->name)))) ||
                             xa != ya;
         }
-        // TODO: a file-scope call's copy of a file type could be unified with
-        // the parse's own (#2049)
         if (clash && found->from_preparse)
             error_tok(vm, site,
                       "cannot name the instance: a file-scope call made '%s' "

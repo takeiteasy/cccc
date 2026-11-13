@@ -4267,6 +4267,9 @@ typedef struct Compiler {
     PreparseTemplate *preparse_templates, **preparse_templates_tail;
     Template         *captured; // the template the last capture registered
     bool              in_preparse_calls; // file-scope calls are running
+    bool              in_index_splice;   // a declaration is being spliced in
+    HashMap spliced_aggs; // `{` token of an aggregate spliced in -> its Type
+    Token  *agg_body;     // `{` of the aggregate struct_union_decl just parsed
     PreparseSeed
         *preparse_seeds;         // one per input; NULL without file-scope calls
     PreparseSeed    *parse_seed; // for the next runtime parse(), or NULL

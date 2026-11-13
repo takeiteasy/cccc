@@ -2731,7 +2731,10 @@ bool cc_parse_splice_range(VirtualMachine *vm, Token *tok) {
 
     vm->compiler.locals     = NULL;
     vm->compiler.current_fn = NULL;
-    if (vm->compiler.macro_file_scope)
+    if (vm->compiler.in_preparse_calls && !vm->compiler.in_macro_mode &&
+        vm->compiler.runtime_file_scope)
+        vm->compiler.scope = vm->compiler.runtime_file_scope;
+    else if (vm->compiler.macro_file_scope)
         vm->compiler.scope = vm->compiler.macro_file_scope;
     // #894: a splice can be triggered two ways -- during the comptime
     // *parse* (is_typename/find_tag/primary()'s hooks, in_macro_mode

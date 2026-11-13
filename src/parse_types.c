@@ -1789,6 +1789,46 @@ static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
     return existing;
 }
 
+// A file-scope call that ran before the parse spliced this file's declarations
+// in, so an aggregate it declared is a Type of its own. The parse of the same
+// declaration (the same `{` token) installs that Type instead of a second one,
+// so an instance the call made over it is the file's own.
+static Type *spliced_aggregate(VirtualMachine *vm, Token *body, TypeKind kind) {
+    if (!body || vm->compiler.in_index_splice || vm->compiler.in_macro_mode ||
+        !vm->compiler.spliced_aggs.capacity)
+        return NULL;
+    Type *ty = hashmap_get_int(&vm->compiler.spliced_aggs, (long long)body);
+    return ty && ty->kind == kind && ty->size >= 0 ? ty : NULL;
+}
+
+// Installs the spliced Type as the tag before the members are parsed, so a
+// member that points back at the tag points at it.
+static void install_spliced_tag(VirtualMachine *vm, Token *body, Token *tag,
+                                TypeKind kind) {
+    Type *spliced = spliced_aggregate(vm, body, kind);
+    if (!spliced || !tag || find_tag_in_current_scope(vm, tag))
+        return;
+    push_tag_scope(vm, tag, spliced);
+    mark_last_type_name_as_definition(vm, spliced);
+}
+
+static Type *install_body_tag(VirtualMachine *vm, Token *body, Token *tag,
+                              Type *ty, char *kind_name) {
+    Type *spliced = spliced_aggregate(vm, body, ty->kind);
+    if (spliced && !types_same_layout(spliced, ty))
+        spliced = NULL;
+    Type *in_scope = tag ? find_tag_in_current_scope(vm, tag) : NULL;
+    Type *result =
+        spliced && in_scope == spliced
+            ? spliced
+            : install_tag_definition(
+                  vm, tag, spliced && !in_scope ? spliced : ty, kind_name);
+    if (body && body->origin && vm->compiler.in_index_splice)
+        hashmap_put_int(&vm->compiler.spliced_aggs, (long long)body->origin,
+                        result);
+    return result;
+}
+
 // enum-specifier = ident? (":" typename)? "{" enum-list? "}"
 //                | ident (":" typename)?
 //
@@ -1927,8 +1967,9 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,
     if (existing_tag && existing_tag->kind != TY_ENUM)
         error_tok(vm, tag, "not an enum tag");
 
-    tok      = skip(vm, tok, "{");
-    *defined = true;
+    Token *body = tok;
+    tok         = skip(vm, tok, "{");
+    *defined    = true;
     mark_block_scope(vm, ty);
 
     // Read an enum-list.
@@ -2132,7 +2173,7 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,
         }
     }
 
-    return install_tag_definition(vm, tag, ty, "enum");
+    return install_body_tag(vm, body, tag, ty, "enum");
 }
 
 // typeof-specifier = "(" (expr | typename) ")"
@@ -3846,11 +3887,14 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
         return ty;
     }
 
-    tok = skip(vm, tok, "{");
+    Token *body = tok;
+    tok         = skip(vm, tok, "{");
+    install_spliced_tag(vm, body, tag, kind);
 
     // Construct a struct object.
     mark_block_scope(vm, ty);
     struct_members(vm, &tok, tok, ty);
+    vm->compiler.agg_body = body;
     tok = attribute_list(vm, tok, ty, NULL);
     // #1160: unlike the GNU spelling (still handled above), gcc does not
     // apply a trailing [[gnu::aligned(N)]]/[[gnu::packed]] here -- see
@@ -4059,7 +4103,8 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok,
     }
 
     ty->size = align_to(bits, ty->align * 8) / 8;
-    return install_tag_definition(vm, type_agg(ty)->struct_tag, ty, "struct");
+    return install_body_tag(vm, vm->compiler.agg_body, type_agg(ty)->struct_tag,
+                            ty, "struct");
 }
 
 // union-decl = struct-union-decl
@@ -4117,7 +4162,8 @@ static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok,
             ty->size = mem->ty->size;
     }
     ty->size = align_to(ty->size, ty->align);
-    return install_tag_definition(vm, type_agg(ty)->struct_tag, ty, "union");
+    return install_body_tag(vm, vm->compiler.agg_body, type_agg(ty)->struct_tag,
+                            ty, "union");
 }
 
 // Find a struct member by name.

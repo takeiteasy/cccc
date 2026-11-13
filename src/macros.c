@@ -414,6 +414,7 @@ typedef struct ComptimeDecl {
     Token      *end;   // token AFTER the terminating ';' (exclusive)
     File       *file;
     const char *filename;
+    int         input; // input stream the declaration is in
     bool        has_top_level_eq;
     bool initializer_self_contained; // meaningful only if has_top_level_eq
     // #1247: true when this range is a function *definition*'s signature --
@@ -656,6 +657,7 @@ static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
     decl->end              = is_definition ? semi : semi->next;
     decl->file             = file;
     decl->filename         = start->filename;
+    decl->input            = vm->compiler.cur_input;
     decl->has_top_level_eq = has_top_level_eq;
     decl->initializer_self_contained =
         has_top_level_eq && eq_tok &&
@@ -815,7 +817,8 @@ static void cc_comptime_index_build(VirtualMachine *vm, Token **input_tokens,
     vm->compiler.has_comptime_decl_index = true;
 
     for (int fi = 0; fi < count; fi++) {
-        Token *tok = input_tokens[fi];
+        vm->compiler.cur_input = fi;
+        Token *tok             = input_tokens[fi];
         while (tok && tok->kind != TK_EOF) {
             Token *start = tok;
 
@@ -967,18 +970,26 @@ static bool comptime_index_splice(VirtualMachine *vm, HashMap *map,
     if (!chain)
         return false;
 
-    ComptimeDeclName *pick = NULL;
+    // A call at file scope declares what it names from its own input, then a
+    // declaration in the primary file wins.
+    bool own = vm->compiler.in_preparse_calls && !vm->compiler.in_macro_mode;
+    ComptimeDeclName *pick   = NULL;
+    ComptimeDeclName *prefer = NULL;
     for (ComptimeDeclName *r = chain; r; r = r->next) {
         if (!(kind_mask & (1u << r->kind)))
             continue;
         if (!pick)
             pick = r;
-        if (vm->compiler.primary_file &&
-            r->decl->file == vm->compiler.primary_file) {
+        if (own && r->decl->input == vm->compiler.cur_input) {
             pick = r;
             break;
         }
+        if (!prefer && vm->compiler.primary_file &&
+            r->decl->file == vm->compiler.primary_file)
+            prefer = r;
     }
+    if (prefer && !(own && pick->decl->input == vm->compiler.cur_input))
+        pick = prefer;
     if (!pick)
         return false;
 
@@ -1058,7 +1069,10 @@ static bool comptime_index_splice(VirtualMachine *vm, HashMap *map,
     int           pre_err_count  = vm->error_count;
     CompileError *pre_err_tail   = vm->errors_tail;
 
-    bool          ok             = cc_parse_splice_range(vm, materialized);
+    bool          was_splicing   = vm->compiler.in_index_splice;
+    vm->compiler.in_index_splice = true;
+    bool ok                      = cc_parse_splice_range(vm, materialized);
+    vm->compiler.in_index_splice = was_splicing;
     decl->state                  = ok ? CD_DONE : CD_FAILED;
     if (!ok) {
         vm->compiler.globals = globals_before;
