@@ -342,6 +342,7 @@ _Bool same = Cell__int_equals(&x, &y);
 | Argument that is a variable-length array | Compile error |
 | Argument that is an unnamed struct, union or enum with no typedef name | Compile error asking for a tag or typedef name |
 | A runtime template used in comptime code, or the reverse | Each program has its own templates: `'twice' is not a template in comptime code` |
+| `[[cccc::operator(sym)]]` on a function template, or an operator written in a struct template's body | Not bound for the instances; [bind them per instance](cpp.md#templates-and-members) |
 | Defining a template after its first `@inst` | The template must come first |
 
 ## Diagnostics

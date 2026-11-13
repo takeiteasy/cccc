@@ -93,21 +93,22 @@ An rvalue receiver (`make().len()`) passed to a `T *` parameter is copied into a
 
 ### Templates and members
 
-Operators and methods bind to a concrete struct. Instantiate first, then bind per instance, with a generic function doing the work:
+A method in a struct template's body is a method of every instance; the receiver is `struct Vec2 *`, as the template name stands for the instance. An operator binds to a concrete struct, so bind it per instance on a `typedef`, with a generic function doing the work:
 
 ```c
-@template(T) struct Vec2 { T x, y; };
-@template(T) T vec2_dot(const @inst(T) Vec2 *a, const @inst(T) Vec2 *b) {
-    return a->x * b->x + a->y * b->y;
+@template(T) struct Vec2 {
+    T x, y;
+    T dot(const struct Vec2 *self, const struct Vec2 *o) { return self->x * o->x + self->y * o->y; }
+};
+@template(T) @inst(T) Vec2 vec2_add(@inst(T) Vec2 a, @inst(T) Vec2 b) {
+    return (@inst(T) Vec2){a.x + b.x, a.y + b.y};
 }
 
 typedef Vec2@(int) IVec;
-[[cccc::method(IVec, dot)]] int ivec_dot(const IVec *a, const IVec *b) {
-    return vec2_dot@(int)(a, b);
-}
+[[cccc::operator(+)]] IVec ivec_add(IVec a, IVec b) { return vec2_add@(int)(a, b); }
 ```
 
-A member function or operator inside a struct template body is not supported.[^membertemplates]
+C++ writes `operator+` once for every `T`.[^membertemplates]
 
 ## Compile-time evaluation
 
@@ -186,4 +187,4 @@ No classes or inheritance, function or operator overloading beyond operand-type 
 
 [^spelling]: The prefix `@inst(int) max`, the postfix `max@(int)` and the keyword `__inst(int) max` name the same instance; see [templates.md](templates.md#spellings).
 
-[^membertemplates]: A function in a template struct's body (`T dot(Vec2 *self, Vec2 *o) {...}`) and an operator attribute on a function template are not applied to instances. Bind them on a `typedef` of the instance as above.
+[^membertemplates]: `[[cccc::operator(+)]]` on a function template is not applied to its instances, and an `operator+` in a struct template's body is rejected for the instance (`operator '+' in Vec2__int needs a Vec2__int or Vec2__int * operand`).
