@@ -2940,11 +2940,8 @@ static char *first_error_since(VirtualMachine *vm, CompileError *pre_tail,
         return NULL;
     for (CompileError *e = pre_tail ? pre_tail->next : vm->errors; e;
          e               = e->next) {
-        if (e->severity != 0 || !e->message)
-            continue;
-        const char *text = strstr(e->message, "error: ");
-        text             = text ? text + 7 : e->message;
-        return arena_strndup(vm, text, (int)strcspn(text, "\n"));
+        if (e->severity == 0 && e->text)
+            return arena_strdup(vm, e->text);
     }
     return NULL;
 }

@@ -3875,6 +3875,7 @@ typedef struct CompileError {
     struct CompileError
                *next;      /**< Pointer to the next error in the linked list. */
     char       *message;   /**< Formatted error message string. */
+    const char *text;      /**< The message alone, without location. */
     const char *filename;  /**< Source file name where the error occurred. */
     int         line_no;   /**< Line number in the source file. */
     int         col_no;    /**< Column number in the source file. */
@@ -5471,6 +5472,7 @@ struct VirtualMachine {
     jmp_buf
          *error_jmp_buf; // Jump buffer for error handling (NULL = use exit())
     char *error_message; // Last error message (when using longjmp)
+    char *error_text;    // Its bare message, moved into CompileError.text
     CompileError *pending_notes; // #966: expansion-backtrace notes for the
                                  // diagnostic that just produced error_message;
                                  // consumed (and reset to NULL) by the same

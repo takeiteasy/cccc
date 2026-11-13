@@ -459,6 +459,9 @@ static void vdiagnostic_at(VirtualMachine *vm, const char *filename, char *input
         va_copy(ap_copy, ap);
         int written = vsnprintf(msg + pos, 4096 - pos, fmt, ap_copy);
         va_end(ap_copy);
+        int text_len = written > 4096 - pos - 1 ? 4096 - pos - 1 : written;
+        vm->error_text =
+            arena_strndup(vm, msg + pos, text_len > 0 ? text_len : 0);
         if (written > 0) {
             pos += written;
             if (pos > 4096)
@@ -535,23 +538,25 @@ static int tok_col_no(Token *tok) {
     return (int)(tok->loc - line_start) + 1;
 }
 
-// Shared tail of error_at/error_tok/error_tok_recover's collect-errors
-// block: wrap vm->error_message (+ vm->pending_notes, #966) in a
-// CompileError and append it to vm->errors. Returns the new node (already
-// appended) or NULL if collection isn't active. Consumes and clears both
-// vm->error_message and vm->pending_notes.
-static CompileError *collect_compile_error(VirtualMachine *vm, const char *filename,
-                                           int line_no, int col_no) {
-    if (!(vm && vm->collect_errors && vm->error_message))
+// Wraps vm->error_message (+ vm->error_text, vm->pending_notes, #966) in a
+// CompileError and appends it to vm->errors. Returns the new node, or NULL if
+// there is no message. Consumes and clears all three. Severity 1 is counted as
+// a warning, anything else as an error.
+static CompileError *collect_diagnostic(VirtualMachine *vm,
+                                        const char *filename, int line_no,
+                                        int col_no, int severity,
+                                        const char *warn_name) {
+    if (!(vm && vm->error_message))
         return NULL;
     CompileError *err =
         arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
     err->message   = vm->error_message;
+    err->text      = vm->error_text;
     err->filename  = filename;
     err->line_no   = line_no;
     err->col_no    = col_no;
-    err->severity  = 0; // error
-    err->warn_name = NULL;
+    err->severity  = severity;
+    err->warn_name = warn_name;
     err->next      = NULL;
     err->notes     = vm->pending_notes;
 
@@ -561,10 +566,22 @@ static CompileError *collect_compile_error(VirtualMachine *vm, const char *filen
         vm->errors_tail->next = err;
         vm->errors_tail       = err;
     }
-    vm->error_count++;
+    if (severity == 1)
+        vm->warning_count++;
+    else
+        vm->error_count++;
     vm->error_message = NULL; // Clear so it's not reused
+    vm->error_text    = NULL;
     vm->pending_notes = NULL;
     return err;
+}
+
+static CompileError *collect_compile_error(VirtualMachine *vm,
+                                           const char *filename, int line_no,
+                                           int col_no) {
+    if (!(vm && vm->collect_errors))
+        return NULL;
+    return collect_diagnostic(vm, filename, line_no, col_no, 0, NULL);
 }
 
 void error_at(VirtualMachine *vm, char *loc, char *fmt, ...) {
@@ -699,29 +716,7 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
 
     // If this warning is treated as an error, collect it as an error and abort.
     if (is_error) {
-        if (vm->error_message) {
-            CompileError *err =
-                arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-            err->message   = vm->error_message;
-            err->filename  = site->file->name;
-            err->line_no   = line_no;
-            err->col_no    = col_no;
-            err->severity  = 0; // error (not warning)
-            err->warn_name = warn_name;
-            err->next      = NULL;
-            err->notes     = vm->pending_notes;
-
-            // Append to list
-            if (!vm->errors) {
-                vm->errors = vm->errors_tail = err;
-            } else {
-                vm->errors_tail->next = err;
-                vm->errors_tail       = err;
-            }
-            vm->error_count++; // Count as error
-            vm->error_message = NULL;
-            vm->pending_notes = NULL;
-        }
+        collect_diagnostic(vm, site->file->name, line_no, col_no, 0, warn_name);
 
         // Use longjmp like error_tok
         if (vm->error_jmp_buf) {
@@ -731,29 +726,8 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
     }
 
     // Collect warning if error collection is enabled
-    if (vm && vm->collect_errors && vm->error_message) {
-        CompileError *err =
-            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-        err->message   = vm->error_message;
-        err->filename  = site->file->name;
-        err->line_no   = line_no;
-        err->col_no    = col_no;
-        err->severity  = 1; // warning
-        err->warn_name = warn_name;
-        err->next      = NULL;
-        err->notes     = vm->pending_notes;
-
-        // Append to list
-        if (!vm->errors) {
-            vm->errors = vm->errors_tail = err;
-        } else {
-            vm->errors_tail->next = err;
-            vm->errors_tail       = err;
-        }
-        vm->warning_count++;
-        vm->error_message = NULL; // Clear so it's not reused
-        vm->pending_notes = NULL;
-    }
+    if (vm->collect_errors)
+        collect_diagnostic(vm, site->file->name, line_no, col_no, 1, warn_name);
 }
 
 void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt,
@@ -795,53 +769,16 @@ void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt,
         vm->error_message = NULL;
     }
 
+    const char *file = vm->compiler.current_file->name;
     if (is_error) {
-        if (vm->error_message) {
-            CompileError *err =
-                arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-            err->message   = vm->error_message;
-            err->filename  = vm->compiler.current_file->name;
-            err->line_no   = line_no;
-            err->col_no    = col_no;
-            err->severity  = 0;
-            err->warn_name = warn_name;
-            err->next      = NULL;
-
-            if (!vm->errors) {
-                vm->errors = vm->errors_tail = err;
-            } else {
-                vm->errors_tail->next = err;
-                vm->errors_tail       = err;
-            }
-            vm->error_count++;
-            vm->error_message = NULL;
-        }
-
+        collect_diagnostic(vm, file, line_no, col_no, 0, warn_name);
         if (vm->error_jmp_buf)
             jump_to_error_handler(vm);
         exit(1);
     }
 
-    if (vm->collect_errors && vm->error_message) {
-        CompileError *err =
-            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-        err->message   = vm->error_message;
-        err->filename  = vm->compiler.current_file->name;
-        err->line_no   = line_no;
-        err->col_no    = col_no;
-        err->severity  = 1;
-        err->warn_name = warn_name;
-        err->next      = NULL;
-
-        if (!vm->errors) {
-            vm->errors = vm->errors_tail = err;
-        } else {
-            vm->errors_tail->next = err;
-            vm->errors_tail       = err;
-        }
-        vm->warning_count++;
-        vm->error_message = NULL;
-    }
+    if (vm->collect_errors)
+        collect_diagnostic(vm, file, line_no, col_no, 1, warn_name);
 }
 
 // Returns the canonical single/double-char spelling for a C digraph, or NULL.

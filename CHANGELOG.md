@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: a `CompileError` carries the bare message in `text` (no location, source line or caret) beside the rendered `message`.
 - Fixed: a `Quote()` template can use `@inst`, so a comptime macro can call a function template or declare a template struct (`Quote("@inst(int) max($1, $2)", a, b)`). It was rejected with `expected an expression, found '@'`, and an instance made while expanding a function body was left out of the program (`undefined function: max__int`).
 - Added: a function template's pattern may hold a template pack and an instance's member pack together: `f(xs + t.v ...)`, `{xs * t.v ...}` and `(xs * t.v + ...)` pair each element of `xs` with the matching member of `t`. Packs of different lengths are an error.
 - Fixed: under `--testing`, a negative test whose call instantiates a template, or defines a nested function, with a recoverable error in its body (such as `no such member`) now passes instead of crashing code generation. A later use of an instance that failed reports `instantiation of 'f__int' failed earlier: <the first error>`.
