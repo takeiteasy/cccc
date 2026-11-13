@@ -601,9 +601,6 @@ Token *cc_template_capture(VirtualMachine *vm, Token *tok) {
         error_tok(vm, err_tok, "%s", err);
     if (r == 0)
         return NULL;
-    if (vm->compiler.in_macro_mode)
-        error_tok(vm, scan.marker,
-                  "@template is not supported in comptime code");
 
     Template *t = arena_alloc(&vm->compiler.parser_arena, sizeof(Template));
     *t          = scan;
@@ -614,16 +611,16 @@ Token *cc_template_capture(VirtualMachine *vm, Token *tok) {
         register_partial(vm, t);
         return t->end;
     }
-    if (hashmap_get2(&vm->compiler.templates, t->name, t->name_len))
+    if (hashmap_get2(tmpl_templates(vm), t->name, t->name_len))
         error_tok(vm, t->name_tok, "redefinition of template '%s'", t->name);
-    hashmap_put2(&vm->compiler.templates, t->name, t->name_len, t);
+    hashmap_put2(tmpl_templates(vm), t->name, t->name_len, t);
     return t->end;
 }
 
 Template *cc_find_template(VirtualMachine *vm, Token *name) {
     if (!vm->compiler.saw_templates || !name || name->kind != TK_IDENT)
         return NULL;
-    return hashmap_get2(&vm->compiler.templates, name->loc, name->len);
+    return hashmap_get2(tmpl_templates(vm), name->loc, name->len);
 }
 
 // Reports a stray `@template` or `@specialize` the capture arm did not consume.
@@ -734,7 +731,7 @@ static void mangle_tag(MangleBuf *mb, Type *ty, Token *tag, const char *kw,
         mb_puts(mb, "__");
         mb_putu(mb, agg->scope_ord);
     }
-    HashMap *owners = &mb->vm->compiler.template_aggs;
+    HashMap *owners = tmpl_aggs(mb->vm);
     Type    *owner  = hashmap_get2(owners, mb->p + start, mb->len - start);
     if (!owner)
         hashmap_put2(owners, mb->p + start, mb->len - start, root);
@@ -2252,11 +2249,11 @@ static void bind_param_as(VirtualMachine *vm, TemplateParam *p, Type *ty,
         obj->is_maybe_unused = true;
         cc_finalize_const_gvar(vm, obj, value);
         *hidden = obj;
-        vm->compiler.scope = vm->compiler.runtime_file_scope;
+        vm->compiler.scope = tmpl_file_scope(vm);
         return;
     }
     VarScope *vs       = push_scope(vm, p->name->loc, p->name->len);
-    vm->compiler.scope = vm->compiler.runtime_file_scope;
+    vm->compiler.scope = tmpl_file_scope(vm);
     if (p->type_start) {
         vs->enum_ty  = ty;
         vs->enum_val = arg->val;
@@ -2392,8 +2389,8 @@ static void inst_lookup(VirtualMachine *vm, TemplateInstance *inst,
                         Token *name_probe) {
     switch (inst->tmpl->kind) {
         case TMPL_FUNC: {
-            VarScope *vs = scope_find_var(vm->compiler.runtime_file_scope,
-                                          inst->mangled, strlen(inst->mangled));
+            VarScope *vs = scope_find_var(tmpl_file_scope(vm), inst->mangled,
+                                          strlen(inst->mangled));
             inst->fn     = vs ? vs->var : NULL;
             break;
         }
@@ -2801,8 +2798,7 @@ static bool match_inst(Matcher *m, Type *pat, InstPat *ip, Type *arg) {
                                        : type_agg(root)->struct_tag;
     if (!tag)
         return false;
-    TemplateInstance *in =
-        hashmap_get2(&m->vm->compiler.template_insts, tag->loc, tag->len);
+    TemplateInstance *in = hashmap_get2(tmpl_insts(m->vm), tag->loc, tag->len);
     if (!in || in->tmpl != ip->tmpl || !in->ty || origin_root(in->ty) != root)
         return false;
     return match_args(m, ip->tmpl, &ip->pl, in->args, in->nargs, NULL);
@@ -3007,8 +3003,8 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     }
 
     snapshot_clear(vm);
-    vm->compiler.scope       = vm->compiler.runtime_file_scope;
-    vm->compiler.tmpl_anchor = vm->compiler.runtime_file_scope;
+    vm->compiler.scope       = tmpl_file_scope(vm);
+    vm->compiler.tmpl_anchor = tmpl_file_scope(vm);
 
     // The name is built from the arguments alone. A parameter is bound (made
     // visible to the template's later types and defaults) only when one of
@@ -3030,7 +3026,7 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
             bind_state(vm, t, i, state, args, &bindings);
     }
 
-    TemplateInstance *found = hashmap_get(&vm->compiler.template_insts, mb.p);
+    TemplateInstance *found = hashmap_get(tmpl_insts(vm), mb.p);
     if (def && found)
         error_tok(vm, site,
                   found->state == TI_SPECIALIZED
@@ -3049,7 +3045,7 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         spec->args    = memcpy(arena_alloc(&vm->compiler.parser_arena,
                                            sizeof(TemplateArg) * (total + 1)),
                                args, sizeof(TemplateArg) * total);
-        hashmap_put(&vm->compiler.template_insts, spec->mangled, spec);
+        hashmap_put(tmpl_insts(vm), spec->mangled, spec);
         snapshot_restore(vm, &snap);
         vm->error_jmp_buf = saved_jb;
         return spec;
@@ -3153,7 +3149,7 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         inst->state   = TI_IN_PROGRESS;
         inst->args    = args;
         inst->nargs   = total;
-        hashmap_put(&vm->compiler.template_insts, mangled, inst);
+        hashmap_put(tmpl_insts(vm), mangled, inst);
         inst->next_inst = t->insts;
         t->insts        = inst;
     }
@@ -3277,7 +3273,12 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
     tok         = skip(vm, tok->next, "(");
     Template *t = cc_find_template(vm, tok);
     if (!t)
-        error_tok(vm, tok, "'%.*s' is not a template", (int)tok->len, tok->loc);
+        error_tok(vm, tok, "'%.*s' is not a template%s", (int)tok->len,
+                  tok->loc,
+                  vm->compiler.in_macro_mode
+                      ? " in comptime code; define it in a comptime block or "
+                        "an '@shared' header"
+                      : "");
     tok = tok->next;
 
     TemplateArg  stack[TMPL_STACK_PARAMS];
@@ -3305,6 +3306,67 @@ Type *cc_template_inst_type(VirtualMachine *vm, Token **rest, Token *tok) {
         error_tok(vm, tok, "template '%s' is a function, not a type",
                   inst->tmpl->name);
     return inst->ty;
+}
+
+static const char *kind_name(TemplateKind kind);
+
+// The instance of template `name` for the argument text `args`, as the
+// comptime builtins InstantiateType() and InstantiateFunction() ask for it.
+// The text is parsed like `@inst(args) name`.
+static TemplateInstance *instantiate_text(VirtualMachine *vm,
+                                          const char *builtin, const char *name,
+                                          const char *args) {
+    Token *site = vm->compiler.macro_call_tok;
+    // TODO: a file-scope call runs before the parse and sees no templates
+    // (#2042)
+    if (!name || !hashmap_get2(tmpl_templates(vm), name, strlen(name)))
+        error_tok(vm, site,
+                  "%s: '%s' is not a template; a call at file scope "
+                  "runs before the file is parsed and sees none",
+                  builtin, name ? name : "");
+    Token *toks =
+        tokenize_string(vm, "<instantiate>",
+                        arena_format(vm, "%s@(%s)", name, args ? args : ""));
+    convert_pp_tokens(vm, toks);
+    toks = cc_rewrite_template_markers(vm, toks);
+    if (!equal(toks, "__cccc_inst"))
+        error_tok(vm, site ? site : toks, "%s: '%s' is not a template name",
+                  builtin, name ? name : "");
+
+    bool saved_splice_active            = vm->compiler.comptime_splice_active;
+    vm->compiler.comptime_splice_active = true;
+    Token            *rest;
+    TemplateInstance *inst = cc_parse_template_inst(vm, &rest, toks);
+    vm->compiler.comptime_splice_active = saved_splice_active;
+    if (rest->kind != TK_EOF)
+        error_tok(vm, site ? site : rest,
+                  "%s: unexpected '%.*s' in the arguments", builtin,
+                  (int)rest->len, rest->loc);
+    return inst;
+}
+
+Type *cc_instantiate_type_text(VirtualMachine *vm, const char *name,
+                               const char *args) {
+    TemplateInstance *inst =
+        instantiate_text(vm, "InstantiateType", name, args);
+    if (inst->tmpl->kind == TMPL_FUNC)
+        error_tok(vm, vm->compiler.macro_call_tok,
+                  "InstantiateType: '%s' is a function template; use "
+                  "InstantiateFunction",
+                  inst->tmpl->name);
+    return inst->ty;
+}
+
+Obj *cc_instantiate_function_text(VirtualMachine *vm, const char *name,
+                                  const char *args) {
+    TemplateInstance *inst =
+        instantiate_text(vm, "InstantiateFunction", name, args);
+    if (inst->tmpl->kind != TMPL_FUNC)
+        error_tok(vm, vm->compiler.macro_call_tok,
+                  "InstantiateFunction: '%s' is a %s template; use "
+                  "InstantiateType",
+                  inst->tmpl->name, kind_name(inst->tmpl->kind));
+    return inst->fn;
 }
 
 // File-scope `@inst(Types...) Name;` instantiates without using the result.
@@ -3351,9 +3413,6 @@ Token *cc_specialize_capture(VirtualMachine *vm, Token *tok) {
         error_tok(vm, err_tok, "%s", err);
     if (r == 0)
         return NULL;
-    if (vm->compiler.in_macro_mode)
-        error_tok(vm, scan.marker,
-                  "@specialize is not supported in comptime code");
 
     Template *t = cc_find_template(vm, scan.name_tok);
     if (!t)
@@ -3717,8 +3776,6 @@ static void register_partial(VirtualMachine *vm, Template *pt) {
     if (t->kind != pt->kind)
         error_tok(vm, pt->name_tok, "'%s' is a %s template, not a %s", t->name,
                   kind_name(t->kind), kind_name(pt->kind));
-    if (vm->compiler.in_macro_mode)
-        error_tok(vm, site, "@specialize is not supported in comptime code");
     if (pt->nparams > TMPL_MAX_ARGS)
         error_tok(vm, pt->params[TMPL_MAX_ARGS].name,
                   "a partial specialization takes at most %d parameters",
@@ -3752,8 +3809,8 @@ static void register_partial(VirtualMachine *vm, Template *pt) {
         longjmp(*saved_jb, 1);
     }
     snapshot_clear(vm);
-    vm->compiler.scope       = vm->compiler.runtime_file_scope;
-    vm->compiler.tmpl_anchor = vm->compiler.runtime_file_scope;
+    vm->compiler.scope       = tmpl_file_scope(vm);
+    vm->compiler.tmpl_anchor = tmpl_file_scope(vm);
     Scope *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
     memset(bindings, 0, sizeof(Scope));
     vm->compiler.tmpl_bindings = bindings;

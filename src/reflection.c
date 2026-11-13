@@ -485,6 +485,22 @@ Type *__builtin_ast_get_type(const char *name) {
           name);
 }
 
+CC_BUILTIN(__builtin_ast_instantiate_type, 2);
+Type *__builtin_ast_instantiate_type(const char *name, const char *args) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm || !name)
+        return NULL;
+    return cc_instantiate_type_text(vm, name, args);
+}
+
+CC_BUILTIN(__builtin_ast_instantiate_function, 2);
+Obj *__builtin_ast_instantiate_function(const char *name, const char *args) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm || !name)
+        return NULL;
+    return cc_instantiate_function_text(vm, name, args);
+}
+
 CC_BUILTIN(__builtin_ast_type_kind, 1);
 TypeKind __builtin_ast_type_kind(Type *ty) {
     return ty ? ty->kind : TY_VOID;

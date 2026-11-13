@@ -654,6 +654,24 @@ const char *__builtin_ast_type_c_name(Type *ty);
  */
 Type *__builtin_ast_make_pointer(Type *base);
 
+/*! @brief Instantiate a struct, union, enum or typedef template.
+ * @param name The template name.
+ * @param args The argument list as written inside `@inst(...)`, such as
+ *             "int" or "Point, 4".
+ * @return The instance's type. An error if `name` is not such a template.
+ * @details Convenience wrapper: InstantiateType(name, args).
+ */
+Type *__builtin_ast_instantiate_type(const char *name, const char *args);
+
+/*! @brief Instantiate a function template.
+ * @param name The template name.
+ * @param args The argument list as written inside `@inst(...)`.
+ * @return The instance's function. An error if `name` is not a function
+ *         template.
+ * @details Convenience wrapper: InstantiateFunction(name, args).
+ */
+Obj *__builtin_ast_instantiate_function(const char *name, const char *args);
+
 /*! @brief Build a fixed-length array type.
  * @param base The element type.
  * @param length The element count.
@@ -2595,6 +2613,17 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Build a pointer-to-base type.
  * @param base The pointed-to type. */
 #define MakePointer(base) __builtin_ast_make_pointer(base)
+/*! @def InstantiateType
+ * @brief Instantiate a struct, union, enum or typedef template.
+ * @param name The template name.
+ * @param args The argument list as written inside `@inst(...)`. */
+#define InstantiateType(name, args) __builtin_ast_instantiate_type(name, args)
+/*! @def InstantiateFunction
+ * @brief Instantiate a function template.
+ * @param name The template name.
+ * @param args The argument list as written inside `@inst(...)`. */
+#define InstantiateFunction(name, args)                                        \
+    __builtin_ast_instantiate_function(name, args)
 /*! @def MakeArray
  * @brief Build a fixed-length array type.
  * @param base The element type.

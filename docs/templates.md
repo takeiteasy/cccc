@@ -210,7 +210,7 @@ typedef @inst(int) Vec IntVec;     // type alias
 | Attributes | Only those written on the specialization: `@specialize(int) @equals struct Cell {...}` generates `Cell__int_equals` |
 | Signature | A function specialization is not checked against the template's signature |
 | Unused | A specialization nobody instantiates is never compiled |
-| Where | File scope only; not in comptime code |
+| Where | File scope only, in runtime code or [comptime code](macros-templates.md#templates-in-comptime-code) |
 | Errors | `redefinition of specialization 'Vec__bool'`, `specialization of 'Vec__bool' after its first use`, `'Vec' is a struct template, not a union` |
 
 A specialization in a header applies in every file that includes it.
@@ -341,7 +341,7 @@ _Bool same = Cell__int_equals(&x, &y);
 | Pattern naming an instance of a function or typedef template, or a variable inside an array-length expression (`T[N + 1]`) | Compile error |
 | Argument that is a variable-length array | Compile error |
 | Argument that is an unnamed struct, union or enum with no typedef name | Compile error asking for a tag or typedef name |
-| `@template`, `@inst` or `@specialize` in comptime code | Compile error |
+| A runtime template used in comptime code, or the reverse | Each program has its own templates: `'twice' is not a template in comptime code` |
 | Defining a template after its first `@inst` | The template must come first |
 
 ## Diagnostics

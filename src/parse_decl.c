@@ -2760,19 +2760,14 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     hashmap_deinit(&vm->compiler.global_decl_map);
     memset(&vm->compiler.global_decl_map, 0,
            sizeof(vm->compiler.global_decl_map));
-    // The comptime program is parsed in the middle of the runtime parse; it
-    // does not use templates, so it must not discard theirs.
-    if (!vm->compiler.in_macro_mode) {
-        hashmap_deinit(&vm->compiler.templates);
-        memset(&vm->compiler.templates, 0, sizeof(vm->compiler.templates));
-        hashmap_deinit(&vm->compiler.template_insts);
-        memset(&vm->compiler.template_insts, 0,
-               sizeof(vm->compiler.template_insts));
-        hashmap_deinit(&vm->compiler.template_aggs);
-        memset(&vm->compiler.template_aggs, 0,
-               sizeof(vm->compiler.template_aggs));
-        hashmap_deinit(&vm->compiler.scope_ords);
-        memset(&vm->compiler.scope_ords, 0, sizeof(vm->compiler.scope_ords));
+    // Each program has its own template registry: the comptime program is
+    // parsed in the middle of the runtime parse and must not discard the
+    // runtime program's templates.
+    HashMap *registry[] = {tmpl_templates(vm), tmpl_insts(vm), tmpl_aggs(vm),
+                           tmpl_scope_ords(vm)};
+    for (size_t i = 0; i < sizeof registry / sizeof *registry; i++) {
+        hashmap_deinit(registry[i]);
+        memset(registry[i], 0, sizeof *registry[i]);
     }
 
     tok = parse_file_scope_decls(vm, tok);

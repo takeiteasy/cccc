@@ -418,6 +418,28 @@ bool omp_at_section(VirtualMachine *vm, Token *tok);
 Token *omp_file_scope(VirtualMachine *vm, Token *tok);
 
 // parse_template.c: `@template` / `@inst` / `@specialize`.
+// The registry and file scope of the program being parsed: the comptime
+// program has its own, apart from the runtime program's.
+static inline HashMap *tmpl_templates(VirtualMachine *vm) {
+    return vm->compiler.in_macro_mode ? &vm->compiler.ct_templates
+                                      : &vm->compiler.templates;
+}
+static inline HashMap *tmpl_insts(VirtualMachine *vm) {
+    return vm->compiler.in_macro_mode ? &vm->compiler.ct_template_insts
+                                      : &vm->compiler.template_insts;
+}
+static inline HashMap *tmpl_aggs(VirtualMachine *vm) {
+    return vm->compiler.in_macro_mode ? &vm->compiler.ct_template_aggs
+                                      : &vm->compiler.template_aggs;
+}
+static inline HashMap *tmpl_scope_ords(VirtualMachine *vm) {
+    return vm->compiler.in_macro_mode ? &vm->compiler.ct_scope_ords
+                                      : &vm->compiler.scope_ords;
+}
+static inline Scope *tmpl_file_scope(VirtualMachine *vm) {
+    return vm->compiler.in_macro_mode ? vm->compiler.macro_file_scope
+                                      : vm->compiler.runtime_file_scope;
+}
 int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
                      const char **err, Token **err_tok);
 int cc_specialize_scan(VirtualMachine *vm, Token *start, Template *t,

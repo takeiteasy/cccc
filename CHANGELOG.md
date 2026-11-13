@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: templates in comptime code. `@template`, `@specialize` and `@inst` work in a comptime function, a `#pragma cccc comptime` block and an `@shared` header. The comptime program has its own templates, apart from the runtime program's. They were rejected with `@template is not supported in comptime code`, and an `@inst` of a runtime template in a comptime function worked or failed (`undefined function in macro bytecode`) depending on which program instantiated it first; it is now `'twice' is not a template in comptime code`.
+- Added: `InstantiateType(name, args)` and `InstantiateFunction(name, args)` instantiate a runtime template from a comptime handler (`InstantiateType("Arr", "char, 5")`) and return the instance's `Type *` or `Obj *`.
 - Fixed: `@template`, `@inst`, `Name@(...)` and `@name` attributes work inside an emit block (`#pragma cccc emit begin`), including `@test`, `@build` and `@build_target`. They reached the parser as a raw `@` (`expected an expression, found '@'`). `-c=generated` replays the lines as written.
 - Added: `t.v...` expands in a declaration at file scope: an array length, an initializer list or a `_Static_assert` (`char flat[(sizeof(g.v) + ... + 0)];`). It stopped with `member pack 'v' must be expanded with '...'`.
 - Added: `t.v...` expands in a struct or union body (a member's array length or initializer), and a struct or union template pattern may hold a template pack and an instance member pack together: `char b[(sizeof(Ts) + sizeof(g.v) + ...)]`. It stopped with `member pack 'v' must be expanded with '...'`.

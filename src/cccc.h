@@ -4231,6 +4231,9 @@ typedef struct Compiler {
     HashMap      template_insts;  // mangled name -> TemplateInstance *
     HashMap      template_aggs; // block-scope aggregate spelling -> root Type *
     HashMap      scope_ords;    // owner function + spelling -> types numbered
+    // The comptime program's own template registry (the four maps above are
+    // the runtime program's); template_registry() picks one by in_macro_mode.
+    HashMap ct_templates, ct_template_insts, ct_template_aggs, ct_scope_ords;
     Scope       *runtime_file_scope;
     Scope       *tmpl_bindings;   // detached scope holding the type parameters
     Scope       *tmpl_anchor;     // scope in which tmpl_bindings is consulted
@@ -5975,6 +5978,13 @@ bool cc_file_is_command_line_input(VirtualMachine *vm,
                                    const char     *name);  // #1006
 Token *cc_rewrite_pragma_operators(VirtualMachine *vm, Token *toks);
 Token *cc_rewrite_template_markers(VirtualMachine *vm, Token *toks);
+// parse_template.c: the instance of template `name` for the argument text
+// `args` (`int, 4`); the instance's type, or its function for a function
+// template.
+Type *cc_instantiate_type_text(VirtualMachine *vm, const char *name,
+                               const char *args);
+Obj *cc_instantiate_function_text(VirtualMachine *vm, const char *name,
+                                  const char *args);
 // #1292: realpath()-canonicalizes a path key (falls back to the literal
 // string when realpath() can't resolve it, e.g. a synthetic "<embedded>/..."
 // path). Originally private to preprocess.c's `#pragma once`/include-guard

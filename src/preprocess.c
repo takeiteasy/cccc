@@ -45,6 +45,7 @@
 // https://github.com/rui314/chibicc/wiki/cpp.algo.pdf
 
 #include "./internal.h"
+#include "./parse_internal.h" // cc_template_scan
 #include <fenv.h>  // host <fenv.h>, for init_fenv_macros() (#771)
 #include <errno.h> // host <errno.h>, for init_errno_macros() (#813)
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -4497,8 +4498,6 @@ static bool try_rewrite_template_attr(VirtualMachine *vm, Token **tok_ptr) {
     if (!marker->next || !equal(marker->next, "("))
         error_tok(vm, marker, "'%s' needs a parameter list: %s(T)", spell,
                   spell);
-    if (ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)
-        error_tok(vm, marker, "'%s' is not supported in comptime code", spell);
     Token *close = matching_paren(marker->next);
     if (!close || close->next != list_end)
         error_tok(vm, marker, "malformed '%s' attribute", spell);
@@ -4538,9 +4537,6 @@ static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
         spell =
             arena_format(vm, "%s%.*s", at ? "@" : "", (int)kw->len, kw->loc);
         if (kind != TM_INST) {
-            if (ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)
-                error_tok(vm, tok, "%s is not supported in comptime code",
-                          spell);
             *tok_ptr = splice_definition_marker(vm, tok, kw, kind, NULL, NULL,
                                                 kw->next);
             return true;
@@ -4558,7 +4554,10 @@ static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
     }
 
     if (ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)
-        error_tok(vm, tok, "%s is not supported in comptime code", spell);
+        error_tok(vm, tok,
+                  "%s cannot start a declaration in a comptime block; use it "
+                  "inside a function",
+                  spell);
 
     Token *close = NULL;
     if (args_open) {
@@ -6794,6 +6793,59 @@ static void queue_comptime_directive(VirtualMachine *vm, char *line) {
         strarray_push(&vm->compiler.comptime_pending_includes, line);
 }
 
+// A `@template` / `@specialize` definition inside a comptime block belongs to
+// the comptime program. Its source is queued for the comptime pass, which
+// registers it in the comptime program's own template registry, instead of
+// reaching the runtime stream.
+static bool try_capture_comptime_template(VirtualMachine *vm, Token **tok_ptr) {
+    ComptimeCtxEntry *top = ctx_top(vm);
+    Token            *tok = *tok_ptr;
+    if (!top || top->type != CTX_COMPTIME || tok->file != top->file ||
+        vm->compiler.pp_const_expr_depth)
+        return false;
+
+    // Rewrite the run of markers (`@template(T) @specialize(T *)`) so the
+    // scanner finds the definition's end.
+    Token  *def  = NULL;
+    Token **link = &def;
+    for (Token *p = tok;;) {
+        Token *q = p;
+        if (!try_rewrite_template_marker(vm, &q) &&
+            !try_rewrite_template_attr(vm, &q))
+            break;
+        if (!equal(q, "__cccc_template") && !equal(q, "__cccc_specialize"))
+            return false;
+        Token *close = matching_paren(q->next);
+        *link        = q;
+        link         = &close->next;
+        p            = close->next;
+    }
+    if (!def)
+        return false;
+
+    Template    scan;
+    const char *err     = NULL;
+    Token      *err_tok = NULL;
+    int         r = equal(def, "__cccc_specialize")
+                        ? cc_specialize_scan(vm, def, &scan, &err, &err_tok)
+                        : cc_template_scan(vm, def, &scan, &err, &err_tok);
+    if (r < 0)
+        error_tok(vm, err_tok, "%s", err);
+    if (r == 0)
+        return false;
+
+    // TODO: queued as text, so diagnostics name <comptime-include> (#2046)
+    Token *last = def;
+    while (last->next != scan.end)
+        last = last->next;
+    char *text =
+        arena_format(vm, "#line %d \"%s\"\n%.*s", tok->line_no, tok->file->name,
+                     (int)(last->loc + last->len - tok->loc), tok->loc);
+    queue_comptime_directive(vm, text);
+    *tok_ptr = scan.end;
+    return true;
+}
+
 // Visit all tokens in `tok` while evaluating preprocessing
 // macros and directives.
 static Token *preprocess2(VirtualMachine *vm, Token *tok) {
@@ -6984,6 +7036,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // @name / @name(args) is rewritten to the canonical attribute form
             // so that try_extract_attr_macro sees [[cccc::name(...)]] as usual.
             if (try_rewrite_at_directive(vm, &tok))
+                continue;
+            if (try_capture_comptime_template(vm, &tok))
                 continue;
             if (try_rewrite_template_marker(vm, &tok))
                 continue;

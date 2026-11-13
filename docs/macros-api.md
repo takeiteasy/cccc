@@ -25,6 +25,8 @@ Lookup tables for the comptime API.
 | `TypeName(ty)` | Get a type name when available — for a tagged struct/union/enum, always the tag (never a typedef alias spelling, even when looked up by one) |
 | `MakePointer(base)` | Create pointer type |
 | `MakeArray(base, len)` | Create array type |
+| `InstantiateType(name, args)` | Instantiate a struct, union, enum or typedef [template](macros-templates.md#instantiating-from-a-handler); `args` is the text inside `@inst(...)` |
+| `InstantiateFunction(name, args)` | Instantiate a function template; returns the instance's `Obj *` |
 
 ### Enum APIs
 

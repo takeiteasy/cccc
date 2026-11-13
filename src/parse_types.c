@@ -1829,8 +1829,8 @@ void assign_scope_ord(VirtualMachine *vm, Type *ty) {
     char       *key = arena_format(vm, "%p/%s_%.*s", (void *)agg->scope_fn, kw,
                                    (int)tag->len, tag->loc);
     size_t      len = strlen(key);
-    uintptr_t   n = (uintptr_t)hashmap_get2(&vm->compiler.scope_ords, key, len);
-    hashmap_put2(&vm->compiler.scope_ords, key, len, (void *)(n + 1));
+    uintptr_t   n   = (uintptr_t)hashmap_get2(tmpl_scope_ords(vm), key, len);
+    hashmap_put2(tmpl_scope_ords(vm), key, len, (void *)(n + 1));
     type_agg_mut(vm, ty)->scope_ord = (unsigned)(n + 1);
 }
 

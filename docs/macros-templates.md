@@ -123,4 +123,49 @@ A `Quote` or `QuoteLazy` template can name [template](templates.md) instances wi
 int main(void) { return biggest(40, 42); }
 ```
 
+## Templates in comptime code
+
+Comptime code has its own [templates](templates.md): a template defined for the comptime program is used only by it, and a runtime template is not visible to comptime code, so both can use the same name. Define one in a comptime block or in an `@shared` header, which both programs read.
+
+```c
+#pragma cccc comptime begin
+@template(T) T twice(T v) { return v * 2; }
+
+int ct_answer(void) { return @inst(int) twice(21); }
+#pragma cccc comptime end
+```
+
+| Where | Behavior |
+|---|---|
+| `@template`, `@specialize`, `@inst` in a comptime function, a comptime block or an `@shared` header | Work as in runtime code |
+| `@inst` as the first token of a declaration in a comptime block | Error: use it inside a function |
+| `@inst` in comptime code of a runtime template | `'twice' is not a template in comptime code` |
+
+## Instantiating from a handler
+
+`InstantiateType(name, args)` and `InstantiateFunction(name, args)` instantiate a runtime template from a handler. `args` is the text written inside `@inst(...)`, so it takes types, constants and packs. Each call returns the instance's `Type *` or `Obj *`.
+
+```c
+@template(T, int N) struct Arr { T v[N]; };
+@template(T) T maxof(T a, T b) { return a > b ? a : b; }
+
+@comptime Node *bytes(void) {
+    Type *arr = InstantiateType("Arr", "char, 5");
+    return MakeIntLiteral(TypeSize(arr));                // 5
+}
+
+@comptime Node *biggest(Node *a, Node *b) {
+    Obj *fn = InstantiateFunction("maxof", "int");       // maxof__int
+    return Quote("maxof__int($1, $2)", a, b);
+}
+```
+
+| Case | Result |
+|---|---|
+| `InstantiateType` on a function template, or `InstantiateFunction` on any other | Error naming the other builtin |
+| Trailing text after the arguments (`"int) junk ("`) | Error |
+| A call at file scope (`gen();`) | `'Box' is not a template`: it runs before the file is parsed, so no template exists yet. Handlers that run while a function body or attribute is expanded can instantiate[^filescope] |
+
+[^filescope]: `Quote` with `@inst` has the same limit.
+
 [^with]: Without the wrapper, the generated function's locals would be built while the caller is the active function context.
