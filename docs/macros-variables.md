@@ -31,6 +31,10 @@ Node *area_of_n_tiles(Node *n) {
 | `GetComptimeVar(name)` | `Node *` | Comptime scalar as an AST literal node |
 | `GetComptimePtr(name)` | `Node *` | Address of a static shadow copy of the evaluated comptime variable |
 
+An unknown name, a name that is not yet evaluated, or a struct passed to a
+scalar getter stops the compile with a message naming the getter
+(`GetComptimeInt: no comptime variable 'x'`).
+
 Use `GetComptimePtr(name)` when generated code needs an addressable value
 rather than a literal copy:
 
@@ -66,7 +70,8 @@ call comptime helper functions.
 
 `GetComptimeMember(var_name, field)` returns the field's value as an
 AST literal node. Integer and float/double members are supported. Pointer and
-array members are not accessible this way.
+array members are not accessible this way. A member the struct lacks stops the
+compile.
 
 ### Scope notes
 

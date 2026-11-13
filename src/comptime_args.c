@@ -430,11 +430,11 @@ static const struct {
     {"setpayloadsig", "w=8 -"},
     // Compiler builtins whose prototype can't say enough; the rest are derived
     // from reflection.h (cccc_builtin_note_signature).
-    {"__builtin_ast_global_var_set_init_data", "- r@2 -"},
+    {"__builtin_ast_global_var_set_init_data", "- r@2? -"},
     {"__builtin_macro_error_at", "- f"},
     {"__builtin_macro_warning_at", "- f"},
-    {"__builtin_quote", "s"},
-    {"__builtin_quote_lazy", "s"},
+    {"__builtin_quote", "s?"},
+    {"__builtin_quote_lazy", "s?"},
     // The standard streams are host handles the guest never dereferences.
     {"__cccc_stderr", "> h"},
     {"__cccc_stdin", "> h"},

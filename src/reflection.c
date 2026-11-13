@@ -512,7 +512,7 @@ Type *__builtin_ast_get_type(const char *name) {
 CC_BUILTIN(__builtin_ast_instantiate_type, 2);
 Type *__builtin_ast_instantiate_type(const char *name, const char *args) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return NULL;
     return cc_instantiate_type_text(vm, name, args);
 }
@@ -520,7 +520,7 @@ Type *__builtin_ast_instantiate_type(const char *name, const char *args) {
 CC_BUILTIN(__builtin_ast_instantiate_function, 2);
 Obj *__builtin_ast_instantiate_function(const char *name, const char *args) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return NULL;
     return cc_instantiate_function_text(vm, name, args);
 }
@@ -529,7 +529,7 @@ CC_BUILTIN(__builtin_ast_instantiate_type_with, 3);
 Type *__builtin_ast_instantiate_type_with(const char             *name,
                                           const TemplateArgument *args, int n) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return NULL;
     return cc_instantiate_type_args(vm, name, args, n);
 }
@@ -539,7 +539,7 @@ Obj *__builtin_ast_instantiate_function_with(const char             *name,
                                              const TemplateArgument *args,
                                              int                     n) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return NULL;
     return cc_instantiate_function_args(vm, name, args, n);
 }
@@ -2138,11 +2138,13 @@ Node *__builtin_ast_switch(Node *cond) {
 CC_BUILTIN(__builtin_ast_switch_add_case, 3);
 void __builtin_ast_switch_add_case(Node *switch_node, Node *value, Node *body) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !switch_node || !value || !body)
+    if (!vm)
         return;
-
+    reflect_require(vm, switch_node, "SwitchAddCase: switch");
+    reflect_require(vm, value, "SwitchAddCase: value");
+    reflect_require(vm, body, "SwitchAddCase: body");
     if (switch_node->kind != ND_SWITCH)
-        return;
+        reflect_link_error(vm, "SwitchAddCase: node is not a switch");
 
     // Create a case node. cc_eval constant-folds "value" (it calls add_type
     // itself, so this works even on reflection-built nodes that were never
@@ -2175,11 +2177,12 @@ void __builtin_ast_switch_add_case(Node *switch_node, Node *value, Node *body) {
 CC_BUILTIN(__builtin_ast_switch_set_default, 2);
 void __builtin_ast_switch_set_default(Node *switch_node, Node *body) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !switch_node || !body)
+    if (!vm)
         return;
-
+    reflect_require(vm, switch_node, "SwitchSetDefault: switch");
+    reflect_require(vm, body, "SwitchSetDefault: body");
     if (switch_node->kind != ND_SWITCH)
-        return;
+        reflect_link_error(vm, "SwitchSetDefault: node is not a switch");
 
     // #815/#816: a second default label silently overwrote the first with no
     // diagnostic; same fix as the parser's registration-time check.
@@ -3373,7 +3376,7 @@ Node *__builtin_ast_publish(Obj *obj, Token *tok) {
     if (!obj->ty)
         reflect_link_error(vm, "PublishNode: object has no type");
     if (!vm->compiler.scope)
-        return NULL;
+        reflect_link_error(vm, "PublishNode: no scope to publish into");
 
     if (tok)
         obj->tok = tok;
@@ -3785,19 +3788,29 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
 
 CC_BUILTIN(__builtin_ast_function_set_static, 2);
 void __builtin_ast_function_set_static(Obj *fn, bool is_static) {
-    if (fn)
-        fn->is_static = is_static;
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
+        return;
+    reflect_require(vm, fn, "FunctionSetStatic: function");
+    fn->is_static = is_static;
 }
 
 CC_BUILTIN(__builtin_ast_function_set_inline, 2);
 void __builtin_ast_function_set_inline(Obj *fn, bool is_inline) {
-    if (fn)
-        fn->is_inline = is_inline;
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
+        return;
+    reflect_require(vm, fn, "FunctionSetInline: function");
+    fn->is_inline = is_inline;
 }
 
 CC_BUILTIN(__builtin_ast_function_set_variadic, 2);
 void __builtin_ast_function_set_variadic(Obj *fn, bool is_variadic) {
-    if (fn && fn->ty)
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
+        return;
+    reflect_require(vm, fn, "FunctionSetVariadic: function");
+    if (fn->ty)
         fn->ty->is_variadic = is_variadic;
 }
 
@@ -3854,6 +3867,10 @@ Obj *__builtin_ast_function_prototype(const char *name, Type *return_type) {
 CC_BUILTIN(__builtin_ast_add_attribute, 2);
 void __builtin_ast_add_attribute(Obj *fn, const char *attr_text) {
     VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
+        return;
+    reflect_require(vm, fn, "AddAttribute: function");
+    reflect_require(vm, attr_text, "AddAttribute: attribute text");
     cc_apply_attr_to_fn(vm, fn, attr_text, vm->compiler.macro_call_tok);
 }
 
@@ -3939,8 +3956,12 @@ CC_BUILTIN(__builtin_ast_global_var_set_init_data, 3);
 void __builtin_ast_global_var_set_init_data(Obj *var, const char *data,
                                             int len) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !var || !data || len <= 0)
+    if (!vm)
         return;
+    reflect_require(vm, var, "GlobalVarSetInitData: variable");
+    reflect_require(vm, data, "GlobalVarSetInitData: data");
+    if (len <= 0)
+        reflect_link_error(vm, "GlobalVarSetInitData: length is not positive");
     char *buf = arena_alloc(&vm->compiler.parser_arena, len);
     memcpy(buf, data, len);
     var->init_data = buf;
@@ -3949,8 +3970,11 @@ void __builtin_ast_global_var_set_init_data(Obj *var, const char *data,
 // Set the static flag on a generated global (true = internal linkage).
 CC_BUILTIN(__builtin_ast_global_var_set_static, 2);
 void __builtin_ast_global_var_set_static(Obj *var, bool is_static) {
-    if (var)
-        var->is_static = is_static;
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
+        return;
+    reflect_require(vm, var, "GlobalVarSetStatic: variable");
+    var->is_static = is_static;
 }
 
 // ============================================================================
@@ -3974,6 +3998,7 @@ void __builtin_ast_push_fn(Obj *fn) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm)
         return;
+    reflect_require(vm, fn, "WithFn: function");
     if (_fn_context_depth >= CCCC_FN_CONTEXT_STACK_DEPTH) {
         error("__builtin_ast_push_fn: function context stack overflow (max %d)",
               CCCC_FN_CONTEXT_STACK_DEPTH);
@@ -4046,8 +4071,9 @@ static int   _loop_context_depth = 0;
 CC_BUILTIN(__builtin_ast_push_loop, 1);
 void __builtin_ast_push_loop(Node *loop) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !loop)
+    if (!vm)
         return;
+    reflect_require(vm, loop, "WithLoop: loop");
     if (_loop_context_depth >= CCCC_LOOP_CONTEXT_STACK_DEPTH) {
         error("__builtin_ast_push_loop: loop context stack overflow (max %d)",
               CCCC_LOOP_CONTEXT_STACK_DEPTH);
@@ -4396,7 +4422,9 @@ void __builtin_ast_enum_add_constant(Type *ty, const char *name, int64_t value);
 CC_BUILTIN(__builtin_ast_push_block, 1);
 void __builtin_ast_push_block(Node *block) {
     VirtualMachine *vm = __builtin_current_vm;
-    (void)vm;
+    if (!vm)
+        return;
+    reflect_require(vm, block, "WithBlock: block");
     if (_block_context_depth >= CCCC_AST_CONTEXT_STACK_DEPTH) {
         error("__builtin_ast_push_block: block context stack overflow (max %d)",
               CCCC_AST_CONTEXT_STACK_DEPTH);
@@ -4416,7 +4444,9 @@ void __builtin_ast_pop_block(void) {
 CC_BUILTIN(__builtin_ast_push_struct, 1);
 void __builtin_ast_push_struct(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
-    (void)vm;
+    if (!vm)
+        return;
+    reflect_require(vm, ty, "WithStruct: struct type");
     if (_struct_context_depth >= CCCC_AST_CONTEXT_STACK_DEPTH) {
         error(
             "__builtin_ast_push_struct: struct context stack overflow (max %d)",
@@ -4437,7 +4467,9 @@ void __builtin_ast_pop_struct(void) {
 CC_BUILTIN(__builtin_ast_push_switch, 1);
 void __builtin_ast_push_switch(Node *switch_node) {
     VirtualMachine *vm = __builtin_current_vm;
-    (void)vm;
+    if (!vm)
+        return;
+    reflect_require(vm, switch_node, "WithSwitch: switch");
     if (_switch_context_depth >= CCCC_AST_CONTEXT_STACK_DEPTH) {
         error(
             "__builtin_ast_push_switch: switch context stack overflow (max %d)",
@@ -4458,7 +4490,9 @@ void __builtin_ast_pop_switch(void) {
 CC_BUILTIN(__builtin_ast_push_enum, 1);
 void __builtin_ast_push_enum(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
-    (void)vm;
+    if (!vm)
+        return;
+    reflect_require(vm, ty, "WithEnum: enum type");
     if (_enum_context_depth >= CCCC_AST_CONTEXT_STACK_DEPTH) {
         error("__builtin_ast_push_enum: enum context stack overflow (max %d)",
               CCCC_AST_CONTEXT_STACK_DEPTH);
@@ -4477,8 +4511,11 @@ void __builtin_ast_pop_enum(void) {
 
 CC_BUILTIN(__builtin_ast_block_add_current_stmt, 1);
 Node *__builtin_ast_block_add_current_stmt(Node *stmt) {
-    if (_block_context_depth <= 0)
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
         return NULL;
+    if (_block_context_depth <= 0)
+        reflect_link_error(vm, "BlockAddStmt: no WithBlock context");
     return __builtin_ast_block_add_stmt(
         _block_context_stack[_block_context_depth - 1], stmt);
 }
@@ -4486,32 +4523,44 @@ Node *__builtin_ast_block_add_current_stmt(Node *stmt) {
 CC_BUILTIN(__builtin_ast_struct_add_current_field, 2);
 Type *__builtin_ast_struct_add_current_field(const char *name,
                                              Type       *field_type) {
-    if (_struct_context_depth <= 0)
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
         return NULL;
+    if (_struct_context_depth <= 0)
+        reflect_link_error(vm, "StructAddField: no WithStruct context");
     return __builtin_ast_struct_add_field(
         _struct_context_stack[_struct_context_depth - 1], name, field_type);
 }
 
 CC_BUILTIN(__builtin_ast_switch_add_current_case, 2);
 void __builtin_ast_switch_add_current_case(Node *value, Node *body) {
-    if (_switch_context_depth <= 0)
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
         return;
+    if (_switch_context_depth <= 0)
+        reflect_link_error(vm, "SwitchAddCase: no WithSwitch context");
     __builtin_ast_switch_add_case(
         _switch_context_stack[_switch_context_depth - 1], value, body);
 }
 
 CC_BUILTIN(__builtin_ast_switch_set_current_default, 1);
 void __builtin_ast_switch_set_current_default(Node *body) {
-    if (_switch_context_depth <= 0)
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
         return;
+    if (_switch_context_depth <= 0)
+        reflect_link_error(vm, "SwitchSetDefault: no WithSwitch context");
     __builtin_ast_switch_set_default(
         _switch_context_stack[_switch_context_depth - 1], body);
 }
 
 CC_BUILTIN(__builtin_ast_enum_add_current_constant, 2);
 void __builtin_ast_enum_add_current_constant(const char *name, int value) {
-    if (_enum_context_depth <= 0)
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
         return;
+    if (_enum_context_depth <= 0)
+        reflect_link_error(vm, "EnumAddConstant: no WithEnum context");
     __builtin_ast_enum_add_constant(
         _enum_context_stack[_enum_context_depth - 1], name, value);
 }
@@ -5555,8 +5604,11 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl, Node **nodes,
 CC_BUILTIN(__builtin_quote_n, 3);
 Node *__builtin_quote_n(const char *tmpl, Node **nodes, int count) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !tmpl || (!nodes && count > 0))
+    if (!vm)
         return NULL;
+    reflect_require(vm, tmpl, "QuoteN: template");
+    if (count > 0)
+        reflect_require(vm, nodes, "QuoteN: nodes");
     return quote_core(vm, tmpl, nodes, count);
 }
 
@@ -5653,8 +5705,9 @@ int cc_quote_max_index(const char *tmpl) {
 CC_BUILTIN_VARIADIC(__builtin_quote, 1);
 Node *__builtin_quote(const char *tmpl, ...) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !tmpl)
+    if (!vm)
         return NULL;
+    reflect_require(vm, tmpl, "Quote: template");
 
     int max_index = cc_quote_max_index(tmpl);
 
@@ -5719,8 +5772,11 @@ static Node *quote_lazy_capture(VirtualMachine *vm, const char *tmpl,
 CC_BUILTIN(__builtin_quote_lazy_n, 3);
 Node *__builtin_quote_lazy_n(const char *tmpl, Node **nodes, int count) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !tmpl || (!nodes && count > 0))
+    if (!vm)
         return NULL;
+    reflect_require(vm, tmpl, "QuoteLazyN: template");
+    if (count > 0)
+        reflect_require(vm, nodes, "QuoteLazyN: nodes");
 
     // quote_core defers this check until the fragment is actually parsed;
     // QuoteLazyN validates eagerly at the capture site instead, so a wrong
@@ -5730,11 +5786,11 @@ Node *__builtin_quote_lazy_n(const char *tmpl, Node **nodes, int count) {
     if (max_index > count) {
         if (vm->compiler.macro_call_tok)
             error_tok(vm, vm->compiler.macro_call_tok,
-                      "__builtin_quote_lazy_n: template references $%d but "
+                      "QuoteLazyN: template references $%d but "
                       "only %d argument%s supplied",
                       max_index, count, count == 1 ? "" : "s");
         else
-            error("__builtin_quote_lazy_n: template references $%d but "
+            error("QuoteLazyN: template references $%d but "
                   "only %d argument%s supplied",
                   max_index, count, count == 1 ? "" : "s");
         return NULL;
@@ -5745,8 +5801,9 @@ Node *__builtin_quote_lazy_n(const char *tmpl, Node **nodes, int count) {
 CC_BUILTIN_VARIADIC(__builtin_quote_lazy, 1);
 Node *__builtin_quote_lazy(const char *tmpl, ...) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !tmpl)
+    if (!vm)
         return NULL;
+    reflect_require(vm, tmpl, "QuoteLazy: template");
 
     int   max_index = cc_quote_max_index(tmpl);
     int   n         = (max_index < 64) ? max_index : 64;
@@ -6528,8 +6585,12 @@ CC_BUILTIN(__builtin_ast_enum_add_constant, 3);
 void __builtin_ast_enum_add_constant(Type *ty, const char *name,
                                      int64_t value) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty || !name || ty->kind != TY_ENUM)
+    if (!vm)
         return;
+    reflect_require(vm, ty, "EnumAddConstant: type");
+    reflect_require(vm, name, "EnumAddConstant: name");
+    if (ty->kind != TY_ENUM)
+        reflect_link_error(vm, "EnumAddConstant: type is not an enum");
 
     int name_len = (int)strlen(name);
 
@@ -6602,36 +6663,61 @@ static ComptimeVar *find_comptime_var(VirtualMachine *vm, const char *name) {
     return NULL;
 }
 
+// The evaluated comptime variable `name` for the builtin `who`; scalar
+// getters want a scalar, GetComptimeMember wants a struct.
+static ComptimeVar *reflect_comptime_var(VirtualMachine *vm, const char *who,
+                                         const char *name, bool want_struct) {
+    char msg[192];
+    if (!name) {
+        snprintf(msg, sizeof msg, "%s: name is NULL", who);
+        reflect_link_error(vm, msg);
+    }
+    ComptimeVar *cv = find_comptime_var(vm, name);
+    if (!cv) {
+        snprintf(msg, sizeof msg, "%s: no comptime variable '%s'", who, name);
+        reflect_link_error(vm, msg);
+    }
+    if (!cv->is_evaluated) {
+        snprintf(msg, sizeof msg, "%s: comptime variable '%s' is not evaluated",
+                 who, name);
+        reflect_link_error(vm, msg);
+    }
+    if (cv->is_struct != want_struct) {
+        snprintf(msg, sizeof msg, "%s: '%s' is %s; use %s", who, name,
+                 want_struct ? "not a struct" : "a struct",
+                 want_struct ? "GetComptimeVar" : "GetComptimeMember");
+        reflect_link_error(vm, msg);
+    }
+    return cv;
+}
+
 CC_BUILTIN(__builtin_get_comptime_int, 1);
 int64_t __builtin_get_comptime_int(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return 0;
-    ComptimeVar *cv = find_comptime_var(vm, name);
-    if (!cv || !cv->is_evaluated || cv->is_struct)
-        return 0;
+    ComptimeVar *cv =
+        reflect_comptime_var(vm, "GetComptimeInt", name, false);
     return cv->is_float ? (int64_t)cv->float_val : cv->int_val;
 }
 
 CC_BUILTIN_DOUBLE(__builtin_get_comptime_float, 1);
 double __builtin_get_comptime_float(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return 0.0;
-    ComptimeVar *cv = find_comptime_var(vm, name);
-    if (!cv || !cv->is_evaluated || cv->is_struct)
-        return 0.0;
+    ComptimeVar *cv =
+        reflect_comptime_var(vm, "GetComptimeFloat", name, false);
     return cv->is_float ? cv->float_val : (double)cv->int_val;
 }
 
 CC_BUILTIN(__builtin_get_comptime_var, 1);
 Node *__builtin_get_comptime_var(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return NULL;
-    ComptimeVar *cv = find_comptime_var(vm, name);
-    if (!cv || !cv->is_evaluated || cv->is_struct)
-        return NULL;
+    ComptimeVar *cv =
+        reflect_comptime_var(vm, "GetComptimeVar", name, false);
     if (cv->is_float)
         return __builtin_ast_float_literal(cv->float_val);
     return __builtin_ast_int_literal(cv->int_val);
@@ -6640,11 +6726,18 @@ Node *__builtin_get_comptime_var(const char *name) {
 CC_BUILTIN(__builtin_get_comptime_ptr, 1);
 Node *__builtin_get_comptime_ptr(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return NULL;
+    reflect_require(vm, name, "GetComptimePtr: name");
     ComptimeVar *cv = find_comptime_var(vm, name);
-    if (!cv || !cv->is_evaluated || !cv->ptr_obj)
-        return NULL;
+    if (!cv || !cv->is_evaluated || !cv->ptr_obj) {
+        char msg[192];
+        snprintf(msg, sizeof msg,
+                 cv ? "GetComptimePtr: '%s' has no addressable copy"
+                    : "GetComptimePtr: no comptime variable '%s'",
+                 name);
+        reflect_link_error(vm, msg);
+    }
 
     Node *var  = alloc_node(vm, ND_VAR);
     var->var   = cv->ptr_obj;
@@ -6659,11 +6752,11 @@ Node *__builtin_get_comptime_ptr(const char *name) {
 CC_BUILTIN(__builtin_get_comptime_member, 2);
 Node *__builtin_get_comptime_member(const char *var_name, const char *field) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !var_name || !field)
+    if (!vm)
         return NULL;
-    ComptimeVar *cv = find_comptime_var(vm, var_name);
-    if (!cv || !cv->is_evaluated || !cv->is_struct)
-        return NULL;
+    reflect_require(vm, field, "GetComptimeMember: field");
+    ComptimeVar *cv = reflect_comptime_var(vm, "GetComptimeMember", var_name,
+                                           true);
     size_t flen = strlen(field);
     for (ComptimeVarMember *m = cv->members; m; m = m->next) {
         if (m->name && strlen(m->name) == flen &&
@@ -6673,17 +6766,25 @@ Node *__builtin_get_comptime_member(const char *var_name, const char *field) {
             return __builtin_ast_int_literal(m->int_val);
         }
     }
-    return NULL;
+    char msg[192];
+    snprintf(msg, sizeof msg, "GetComptimeMember: '%s' has no member '%s'",
+             var_name, field);
+    reflect_link_error(vm, msg);
 }
 
 CC_BUILTIN(__builtin_get_constexpr_value, 1);
 Node *__builtin_get_constexpr_value(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
+    if (!vm)
         return NULL;
+    reflect_require(vm, name, "GetConstexprValue: name");
     Obj *obj = (Obj *)__builtin_ast_find_global(name);
-    if (!obj || !obj->is_constexpr || !obj_init(obj)->init_expr)
-        return NULL;
+    if (!obj || !obj->is_constexpr || !obj_init(obj)->init_expr) {
+        char msg[192];
+        snprintf(msg, sizeof msg, "GetConstexprValue: '%s' is not a constexpr global",
+                 name);
+        reflect_link_error(vm, msg);
+    }
     if (obj->ty->kind >= TY_FLOAT)
         return __builtin_ast_float_literal(cc_eval_double(vm, obj_init(obj)->init_expr));
     return __builtin_ast_int_literal(cc_eval(vm, obj_init(obj)->init_expr));

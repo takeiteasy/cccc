@@ -92,9 +92,9 @@ Lookup tables for the comptime API.
 | `CopyLocation(dst, src)` | Copy source location from one node to another |
 | `CopyNode(node)` | Deep copy of an expression or statement tree (labels, `switch`, declarations, `cleanup` variables and VLAs included), for linking into a second list |
 | `Quote(tmpl, ...)` | Parse a C template string, splicing `$N`/`$@N` argument nodes, immediately |
-| `QuoteN(tmpl, nodes, count)` | Array-form `Quote`; validates the splice count |
+| `QuoteN(tmpl, nodes, count)` | Array-form `Quote`; validates the splice count; `nodes` may be NULL only when `count` is 0 |
 | `QuoteLazy(tmpl, ...)` | Capture a template and its splice arguments without parsing; parsed only once spliced in, at the splice site's own scope/loop context |
-| `QuoteLazyN(tmpl, nodes, count)` | Array-form `QuoteLazy` |
+| `QuoteLazyN(tmpl, nodes, count)` | Array-form `QuoteLazy`; `nodes` may be NULL only when `count` is 0 |
 | `NodeList(arr, count)` | Build a `->next`-linked node chain from an array for use as a `$@k` splice argument; none of the `count` nodes may be NULL |
 | `MakeBinary(op, l, r)` | Binary expression |
 | `MakeUnary(op, operand)` | Unary expression |

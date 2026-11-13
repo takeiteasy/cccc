@@ -10,6 +10,9 @@ bad() {
     cat >"bad$n.c" <<EOF2
 typedef struct { int x; } P;
 typedef enum { A, B } E;
+@comptime int cv = 1;
+@comptime struct { int w; } cs = { 2 };
+@template(T) T twice(T a) { return a + a; }
 @comptime void gen(void) {
     Obj *fn = MakeFunction("f", GetType("int"));
     FunctionAddParam(fn, "p", GetType("int"));
@@ -80,3 +83,53 @@ bad 'Serialize(GetType("P"), none, one);' 'Serialize: expression is NULL'
 bad 'Deserialize(GetType("P"), none);' 'Deserialize: buffer is NULL'
 bad 'EnumToString(GetType("E"), none);' 'EnumToString: expression is NULL'
 bad 'EnumFromString(NULL, one);' 'EnumFromString: type is NULL'
+
+bad 'SwitchAddCase(none, one, one);' 'SwitchAddCase: switch is NULL'
+bad 'SwitchAddCase(MakeSwitch(one), none, one);' 'SwitchAddCase: value is NULL'
+bad 'SwitchAddCase(MakeSwitch(one), one, none);' 'SwitchAddCase: body is NULL'
+bad 'SwitchAddCase(one, one, one);' 'SwitchAddCase: node is not a switch'
+bad 'SwitchAddCase(one, one);' 'SwitchAddCase: no WithSwitch context'
+bad 'SwitchSetDefault(none, one);' 'SwitchSetDefault: switch is NULL'
+bad 'SwitchSetDefault(MakeSwitch(one), none);' 'SwitchSetDefault: body is NULL'
+bad 'SwitchSetDefault(one, one);' 'SwitchSetDefault: node is not a switch'
+bad 'SwitchSetDefault(one);' 'SwitchSetDefault: no WithSwitch context'
+bad 'FunctionSetStatic(NULL, 1);' 'FunctionSetStatic: function is NULL'
+bad 'FunctionSetInline(NULL, 1);' 'FunctionSetInline: function is NULL'
+bad 'FunctionSetVariadic(NULL, 1);' 'FunctionSetVariadic: function is NULL'
+bad 'AddAttribute(NULL, "noreturn");' 'AddAttribute: function is NULL'
+bad 'AddAttribute(fn, NULL);' 'AddAttribute: attribute text is NULL'
+bad 'GlobalVarSetStatic(NULL, 1);' 'GlobalVarSetStatic: variable is NULL'
+bad 'GlobalVarSetInitData(NULL, "ab", 2);' 'GlobalVarSetInitData: variable is NULL'
+bad 'GlobalVarSetInitData(GlobalVar("gv", it), NULL, 2);' 'GlobalVarSetInitData: data is NULL'
+bad 'GlobalVarSetInitData(GlobalVar("gv", it), "ab", 0);' 'GlobalVarSetInitData: length is not positive'
+bad 'EnumAddConstant(NULL, "X", 1);' 'EnumAddConstant: type is NULL'
+bad 'EnumAddConstant(GetType("E"), NULL, 1);' 'EnumAddConstant: name is NULL'
+bad 'EnumAddConstant(it, "X", 1);' 'EnumAddConstant: type is not an enum'
+bad 'EnumAddConstant("X", 1);' 'EnumAddConstant: no WithEnum context'
+bad 'WithFn(NULL) { }' 'WithFn: function is NULL'
+bad 'WithLoop(none) { }' 'WithLoop: loop is NULL'
+bad 'WithBlock(none) { }' 'WithBlock: block is NULL'
+bad 'WithSwitch(none) { }' 'WithSwitch: switch is NULL'
+bad 'WithStruct(NULL) { }' 'WithStruct: struct type is NULL'
+bad 'WithEnum(NULL) { }' 'WithEnum: enum type is NULL'
+bad 'BlockAddStmt(one);' 'BlockAddStmt: no WithBlock context'
+bad 'StructAddField("f", it);' 'StructAddField: no WithStruct context'
+bad 'Quote(NULL);' 'Quote: template is NULL'
+bad 'QuoteLazy(NULL);' 'QuoteLazy: template is NULL'
+bad 'QuoteN(NULL, NULL, 0);' 'QuoteN: template is NULL'
+bad 'QuoteN("$1", NULL, 1);' 'QuoteN: nodes is NULL'
+bad 'QuoteLazyN(NULL, NULL, 0);' 'QuoteLazyN: template is NULL'
+bad 'QuoteLazyN("$1", NULL, 1);' 'QuoteLazyN: nodes is NULL'
+bad 'GetComptimeInt("nope");' "GetComptimeInt: no comptime variable 'nope'"
+bad 'GetComptimeInt(NULL);' 'GetComptimeInt: name is NULL'
+bad 'GetComptimeInt("cs");' "GetComptimeInt: 'cs' is a struct; use GetComptimeMember"
+bad 'GetComptimeFloat("nope");' "GetComptimeFloat: no comptime variable 'nope'"
+bad 'GetComptimeVar("nope");' "GetComptimeVar: no comptime variable 'nope'"
+bad 'GetComptimePtr("nope");' "GetComptimePtr: no comptime variable 'nope'"
+bad 'GetComptimeMember("cs", "zz");' "GetComptimeMember: 'cs' has no member 'zz'"
+bad 'GetComptimeMember("cv", "w");' "GetComptimeMember: 'cv' is not a struct; use GetComptimeVar"
+bad 'GetConstexprValue("nope");' "GetConstexprValue: 'nope' is not a constexpr global"
+bad 'InstantiateType(NULL, "int");' 'InstantiateType: name is NULL'
+bad 'InstantiateFunction(NULL, "int");' 'InstantiateFunction: name is NULL'
+bad 'InstantiateTypeWith(NULL, NULL, 0);' 'InstantiateTypeWith: name is NULL'
+bad 'InstantiateFunctionWith(NULL, NULL, 0);' 'InstantiateFunctionWith: name is NULL'

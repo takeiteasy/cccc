@@ -3396,20 +3396,22 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @brief Read an integer-typed @c \#pragma comptime variable's value at
  *           compile time.
  * @param name The comptime variable's name.
- * @return The 64-bit integer value, or 0 if the variable is not defined.
+ * @return The 64-bit integer value. An unknown or struct variable is a
+ *         compile error.
  * @details Convenience wrapper: GetComptimeInt(name).
  */
 int64_t __builtin_get_comptime_int(const char *name);
 /*! @brief Read a float/double-typed @c \#pragma comptime variable's value
  *           at compile time.
  * @param name The comptime variable's name.
- * @return The double value, or 0.0 if the variable is not defined.
+ * @return The double value. An unknown or struct variable is a compile error.
  * @details Convenience wrapper: GetComptimeFloat(name).
  */
 double __builtin_get_comptime_float(const char *name);
 /*! @brief Read a comptime scalar variable as an AST literal node.
  * @param name The comptime variable's name.
- * @return A NK_NUM node representing the variable's value, or NULL on error.
+ * @return A NK_NUM node representing the variable's value. An unknown or
+ *         struct variable is a compile error.
  * @details Convenience wrapper: GetComptimeVar(name).
  */
 Node *__builtin_get_comptime_var(const char *name);
@@ -3417,7 +3419,7 @@ Node *__builtin_get_comptime_var(const char *name);
  *           pointer node.
  * @param name The comptime variable's name.
  * @return An NK_ADDR node pointing at a static shadow copy of the evaluated
- *         comptime variable, or NULL on error.
+ *         comptime variable. An unknown variable is a compile error.
  * @details Convenience wrapper: GetComptimePtr(name).
  */
 Node *__builtin_get_comptime_ptr(const char *name);
@@ -3425,7 +3427,8 @@ Node *__builtin_get_comptime_ptr(const char *name);
  *           literal node.
  * @param var_name The comptime struct variable's name.
  * @param field The field name to look up.
- * @return A NK_NUM node for the field's value, or NULL on error.
+ * @return A NK_NUM node for the field's value. An unknown variable or field is
+ *         a compile error.
  * @details Convenience wrapper: GetComptimeMember(var_name, field).
  */
 Node *__builtin_get_comptime_member(const char *var_name, const char *field);
@@ -3461,7 +3464,7 @@ Node *__builtin_get_comptime_member(const char *var_name, const char *field);
  *           as an AST literal node.
  * @param name The constexpr variable's name.
  * @return A NK_NUM node (integer or float, depending on the variable's type),
- *         or NULL on error.
+ *         Never NULL.
  * @details Errors at compile time if @a name does not refer to a visible
  *             @c constexpr variable.  Convenience wrapper:
  *             GetConstexprValue(name).

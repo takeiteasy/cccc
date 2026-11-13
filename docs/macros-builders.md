@@ -9,6 +9,13 @@ the wrong kind stops the compile with a message naming the builder
 Lookups (`FindType`, `FindGlobal`, `MakeVarRef`) return `NULL` on a miss, so
 check their result before passing it on.
 
+The setters (`FunctionSetStatic`, `AddAttribute`, `GlobalVarSetInitData`,
+`EnumAddConstant`, `SwitchAddCase`), the `With*` contexts, `Quote*` and
+`Instantiate*` follow the same rule. `SwitchAddCase(value, body)`,
+`SwitchSetDefault(body)`, `EnumAddConstant(name, value)`, `BlockAddStmt(stmt)`
+and `StructAddField(name, type)` outside their `With*` block report the
+missing context.
+
 ## Function Generation
 
 Generated functions are `Obj *` values. Create the object, add parameters,

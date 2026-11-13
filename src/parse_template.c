@@ -3337,12 +3337,12 @@ static const char *kind_name(TemplateKind kind);
 // function template or a type template.
 static Template *named_template(VirtualMachine *vm, const char *builtin,
                                 const char *name, bool want_func) {
-    Token    *site = vm->compiler.macro_call_tok;
-    Template *t =
-        name ? hashmap_get2(tmpl_templates(vm), name, strlen(name)) : NULL;
+    Token *site = vm->compiler.macro_call_tok;
+    if (!name)
+        error_tok(vm, site, "%s: name is NULL", builtin);
+    Template *t = hashmap_get2(tmpl_templates(vm), name, strlen(name));
     if (!t)
-        error_tok(vm, site, "%s: '%s' is not a template", builtin,
-                  name ? name : "");
+        error_tok(vm, site, "%s: '%s' is not a template", builtin, name);
     if (want_func && t->kind != TMPL_FUNC)
         error_tok(vm, site, "%s: '%s' is a %s template; use InstantiateType",
                   builtin, t->name, kind_name(t->kind));

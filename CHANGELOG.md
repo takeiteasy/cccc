@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: the remaining comptime builders report a NULL required argument or bad input instead of doing nothing: `SwitchAddCase`, `SwitchSetDefault`, `FunctionSetStatic`/`Inline`/`Variadic`, `AddAttribute`, `GlobalVarSetInitData`, `GlobalVarSetStatic`, `EnumAddConstant`, the `With*` contexts and their `*Current*` forms outside a context, `Quote`/`QuoteN`/`QuoteLazy`/`QuoteLazyN`, `Instantiate*` and `PublishNode`. `GetComptimeInt`/`Float`/`Var`/`Ptr`/`Member` and `GetConstexprValue` report an unknown name or member instead of returning NULL or 0. `WithFn(NULL)` no longer crashes the compiler.
 - Fixed: the comptime AST builders (`MakeBinary`, `MakeCast`, `MakeMember`, `MakeParamRef`, `FunctionSetBody`, `MakeFunction`, `MakeStruct` and the rest) report a NULL required argument, an unknown member or parameter name, or an input of the wrong kind with a message naming the builder, instead of returning NULL and building a function with a `return;` or no body.
 - Fixed: `CompoundLiteral()`, `InitArray()` and `InitStruct()` report a NULL initializer or value (`CompoundLiteral: initializer 2 is NULL`) instead of dropping it, and `InitStruct()` reports a member name the type lacks instead of returning NULL.
 - Fixed: a function generated with a `long long` return type (`MakeFunction("f", GetType("long long"))`) agrees with a later `long long f(void);` prototype. It reported `conflicting types`.
