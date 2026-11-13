@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.34.2] - 2026-11-13
+
 - Fixed: `-c=native` with gcc on macOS builds programs that use `constructor(N)`/`destructor(N)`; gcc there has no priorities, so one constructor and one destructor call them in priority order.
 - Fixed: `-c=native` zero-initializes a pointer to an anonymous struct with `(void *)0` instead of a cast to a new anonymous struct type, which gcc 14 and later reject.
 - Fixed: `-c=native` and `-m` keep a pointer to a host pointer typedef (`pthread_t *`, `const pthread_t *`) spelled by its typedef name, not `void **`, so gcc accepts the assignments to it.
