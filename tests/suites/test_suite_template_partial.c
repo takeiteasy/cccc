@@ -215,6 +215,72 @@ static int tp_fn(void) {
     return 1;
 }
 
+// Variables of different types are different sets: the narrower type is the
+// more specialised partial.
+@template(double A, double B) struct Wid {
+    char kind[1];
+};
+@template(float F) @specialize(F, 1.0) struct Wid {
+    char kind[2];
+};
+@template(double D) @specialize(D, 1.0) struct Wid {
+    char kind[3];
+};
+
+@template(long A, long B) struct IWid {
+    char kind[1];
+};
+@template(char N) @specialize(N, N) struct IWid {
+    char kind[2];
+};
+@template(long N) @specialize(N, N) struct IWid {
+    char kind[3];
+};
+
+@template(T, long N) struct LArr {
+    char kind[1];
+};
+@template(T, unsigned char N) @specialize(T[N], N) struct LArr {
+    char kind[2];
+};
+@template(T, long N) @specialize(T[N], N) struct LArr {
+    char kind[3];
+};
+
+@template(void *P, void *Q) struct PWid {
+    char kind[1];
+};
+@template(int *P) @specialize(P, P) struct PWid {
+    char kind[2];
+};
+@template(void *P) @specialize(P, P) struct PWid {
+    char kind[3];
+};
+
+[[cccc::test]]
+void test_float_variable_is_narrower_than_double(void) {
+    @inst(0.5, 1.0) Wid exact;
+    @inst(0.1, 1.0) Wid inexact;
+    AssertEq(sizeof(exact.kind), 2);
+    AssertEq(sizeof(inexact.kind), 3);
+}
+
+[[cccc::test]]
+void test_narrow_integer_variable_is_more_specialised(void) {
+    @inst(5, 5) IWid       small;
+    @inst(1000, 1000) IWid big;
+    @inst(5, 6) IWid       apart;
+    AssertEq(sizeof(small.kind), 2);
+    AssertEq(sizeof(big.kind), 3);
+    AssertEq(sizeof(apart.kind), 1);
+}
+
+[[cccc::test]]
+void test_object_pointer_variable_is_narrower_than_void_pointer(void) {
+    @inst(&tp_a, &tp_a) PWid same;
+    AssertEq(sizeof(same.kind), 2);
+}
+
 @template(int *P, int *Q) struct PPair {
     char kind;
 };

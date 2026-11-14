@@ -2107,6 +2107,61 @@ static bool arg_fits(VirtualMachine *vm, Type *ty, const TemplateArg *arg) {
                           pointer_target_compatible(vm, arg->sym, ty)));
 }
 
+static int int_bits(const Type *ty) {
+    return ty->kind == TY_BOOL     ? 1
+           : ty->kind == TY_BITINT ? ty->bit_width
+                                   : ty->size * 8;
+}
+
+static bool int_unsigned(const Type *ty) {
+    return ty->kind == TY_BOOL || ty->is_unsigned;
+}
+
+// Whether the lowest (`low`) or highest value of integer type `ty` is one that
+// `wide` holds.
+static bool int_end_within(const Type *ty, const Type *wide, bool low) {
+    bool wu = int_unsigned(wide), tu = int_unsigned(ty);
+    if (low)
+        return wu ? tu : tu || int_bits(ty) <= int_bits(wide);
+    return int_bits(ty) - !tu <= int_bits(wide) - !wu;
+}
+
+// Whether pointers to `a` and `b` can hold one address, qualifiers ignored.
+static bool pointee_compatible(VirtualMachine *vm, Type *a, Type *b) {
+    a           = copy_type(vm, a);
+    b           = copy_type(vm, b);
+    a->is_const = a->is_volatile = b->is_const = b->is_volatile = false;
+    return is_compatible(a, b);
+}
+
+// Whether every value of variable type `narrow` that parameter type `slot`
+// takes (any non-negative length when NULL) is one that `wide` holds. Each end
+// of an intersection is the tighter of the two types' ends, so one of them
+// within `wide` is enough.
+static bool var_within(VirtualMachine *vm, Type *narrow, Type *slot,
+                       Type *wide) {
+    if (is_integer(wide) != is_integer(narrow) ||
+        is_float_kind(wide) != is_float_kind(narrow))
+        return false;
+    if (is_integer(wide)) {
+        // A length starts at 0, which every integer type holds.
+        bool low  = !slot || int_end_within(narrow, wide, true) ||
+                    int_end_within(slot, wide, true);
+        bool high = int_end_within(narrow, wide, false) ||
+                    (slot ? int_end_within(slot, wide, false)
+                          : int_bits(wide) - !int_unsigned(wide) >= 63);
+        return low && high;
+    }
+    if (is_float_kind(wide))
+        return wide->kind == TY_DOUBLE || narrow->kind == TY_FLOAT ||
+               (slot && slot->kind == TY_FLOAT);
+    if ((narrow->base->kind == TY_FUNC) != (wide->base->kind == TY_FUNC))
+        return false;
+    return wide->base->kind == TY_VOID ||
+           pointee_compatible(vm, wide->base, narrow->base) ||
+           (slot && pointee_compatible(vm, wide->base, slot->base));
+}
+
 // The pointer a constant argument names: a function, a file-scope or static
 // object (or an array, as its first element), or null (NULL). `expr` is the
 // argument and `pty` the parameter's pointer type.
@@ -2559,9 +2614,11 @@ typedef struct {
 } Matcher;
 
 // A constant argument: a value, or variable `var` of the argument pattern.
+// `slot` is the type of the parameter it stands at, NULL for an array length.
 typedef struct {
     const TemplateArg *arg;
     int                var;
+    Type              *slot;
 } ConstArg;
 
 // The parameter of `t` that entry `i` of an argument list belongs to.
@@ -2694,11 +2751,25 @@ static bool same_const(const TemplateArg *a, const TemplateArg *b) {
             (a->sym && b->sym && !strcmp(a->sym->name, b->sym->name)));
 }
 
+// The type of variable `var` of the argument pattern.
+static Type *arg_var_type(Matcher *m, int var) {
+    return param_type(m->vm, (Template *)m->arg_pt, var);
+}
+
+// The type of parameter `pi` of `t`, which the argument pattern's variable
+// `var` stands at; its own type when that depends on another parameter.
+static Type *slot_type(Matcher *m, const Template *t, int pi, int var) {
+    return t->params[pi].dependent ? arg_var_type(m, var)
+                                   : param_type(m->vm, (Template *)t, pi);
+}
+
 // Binds constant variable `k` to `c`; a variable that is already bound must be
 // bound to the same value.
 static bool bind_const(Matcher *m, int k, ConstArg c) {
-    Deduced *d = m->d;
-    if (c.var < 0 && !arg_fits(m->vm, param_type(m->vm, m->pt, k), c.arg))
+    Deduced *d   = m->d;
+    Type    *vty = param_type(m->vm, m->pt, k);
+    if (c.var < 0 ? !arg_fits(m->vm, vty, c.arg)
+                  : !var_within(m->vm, arg_var_type(m, c.var), c.slot, vty))
         return false;
     if (d->set[k]) {
         if (d->is_var[k] != (c.var >= 0))
@@ -2745,16 +2816,25 @@ static bool same_pack(Matcher *m, int k, const PackBind *a, const PackBind *b) {
 // element that is one of its variables fits any. With an element pattern, the
 // variable is bound to what each argument matched. A variable that is already
 // bound (it appears twice) must be bound to the same list.
-static bool bind_tail(Matcher *m, const PatList *pl, const TemplateArg *args,
-                      int nargs, const PatList *apl) {
+static bool bind_tail(Matcher *m, const Template *t, const PatList *pl,
+                      const TemplateArg *args, int nargs, const PatList *apl) {
     int      k = pl->tail, from = pl->n;
     Deduced *d    = m->d;
     bool     open = apl && apl->tail >= 0;
-    if (m->pt->params[k].type_start)
-        for (int i = from; i < nargs; i++)
-            if (!(apl && apl->pat_var[i] >= 0) &&
-                !arg_fits(m->vm, param_type(m->vm, m->pt, k), &args[i]))
+    if (m->pt->params[k].type_start) {
+        Type *vty = param_type(m->vm, m->pt, k);
+        for (int i = from; i < nargs; i++) {
+            int av = apl ? apl->pat_var[i] : -1;
+            if (av >= 0 ? !var_within(m->vm, arg_var_type(m, av),
+                                      slot_type(m, t, t->nparams - 1, av), vty)
+                        : !arg_fits(m->vm, vty, &args[i]))
                 return false;
+        }
+        if (open &&
+            !var_within(m->vm, arg_var_type(m, apl->tail),
+                        slot_type(m, t, t->nparams - 1, apl->tail), vty))
+            return false;
+    }
     const TemplateArg *els     = args + from;
     Type              *open_ty = NULL;
     if (pl->tail_pat) {
@@ -2805,7 +2885,9 @@ static bool match_args(Matcher *m, const Template *t, const PatList *pl,
                 return false;
             continue;
         }
-        ConstArg c = {&args[i], apl ? apl->pat_var[i] : -1};
+        ConstArg c = {&args[i], apl ? apl->pat_var[i] : -1, NULL};
+        if (c.var >= 0)
+            c.slot = slot_type(m, t, pi, c.var);
         if (pl->pat_var[i] < 0) {
             if (c.var >= 0 || !same_const(&pl->pat[i], &args[i]))
                 return false;
@@ -2813,7 +2895,7 @@ static bool match_args(Matcher *m, const Template *t, const PatList *pl,
             return false;
         }
     }
-    return pl->tail < 0 || bind_tail(m, pl, args, nargs, apl);
+    return pl->tail < 0 || bind_tail(m, t, pl, args, nargs, apl);
 }
 
 // Matches `arg` against the instance pattern `ip`: another pattern naming the
@@ -2881,7 +2963,7 @@ static bool match_type(Matcher *m, Type *pat, Type *arg) {
             ArrPat *other = arr_pat_of(m->arg_pt, arg);
             if (ap) {
                 TemplateArg len = {.val = arg->array_len};
-                ConstArg    c   = {&len, -1};
+                ConstArg    c   = {&len, -1, NULL};
                 if (other)
                     c.var = other->var;
                 else if (arg->is_flexible || arg->array_len < 0)

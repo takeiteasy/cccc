@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: partial specializations whose constant variables differ only in type (`float F` and `double D`, `char N` and `long N`) are no longer a redefinition of each other; the narrower type is the more specialised partial.
+
 ## [0.34.2] - 2026-11-13
 
 - Fixed: `-c=native` with gcc on macOS builds programs that use `constructor(N)`/`destructor(N)`; gcc there has no priorities, so one constructor and one destructor call them in priority order.
