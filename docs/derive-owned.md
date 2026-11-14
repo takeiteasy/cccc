@@ -28,6 +28,8 @@ if (Doc_clone(&copy, &doc) == 0) {
 }
 ```
 
+Both are [methods](derive.md#methods): `copy.clone(&doc)` and `copy.destroy()`.
+
 | Member | `@clone` | `@destroy` |
 |---|---|---|
 | `char *s @owned` | Copies the string | `free`s it |

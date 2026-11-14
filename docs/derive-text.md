@@ -14,6 +14,8 @@ Point_to_string(&p, buf, sizeof buf);   // Point { x = 3, name = "a\"b" }
 Point_from_string(&q, buf);             // 0, q equals p
 ```
 
+A struct's functions are also [methods](derive.md#methods): `p.to_string(buf, sizeof buf)` and `q.from_string(buf)`.
+
 | Attribute | Applies to | Generates |
 |---|---|---|
 | `@to_string` | enum | `const char *T_to_string(T v)` |

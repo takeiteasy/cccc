@@ -25,6 +25,8 @@ if (User_from_json(&v, buf) != 0) { /* malformed or mismatched */ }
 buffer is always NUL-terminated when `cap > 0`, and `cap == 0` only measures.
 `T_from_json` returns 0 on success and nonzero otherwise.
 
+Both are [methods](derive.md#methods): `u.to_json(buf, sizeof buf)` and `v.from_json(buf)`.
+
 | Member | JSON |
 |---|---|
 | Integers, enums | Number (an enum is its numeric value) |

@@ -34,6 +34,8 @@ Item_dump(&a, stdout);        // Item { id = 1, color = GREEN, name = "ann" }
 
 `@equals` also binds `T_equals` to `==` for `(T, T)`, so `a == b` and `a != b` work on the struct (`!=` is `!(a == b)`; see [operators.md](operators.md)). A hand-written `==` for the same type is a duplicate-operator error.
 
+`@equals`, `@hash`, `@dump` and `@compare` are also [methods](derive.md#methods): `a.equals(&b)`, `a.hash()`, `a.dump(stdout)`, `a.compare(&b)`.
+
 ```c
 a == b;  // Item_equals(&a, &b)
 a != b;  // !Item_equals(&a, &b)

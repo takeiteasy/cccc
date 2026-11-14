@@ -27,6 +27,8 @@ Cfg_clamp(&c);      // port is now 65535
 Cfg_validate(&c);   // 1
 ```
 
+Both are [methods](derive.md#methods): `c.validate()` and `c.clamp()`.
+
 | Generated | Behaviour |
 |---|---|
 | `_Bool T_validate(const T *self)` | 1 when every `@range` member is within its bounds, else 0 |
