@@ -79,12 +79,14 @@ struct Cell {
     Pt   p = Pt.new(3, 4);
     Pt   q = Pt.new(0, 0);
     char buf[128];
-    AssertEq(p.to_json(buf, sizeof buf), strlen(buf));
+    size_t n = p.to_json(buf, sizeof buf);
+    AssertEq(n, strlen(buf));
     AssertEq(q.from_json(buf), 0);
     AssertEq(!!q.equals(&p), 1);
 
     Pt r = Pt.new(0, 0);
-    AssertEq(p.to_string(buf, sizeof buf), strlen(buf));
+    n = p.to_string(buf, sizeof buf);
+    AssertEq(n, strlen(buf));
     AssertEq(r.from_string(buf), 0);
     AssertEq(!!r.equals(&p), 1);
 }
