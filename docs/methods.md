@@ -1,6 +1,6 @@
 # Struct methods
 
-`[[cccc::method(T)]]` on a free function makes it callable as `s.f(x)`. The parser rewrites the call to `f(&s, x)`, so the VM and `-c=native` behave the same.
+`[[cccc::method(T)]]` on a free function makes it callable as `s.f(x)`. The parser rewrites the call to `f(&s, x)`, so the VM and `-c=native` behave the same. A `static` method has no receiver and is called as `T.f(x)`: [Static methods](#static-methods).
 
 ```c
 typedef struct { float x, y; } Vec2;
@@ -51,12 +51,40 @@ Vec2_len(&v);    // the same function, callable and addressable by name
 | Function name | the typedef name, else the tag: `typedef struct v {...} V;` gives `V_len`; `struct S {...};` gives `S_len` |
 | Receiver | the explicit first parameter, as in the attribute form |
 | Bodies | parsed after the declaration, so they can use `sizeof(T)`, members and methods defined later |
-| `static` | passed through |
+| `static` | makes a [static method](#static-methods); linkage stays external |
 | `inline` | becomes `static inline`, so a struct in a shared header links |
 | Block scope | not allowed: `methods are only allowed in file-scope structs and unions` |
 | No name | `a struct with methods needs a tag or a typedef name` |
 
-A function-pointer member (`int (*cb)(int);`) is still a member. Operators are written the same way: [operators.md](operators.md#defining-in-the-struct).
+A function-pointer member (`int (*cb)(int);`) is still a member. Operators are written the same way: [operators.md](operators.md#defining-in-the-struct), and a `static` on one is plain C linkage.
+
+## Static methods
+
+A static method has no receiver and is called through its type, `T.f(args)`. Write `static` on a function in the struct body, or bind a free function with `[[cccc::static_method(T)]]` (`[[cccc::static_method(T, name)]]` to name it).
+
+```c
+typedef struct Vec2 {
+    float x, y;
+    static Vec2 make(float x, float y) { return (Vec2){x, y}; }
+    float len(Vec2 *self) { ... }
+} Vec2;
+
+[[cccc::static_method(Vec2, zero)]]
+Vec2 vec2_zero(void);
+
+Vec2 a = Vec2.make(3, 4);   // Vec2_make(3, 4)
+Vec2 z = Vec2.zero();       // vec2_zero()
+float n = Vec2.len(&a);     // Vec2_len(&a): any method, arguments passed as written
+```
+
+| Rule | Behavior |
+|---|---|
+| `T` | a typedef name, `struct S`, `union U` or a template instance (`Box@(int).wrap(7)`) |
+| `static` in the body | marks the method even when its first parameter is `T *`; `static inline` is still `static inline` |
+| `T.f` | calls the function bound to (`T`, `f`), static or not; the arguments are not changed |
+| `v.f()` / `p->f()` | an error for a static method |
+| Names | one namespace per type, so a static and an instance method cannot share a name |
+| Defaults and keys | `T.f(.b = 2)` works as for a direct call |
 
 ## Receiver
 
@@ -82,6 +110,10 @@ A member named `f` wins: `s.f(x)` is a method call only when `T` has no member `
 | Two functions for the same (`T`, name) | `method 'f' is already defined for this type` |
 | No member or method `f` | `no such member 'f'` |
 | Method used without a call (`auto g = s.f;`) | `'f' is a method; call it as a method or name the function directly` |
-| In-struct function with no parameters | `method 'f' must take the receiver type as its first parameter` |
+| In-struct function with no parameters | `method 'f' must take the receiver type as its first parameter` (a `static` one is allowed) |
+| `s.f()` on a static method | `'f' is a static method; call it as T.f(...)` |
+| `T.f` with no method `f` | `no method 'f' for this type` |
+| `T.f` without a call | `'f' is a method; call it as T.f(...)` |
+| `T` is not a struct or union | `'.' after a type needs a struct or union` |
 
 Operators for the same structs are in [operators.md](operators.md).

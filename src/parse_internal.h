@@ -107,6 +107,7 @@ typedef struct VarAttr {
     const char    *operator_sym;
     Type          *method_of;
     const char    *method_name;
+    bool           method_static;
     char          *deprecated_msg;
     char          *nodiscard_msg;
     char          *attr_error_msg;   // __attribute__((error("msg")))
@@ -540,6 +541,7 @@ bool is_function(VirtualMachine *vm, Token *tok, Type *basety);
 bool is_function_decl_list(VirtualMachine *vm, Token *tok, Type *basety);
 bool is_typename(VirtualMachine *vm, Token *tok);
 bool is_typename_ex(VirtualMachine *vm, Token *tok, bool allow_splice);
+bool static_call_ahead(VirtualMachine *vm, Token *tok);
 void leave_scope(VirtualMachine *vm);
 void free_scope_maps(Scope *sc); // buckets only; the Scope is arena-owned
 Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var);

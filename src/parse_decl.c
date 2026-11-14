@@ -2428,6 +2428,7 @@ static Token *method_copy(VirtualMachine *vm, Token *t) {
 // The method as a file-scope declaration of `fname`, bound to `recv` by
 // [[cccc::method]]. A prototype ends after the parameter list; a bare `inline`
 // becomes `static inline` so the hoisted function links from a shared header.
+// The `static` of a static method marks it receiver-less, not internal.
 static Token *method_decl(VirtualMachine *vm, PendingMethod *m,
                           const char *attr_text, const char *fname,
                           bool prototype) {
@@ -2446,13 +2447,15 @@ static Token *method_decl(VirtualMachine *vm, PendingMethod *m,
     for (Token *t = m->start; t != m->name; t = t->next) {
         has_inline  |= equal(t, "inline") || equal(t, "__inline") ||
                        equal(t, "__inline__");
-        has_linkage |= equal(t, "static") || equal(t, "extern");
+        has_linkage |=
+            (equal(t, "static") && !m->is_static) || equal(t, "extern");
     }
     if (has_inline && !has_linkage)
         cur = cur->next = method_token(vm, "static");
 
     for (Token *t = m->start; t != m->name; t = t->next)
-        cur = cur->next = method_copy(vm, t);
+        if (!(m->is_static && equal(t, "static")))
+            cur = cur->next = method_copy(vm, t);
 
     Token *name = method_token(vm, fname);
     name->file     = m->name->file;
@@ -2532,17 +2535,20 @@ void run_pending_methods(VirtualMachine *vm) {
                                      operator_name(m->operator_sym, m->operator_unary));
             } else {
                 Token *params = m->name->next->next;
-                if (equal(params, ")") ||
-                    (equal(params, "void") && equal(params->next, ")")))
+                if (!m->is_static &&
+                    (equal(params, ")") ||
+                     (equal(params, "void") && equal(params->next, ")"))))
                     error_tok(vm, m->name,
                               "method '%.*s' must take the receiver type as "
                               "its first parameter",
                               m->name->len, m->name->loc);
                 char *mname = arena_strndup(vm, m->name->loc, m->name->len);
                 attr_text =
-                    arena_format(vm, "[[cccc::method(%s, %s)]]", recv, mname);
+                    arena_format(vm, "[[cccc::%smethod(%s, %s)]]",
+                                 m->is_static ? "static_" : "", recv, mname);
                 fname = arena_format(vm, "%s_%s", bname, mname);
             }
+            // TODO(#2076): a parameter @default is given by both passes.
             Token *chain = method_decl(vm, m, attr_text, fname, pass == 0);
             parse_file_scope_decls(vm, chain);
             if (m->operator_sym && pass == 0)

@@ -757,10 +757,11 @@ AttrApplyFn attr_checked_ptr, attr_checked, attr_unchecked, attr_addr_space,
     attr_optimize, attr_cleanup, attr_packed, attr_aligned, attr_nonnull,
     attr_returns_nonnull, attr_sentinel, attr_alloc_size, attr_visible_lanes,
     attr_vector_size, attr_malloc, attr_constructor, attr_destructor,
-    attr_operator, attr_method, attr_format, attr_error, attr_warning,
-    attr_warn_unused_result, attr_noreturn, attr_nodiscard, attr_fallthrough,
-    attr_no_unique_address, attr_pure, attr_kernel, attr_trusted, attr_const,
-    attr_gnu_inline, attr_designated_init, attr_unused, attr_deprecated;
+    attr_operator, attr_method, attr_static_method, attr_format, attr_error,
+    attr_warning, attr_warn_unused_result, attr_noreturn, attr_nodiscard,
+    attr_fallthrough, attr_no_unique_address, attr_pure, attr_kernel,
+    attr_trusted, attr_const, attr_gnu_inline, attr_designated_init,
+    attr_unused, attr_deprecated;
 // The attribute `name` (or its `__name__` spelling), or NULL.
 const AttrDef *lookup_attr(const char *name, size_t len);
 // True when __has_attribute(name) reports the GNU attribute as recognized.

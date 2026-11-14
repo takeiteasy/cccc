@@ -1702,24 +1702,26 @@ void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
     Type     *recv = unqualified(vm, type_attrs(ty)->method_of);
     if (!is_aggregate(recv))
         error_tok(vm, tok, "method receiver type must be a struct or union");
-    Type *self = ty->params;
-    if (!self)
-        error_tok(vm, tok,
-                  "method '%s' must take the receiver type as its first "
-                  "parameter",
-                  fn->name);
-
-    MethodEntry e       = {.recv = recv,
-                           .name = type_attrs(ty)->method_name
-                                       ? type_attrs(ty)->method_name
-                                       : fn->name,
-                           .fn   = fn};
-    Type       *operand = operator_operand(vm, self, &e.recv_ptr);
-    if (!is_compatible(operand, recv))
-        error_tok(vm, tok,
-                  "method '%s' must take the receiver type as its first "
-                  "parameter",
-                  fn->name);
+    MethodEntry e = {.recv      = recv,
+                     .name      = type_attrs(ty)->method_name
+                                      ? type_attrs(ty)->method_name
+                                      : fn->name,
+                     .is_static = type_attrs(ty)->method_static,
+                     .fn        = fn};
+    if (!e.is_static) {
+        Type *self = ty->params;
+        if (!self)
+            error_tok(vm, tok,
+                      "method '%s' must take the receiver type as its first "
+                      "parameter",
+                      fn->name);
+        Type *operand = operator_operand(vm, self, &e.recv_ptr);
+        if (!is_compatible(operand, recv))
+            error_tok(vm, tok,
+                      "method '%s' must take the receiver type as its first "
+                      "parameter",
+                      fn->name);
+    }
 
     int name_len = (int)strlen(e.name);
     int existing = binding_head(c, recv, 'm', e.name, name_len);

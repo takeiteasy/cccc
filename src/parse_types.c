@@ -2524,6 +2524,9 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                           "unions",
                           method_op ? "operators" : "methods");
             bool method_unary = method_op && operator_has_one_param(method_name);
+            bool method_static = false;
+            for (Token *t = tok; !method_op && t != method_name; t = t->next)
+                method_static |= equal(t, "static");
             if (method_op)
                 for (PendingMethod *q = vm->compiler.pending_methods; q;
                      q                = q->next)
@@ -2542,6 +2545,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                                  .name           = method_name,
                                  .end            = method_end,
                                  .has_body       = method_body,
+                                 .is_static      = method_static,
                                  .operator_sym   = method_op,
                                  .operator_unary = method_unary};
             queue_method(vm, m);
@@ -2858,8 +2862,9 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
     if (attr->operator_sym && ty->kind == TY_FUNC)
         type_attrs_mut(vm, ty)->operator_sym = attr->operator_sym;
     if (attr->method_of && ty->kind == TY_FUNC) {
-        type_attrs_mut(vm, ty)->method_of   = attr->method_of;
-        type_attrs_mut(vm, ty)->method_name = attr->method_name;
+        type_attrs_mut(vm, ty)->method_of     = attr->method_of;
+        type_attrs_mut(vm, ty)->method_name   = attr->method_name;
+        type_attrs_mut(vm, ty)->method_static = attr->method_static;
     }
     if (attr->format_style && ty->kind == TY_FUNC) {
         type_attrs_mut(vm, ty)->format_style        = attr->format_style;
@@ -2921,8 +2926,9 @@ static void inherit_semantic_attrs(VirtualMachine *vm, Type *dst, Type *src) {
     if (sa->operator_sym)
         type_attrs_mut(vm, dst)->operator_sym = sa->operator_sym;
     if (sa->method_of) {
-        type_attrs_mut(vm, dst)->method_of   = sa->method_of;
-        type_attrs_mut(vm, dst)->method_name = sa->method_name;
+        type_attrs_mut(vm, dst)->method_of     = sa->method_of;
+        type_attrs_mut(vm, dst)->method_name   = sa->method_name;
+        type_attrs_mut(vm, dst)->method_static = sa->method_static;
     }
     if (sa->deprecated_msg && !type_attrs(dst)->deprecated_msg)
         type_attrs_mut(vm, dst)->deprecated_msg = sa->deprecated_msg;
@@ -3464,10 +3470,9 @@ Token *attr_operator(VirtualMachine *vm, Token *tok, const AttrSite *site,
     return tok;
 }
 
-// method(T) or method(T, name)
-Token *attr_method(VirtualMachine *vm, Token *tok, const AttrSite *site,
-                   Type *ty, VarAttr *attr) {
-    (void)site;
+// method(T) or method(T, name); static_method takes the same arguments.
+static Token *method_attr(VirtualMachine *vm, Token *tok, Type *ty,
+                          VarAttr *attr, bool is_static) {
     tok              = skip(vm, tok, "(");
     Type       *recv = typename(vm, &tok, tok);
     const char *name = NULL;
@@ -3480,14 +3485,28 @@ Token *attr_method(VirtualMachine *vm, Token *tok, const AttrSite *site,
     }
     tok = skip(vm, tok, ")");
     if (is_func_type(ty)) {
-        type_attrs_mut(vm, ty)->method_of   = recv;
-        type_attrs_mut(vm, ty)->method_name = name;
+        type_attrs_mut(vm, ty)->method_of     = recv;
+        type_attrs_mut(vm, ty)->method_name   = name;
+        type_attrs_mut(vm, ty)->method_static = is_static;
     }
     if (attr) {
-        attr->method_of   = recv;
-        attr->method_name = name;
+        attr->method_of     = recv;
+        attr->method_name   = name;
+        attr->method_static = is_static;
     }
     return tok;
+}
+
+Token *attr_method(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                   Type *ty, VarAttr *attr) {
+    (void)site;
+    return method_attr(vm, tok, ty, attr, false);
+}
+
+Token *attr_static_method(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                          Type *ty, VarAttr *attr) {
+    (void)site;
+    return method_attr(vm, tok, ty, attr, true);
 }
 
 // format(archetype, string-index, first-to-check)

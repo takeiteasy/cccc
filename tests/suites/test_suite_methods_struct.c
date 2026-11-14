@@ -20,9 +20,6 @@ typedef struct Vec2 {
     int width(Vec2 *self) {
         return sizeof(Vec2);
     }
-    static int stat(Vec2 *self) {
-        return self->y;
-    }
     inline int inl(Vec2 *self) {
         return self->x * 10;
     }
@@ -125,10 +122,8 @@ int test_struct_method_no_layout_change(void) {
 }
 
 [[cccc::test(return = 42)]]
-int test_struct_method_static_and_inline(void) {
+int test_struct_method_inline(void) {
     Vec2 v = {3, 4};
-    if (v.stat() != 4)
-        return 1;
     if (v.inl() != 30)
         return 2;
     return 42;

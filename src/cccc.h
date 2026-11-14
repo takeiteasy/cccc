@@ -1684,6 +1684,7 @@ typedef struct TypeAttrs {
         *operator_sym;      // [[cccc::operator(+)]]: the operator it implements
     struct Type *method_of; // [[cccc::method(T)]]: the receiver type T
     const char  *method_name; // ...and the name s.name() calls it by
+    bool         method_static; // [[cccc::static_method(T)]]: no receiver
     char        *deprecated_msg;
     char        *nodiscard_msg;
     char *attr_error_msg;     // __attribute__((error("msg"))): error if called
@@ -3011,6 +3012,7 @@ typedef struct PendingMethod {
     const char           *operator_sym;   // set for `operator+(...)`, else NULL
     bool                  operator_unary; // one-parameter operator
     bool                  has_body;
+    bool                  is_static;      // `static`: called as T.f(...)
 } PendingMethod;
 
 /*!
@@ -4103,11 +4105,13 @@ typedef struct {
     int         next; // Next entry in the same bucket, index + 1; 0 ends it
 } OperatorEntry;
 
-// A function bound to s.name(...) by [[cccc::method(T)]].
+// A function bound to s.name(...) by [[cccc::method(T)]], or to T.name(...) by
+// [[cccc::static_method(T)]].
 typedef struct {
     Type       *recv;
     const char *name;
     bool        recv_ptr;
+    bool        is_static; // called as T.name(...), has no receiver
     Obj        *fn;
 } MethodEntry;
 
@@ -4569,6 +4573,7 @@ typedef struct Compiler {
     PendingMethod      *pending_methods; // FIFO head; tail via _tail
     PendingMethod      *pending_methods_tail;
     bool                draining_methods;
+    Token *static_call_tok; // the `T` of a `T.f(...)` being parsed as a type
     bool                draining_member_attrs;
     int  fn_nesting_depth;  // Current function nesting depth (0 = top-level)
     bool in_type_lookahead; // Parsing a declarator only to classify it

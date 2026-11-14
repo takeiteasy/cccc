@@ -431,6 +431,9 @@ static Node *method_call(VirtualMachine *vm, Token **rest, Node *base,
     MethodEntry *m = find_method(vm, ty, name);
     if (!m)
         return NULL;
+    if (m->is_static)
+        error_tok(vm, name, "'%.*s' is a static method; call it as T.%.*s(...)",
+                  name->len, name->loc, name->len, name->loc);
     if (!equal(name->next, "("))
         error_tok(vm, name,
                   "'%.*s' is a method; call it as a method or name the "
@@ -447,6 +450,59 @@ static Node *method_call(VirtualMachine *vm, Token **rest, Node *base,
     mark_function_referenced(vm, m->fn);
     return funcall(vm, rest, name->next->next, new_var_node(vm, m->fn, name),
                    recv);
+}
+
+// `T.f(...)` at tok: a struct or union type, spelled as a typedef name, `struct
+// S`, `union U` or a template instance, then `.` and a name. It is a call of
+// the function bound to (T, f), not a declaration or a cast.
+bool static_call_ahead(VirtualMachine *vm, Token *tok) {
+    Token *dot;
+    if (equal(tok, "struct") || equal(tok, "union")) {
+        if (tok->next->kind != TK_IDENT)
+            return false;
+        dot = tok->next->next;
+    } else if (vm->compiler.saw_templates && equal(tok, "__cccc_inst")) {
+        if (!equal(tok->next, "("))
+            return false;
+        Template *t = cc_find_template(vm, tok->next->next);
+        if (!t || t->kind == TMPL_FUNC)
+            return false;
+        dot = tok->next;
+        for (int depth = 0; dot->kind != TK_EOF;) {
+            depth += equal(dot, "(") - equal(dot, ")");
+            dot    = dot->next;
+            if (!depth)
+                break;
+        }
+    } else if (tok->kind == TK_IDENT && equal(tok->next, ".") &&
+               find_typedef(vm, tok)) {
+        dot = tok->next;
+    } else {
+        return false;
+    }
+    return equal(dot, ".") && dot->next->kind == TK_IDENT;
+}
+
+// `T.f(...)` for the type ending at `dot`: the call fn(...) with no receiver
+// added, so an instance method takes its receiver as the first argument.
+static Node *type_method_call(VirtualMachine *vm, Token **rest, Type *ty,
+                              Token *dot) {
+    Token *name = dot->next;
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        error_tok(vm, dot, "'.' after a type needs a struct or union");
+    while (ty->size < 0 && ty->origin &&
+           (ty->origin->kind == TY_STRUCT || ty->origin->kind == TY_UNION))
+        ty = ty->origin;
+    MethodEntry *m = find_method(vm, ty, name);
+    if (!m)
+        error_tok(vm, name, "no method '%.*s' for this type", name->len,
+                  name->loc);
+    if (!equal(name->next, "("))
+        error_tok(vm, name, "'%.*s' is a method; call it as T.%.*s(...)",
+                  name->len, name->loc, name->len, name->loc);
+    mark_function_referenced(vm, m->fn);
+    return funcall(vm, rest, name->next->next, new_var_node(vm, m->fn, name),
+                   NULL);
 }
 
 static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
@@ -4747,6 +4803,15 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (vm->compiler.saw_templates &&
         (equal(tok, "__cccc_template") || equal(tok, "__cccc_specialize")))
         cc_template_misplaced(vm, tok);
+
+    if (static_call_ahead(vm, tok)) {
+        Token *dot;
+        Token *saved                 = vm->compiler.static_call_tok;
+        vm->compiler.static_call_tok = tok;
+        Type *ty                     = typename(vm, &dot, tok);
+        vm->compiler.static_call_tok = saved;
+        return type_method_call(vm, rest, ty, dot);
+    }
 
     if (vm->compiler.saw_templates && equal(tok, "__cccc_inst")) {
         TemplateInstance *inst = cc_parse_template_inst(vm, rest, tok);

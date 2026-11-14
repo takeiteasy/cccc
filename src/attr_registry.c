@@ -62,6 +62,7 @@ static const AttrDef attr_table[] = {
     CCCC_ROW("kernel", 0, attr_kernel),
     CCCC_ROW("operator", 0, attr_operator),
     CCCC_ROW("method", 0, attr_method),
+    CCCC_ROW("static_method", 0, attr_static_method),
     // OpenCL address spaces: the bare names are common identifiers, so they
     // apply only under `cccc::`.
     CCCC_ROW("global", ATTR_NS_CCCC, attr_addr_space),
