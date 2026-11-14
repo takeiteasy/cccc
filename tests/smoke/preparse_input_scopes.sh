@@ -99,7 +99,7 @@ gen_f();
 int from_f(void) { return twice@(int)(1); }
 EOS
 expect_fail "$CCCC" e.c f.c
-grep -q "conflicting definitions of template instance 'twice__int'" err.txt ||
+grep -q "conflicting definitions of template instance 'twice_int'" err.txt ||
     fail "no template instance conflict: $(cat err.txt)"
 
 # A type a call makes is not visible in another input.

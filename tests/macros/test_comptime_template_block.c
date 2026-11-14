@@ -16,7 +16,7 @@ int ct_answer(void) {
 }
 
 int ct_via_name(void) {
-    return twice__int(4);
+    return twice_int(4);
 }
 #pragma cccc comptime end
 

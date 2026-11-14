@@ -12,6 +12,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 - Fixed: partial specializations whose constant variables differ only in type (`float F` and `double D`, `char N` and `long N`) are no longer a redefinition of each other; the narrower type is the more specialised partial.
 
+- Changed: template instances, enumerators and the derived functions that follow are named with a single underscore, `Vec2_int`, `Vec2_int_new`, `Level_char_HIGH`, `S_in_f` for a block-scope type, instead of `__`. A `_BitInt`, `_Float16` or `_DecimalN` argument is spelled `BitInt`, `Float16`, `DecimalN`. A user name that now matches an instance name is a redefinition for the user to rename.
+- Changed: `cannot name the instance` names both instances, such as `'Tuple_struct_a_struct_b' is the name of both Tuple@(struct_a, struct_b) and Tuple@(struct_a_struct_b)`.
+
 ## [0.34.2] - 2026-11-13
 
 - Fixed: `-c=native` with gcc on macOS builds programs that use `constructor(N)`/`destructor(N)`; gcc there has no priorities, so one constructor and one destructor call them in priority order.

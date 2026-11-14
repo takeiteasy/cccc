@@ -7,8 +7,8 @@ Generic structs, unions, enums, typedefs and functions: write the definition onc
 @template(T) T max(T a, T b) { return a > b ? a : b; }
 
 int main(void) {
-    @inst(int) Vec v = {0};          // struct Vec__int
-    return @inst(int) max(40, 42);   // max__int
+    @inst(int) Vec v = {0};          // struct Vec_int
+    return @inst(int) max(40, 42);   // max_int
 }
 ```
 
@@ -32,8 +32,8 @@ A parameter written as a type followed by a name is a constant; integers come fi
 @template(T, int N) struct Arr { T v[N]; };
 @template(T, T N) T add_n(T x) { return x + N; }
 
-@inst(int, 16) Arr a;              // struct Arr__int__16
-int r = @inst(long, 40) add_n(2);  // add_n__long__40
+@inst(int, 16) Arr a;              // struct Arr_int_16
+int r = @inst(long, 40) add_n(2);  // add_n_long_40
 ```
 
 | Rule | Detail |
@@ -41,8 +41,8 @@ int r = @inst(long, 40) add_n(2);  // add_n__long__40
 | Type | Any integer type up to 64 bits (`bool`, `char`, an enum, `_BitInt(N)`); it may name an earlier type parameter |
 | Value | Must fit the type, or the instantiation is an error: `template argument 300 does not fit 'unsigned char'` |
 | Same value | `16`, `0x10` and `8 * 2` name one instance |
-| Negative | Named with an `n` prefix: `-3` gives `signed_n__n3` |
-| Enum or bool | Named by the enumerator (`Pick__GREEN`) or `true`/`false`; a value with no enumerator keeps its number[^enumname] |
+| Negative | Named with an `n` prefix: `-3` gives `signed_n_n3` |
+| Enum or bool | Named by the enumerator (`Pick_GREEN`) or `true`/`false`; a value with no enumerator keeps its number[^enumname] |
 
 ### Float and pointer constants
 
@@ -56,16 +56,16 @@ A `float` or `double` parameter takes any real constant expression; a pointer pa
 static int cmp_int(int a, int b) { return a - b; }
 static int table[4];
 
-double r = @inst(1.5) scale(2.0);          // scale__1p5
-int    s = @inst(int, cmp_int) before(1, 2);  // before__int__cmp_int
-int    t = @inst(table) first();           // first__table
+double r = @inst(1.5) scale(2.0);          // scale_1p5
+int    s = @inst(int, cmp_int) before(1, 2);  // before_int_cmp_int
+int    t = @inst(table) first();           // first_table
 ```
 
 | Parameter | Argument | Instance name |
 |---|---|---|
 | `float`, `double` | Any real constant; converted to the parameter type first | Shortest decimal that reads back the same: `1.5` is `1p5`, `-0.25` is `n0p25`, `1e-5` is `1em05`, `-0.0` is `n0` |
-| Function pointer | A function, or `&function` | The function's name: `before__int__cmp_int` |
-| Object pointer | `&object`, or an array (its first element), with file-scope or `static` storage | The object's name: `first__table` |
+| Function pointer | A function, or `&function` | The function's name: `before_int_cmp_int` |
+| Object pointer | `&object`, or an array (its first element), with file-scope or `static` storage | The object's name: `first_table` |
 | Any pointer | `NULL`, `nullptr` or `0` | `null` |
 
 | Rule | Detail |
@@ -74,7 +74,7 @@ int    t = @inst(table) first();           // first__table
 | Pointer types | The argument must match the parameter: a function for a function pointer, an object for an object pointer, compatible pointee types. `void *` takes any object |
 | Not accepted | String literals (pass a named `static const char x[]` as `x`), `&a[2]`, `&s.m`, locals, block-scope statics, compound literals, thread-local objects |
 | Constant expressions | A float parameter folds (`_Static_assert(D > 1.0)`, `int a[(int)D]`). A non-null pointer parameter is a valid static initializer (`static int (*f)(int) = F;`) but not an integer constant expression |
-| Name clash | An argument spelled like another (`null` as a function name and as null) is an error: `cannot name the instance: 'f__null' is also the name of a different instance` |
+| Name clash | An argument spelled like another (`null` as a function name and as null) is an error that names both instances: `cannot name the instance: 'f_null' is the name of both f@(&null) and f@(0)` |
 
 ## Default arguments
 
@@ -88,11 +88,11 @@ A parameter may end in `= value`, and the instantiation then leaves its argument
 @template(double D = 1.0, double E = D * 2) double span(void) { return E - D; }
 @template(int (*F)(int) = NULL) int apply(int x) { return F ? F(x) : x; }
 
-@inst(int) Arr a;            // struct Arr__int__8
+@inst(int) Arr a;            // struct Arr_int_8
 @inst(int, 8) Arr b;         // the same type
-@inst(int) Map m;            // struct Map__int__int
-@inst Id c;                  // every parameter defaulted: struct Id__int
-@inst(3.0) span;              // span__3__6
+@inst(int) Map m;            // struct Map_int_int
+@inst Id c;                  // every parameter defaulted: struct Id_int
+@inst(3.0) span;              // span_3_6
 ```
 
 | Rule | Detail |
@@ -105,7 +105,7 @@ A parameter may end in `= value`, and the instantiation then leaves its argument
 
 ## Enum and typedef templates
 
-An enum instance is `Name__Arg` and its enumerators are renamed `Name__Arg__ENUMERATOR`, so two instances never collide. A typedef instance is a real file-scope typedef named `Name__Arg`.
+An enum instance is `Name_Arg` and its enumerators are renamed `Name_Arg_ENUMERATOR`, so two instances never collide. A typedef instance is a real file-scope typedef named `Name_Arg`.
 
 ```c
 @template(T) enum Level : T { LOW, HIGH = LOW + 5 };
@@ -113,10 +113,10 @@ An enum instance is `Name__Arg` and its enumerators are renamed `Name__Arg__ENUM
 @template(T, int N) typedef T Row[N];
 @template(T) typedef struct Link { T val; struct Link *next; } Link;
 
-@inst(char) Level lv = Level__char__HIGH;   // enum Level__char
-@inst(int) Ptr p;                           // typedef int *Ptr__int
-@inst(int, 4) Row r;                        // typedef int Row__int__4[4]
-@inst(int) Link l;                          // struct Link__int, typedef Link__int
+@inst(char) Level lv = Level_char_HIGH;   // enum Level_char
+@inst(int) Ptr p;                           // typedef int *Ptr_int
+@inst(int, 4) Row r;                        // typedef int Row_int_4[4]
+@inst(int) Link l;                          // struct Link_int, typedef Link_int
 ```
 
 | Rule | Detail |
@@ -147,7 +147,7 @@ Three spellings name the same instance. Use whichever reads best; they mix freel
 | `@inst Pair` | All defaults: leaves out the parentheses; `Pair@()` is the postfix form |
 
 ```c
-Pair@(int, Vec@(char)) p;          // struct Pair__int__struct_Vec__char
+Pair@(int, Vec@(char)) p;          // struct Pair_int_struct_Vec_char
 int m = max@(long)(5, 3);          // call: the arguments, then the call parentheses
 @inst Arr a;                       // every parameter defaulted
 ```
@@ -182,7 +182,7 @@ The attribute form takes `cccc::` or no namespace (`[[template(T)]]`, `[[cccc::t
 At file scope, `@inst(Type, ...) Name;` creates the instance without using it. This is how a derive attribute's functions come into existence when nothing else names the instance. A `typedef` or `#define` shortens repeated uses:
 
 ```c
-@inst(int) Cell;                   // Cell__int and Cell__int_equals exist
+@inst(int) Cell;                   // Cell_int and Cell_int_equals exist
 typedef @inst(int) Vec IntVec;     // type alias
 #define max_int @inst(int) max     // function alias
 ```
@@ -198,8 +198,8 @@ typedef @inst(int) Vec IntVec;     // type alias
 @template(T) T pick(T a, T b) { return a > b ? a : b; }
 @specialize(bool) bool pick(bool a, bool b) { return a || b; }
 
-@inst(bool) Vec v = {5, 2};      // the specialization: struct Vec__bool
-@inst(int) Vec w = {0};          // the template: struct Vec__int
+@inst(bool) Vec v = {5, 2};      // the specialization: struct Vec_bool
+@inst(int) Vec w = {0};          // the template: struct Vec_int
 ```
 
 | Rule | Detail |
@@ -207,11 +207,11 @@ typedef @inst(int) Vec IntVec;     // type alias
 | Order | The template comes first; a specialization comes before the first `@inst` of its argument list |
 | Kind | Matches the template: a struct template takes a struct specialization |
 | Body | Plain C. The template's parameter names are not visible, and the template's own name stands for the instance as it does in a template body |
-| Attributes | Only those written on the specialization: `@specialize(int) @equals struct Cell {...}` generates `Cell__int_equals` |
+| Attributes | Only those written on the specialization: `@specialize(int) @equals struct Cell {...}` generates `Cell_int_equals` |
 | Signature | A function specialization is not checked against the template's signature |
 | Unused | A specialization nobody instantiates is never compiled |
 | Where | File scope only, in runtime code or [comptime code](macros-templates.md#templates-in-comptime-code) |
-| Errors | `redefinition of specialization 'Vec__bool'`, `specialization of 'Vec__bool' after its first use`, `'Vec' is a struct template, not a union` |
+| Errors | `redefinition of specialization 'Vec_bool'`, `specialization of 'Vec_bool' after its first use`, `'Vec' is a struct template, not a union` |
 
 A specialization in a header applies in every file that includes it.
 
@@ -239,7 +239,7 @@ struct Arr { char text[N + 1]; };  // N bound by the argument
 @specialize(T, T)
 struct Two { T both[2]; };  // repeated variable
 
-@inst(char *) Vec p;     // the T * partial: struct Vec__char_ptr
+@inst(char *) Vec p;     // the T * partial: struct Vec_char_ptr
 @inst(const char *) Vec q;  // the const T * partial
 ```
 
@@ -274,12 +274,12 @@ Box@(int[3]) c;              // N is 3
 | Variables | Every variable appears in the pattern; no defaults. A variable that appears twice stands for one type or one value (`T, T`, `N, N`, `T[N], N`), and a pack variable for one argument list (`Pack@(Ts...), Ts...`). A pattern leaves an argument out only when its default names no earlier parameter |
 | Packs | A pattern over a [variadic template](templates-variadic.md#partial-specialization) ends in a pack variable (`@specialize(T *, Ts...)`, `@specialize(Ts *...)`) |
 | Order | After the template, before the first `@inst` the pattern covers |
-| Name | The instance keeps its argument-list name (`Vec__char_ptr`), and its linkage follows the template |
-| Errors | `ambiguous partial specializations of 'Two' for 'Two__int_ptr__int_ptr'`, `redefinition of partial specialization of 'Vec'`, `a partial specialization must be more specific than the primary template`, `partial specialization parameter 'U' is not deduced by the pattern` |
+| Name | The instance keeps its argument-list name (`Vec_char_ptr`), and its linkage follows the template |
+| Errors | `ambiguous partial specializations of 'Two' for 'Two_int_ptr_int_ptr'`, `redefinition of partial specialization of 'Vec'`, `a partial specialization must be more specific than the primary template`, `partial specialization parameter 'U' is not deduced by the pattern` |
 
 ## Instance names
 
-An instance is named `Name__Arg` for each argument, built from the argument's resolved type, so `size_t` and `unsigned long` are the same instance. Use the mangled name directly once the instance exists.
+An instance is named `Name_Arg` for each argument, built from the argument's resolved type, so `size_t` and `unsigned long` are the same instance. Use the mangled name directly once the instance exists.
 
 | Argument | Spelling in the name |
 |---|---|
@@ -293,23 +293,23 @@ An instance is named `Name__Arg` for each argument, built from the argument's re
 | `int[4]` | `int_arr4` |
 | `struct Point`, `union U`, `enum E` | `struct_Point`, `union_U`, `enum_E` |
 | `typedef struct {...} P;` (no tag) | `typedef_P` |
-| `struct S` declared inside function `f` | `struct_S__in_f`; a second `struct S` in `f` is `struct_S__in_f__2` |
+| `struct S` declared inside function `f` | `struct_S_in_f`; a second `struct S` in `f` is `struct_S_in_f_2` |
 | `int *[[cccc::single]]`, `[[cccc::array]]`, `[[cccc::ntarray]]` | `int_ptr_single`, `int_ptr_array`, `int_ptr_ntarray` |
 | `int _Checked[4]`, `char _Nt_checked[6]` | `int_arr4_checked`, `char_arr6_ntchecked` |
 | `[[cccc::global]] int *` | `global_int_ptr` |
 | `int (^)(int)` | `fn_int_of_int_end_block` |
-| Enumerator of an enum template `Level`, with `char` | `Level__char__HIGH` |
+| Enumerator of an enum template `Level`, with `char` | `Level_char_HIGH` |
 | `void (*)(int)` | `fn_void_of_int_end_ptr` |
 
 ```c
 @inst(int, float) Pair a;
-struct Pair__int__float b;     // the same type
+struct Pair_int_float b;     // the same type
 
 @inst(size_t) Vec c;
-struct Vec__unsigned_long d;   // the same type
+struct Vec_unsigned_long d;   // the same type
 ```
 
-A checked pointer's bounds (`count(n)`) are not part of the argument, so pointers that differ only in bounds share an instance. A tagged `struct P` and an untagged `typedef struct {...} P` are different instances (`struct_P`, `typedef_P`), and so are two `struct S` declared in different functions.[^blockscope] Arguments that still mangle alike but name different types (`struct a_ptr` and `struct a *`) are an error.
+A checked pointer's bounds (`count(n)`) are not part of the argument, so pointers that differ only in bounds share an instance. A tagged `struct P` and an untagged `typedef struct {...} P` are different instances (`struct_P`, `typedef_P`), and so are two `struct S` declared in different functions.[^blockscope] Arguments that still mangle alike but name different types (`struct a_ptr` and `struct a *`, or `Tuple@(struct a, struct b)` and `Tuple@(struct a_struct_b)`) are an error that names both instances.
 
 ## Inside a template
 
@@ -336,7 +336,7 @@ A function instance is shared: the program has one copy, and a pointer to it com
 | `@template(T) T max(...)` | One shared copy |
 | `@template(T) static T max(...)` | A private copy per translation unit |
 
-Two translation units whose templates of the same name produce the same instance are an error (`conflicting definitions of template instance 'max__int'`), as is an ordinary function with the instance's mangled name.
+Two translation units whose templates of the same name produce the same instance are an error (`conflicting definitions of template instance 'max_int'`), as is an ordinary function with the instance's mangled name.
 
 A function instance whose arguments include a type declared inside a function is private to its translation unit, like a `static` template: two files that each declare their own local `struct S` get two instances.
 
@@ -350,7 +350,7 @@ Attributes written on a template run on each instance, after instantiation. The 
 struct Cell { T a; T b; };
 
 @inst(int) Cell x = {1, 2}, y = {1, 2};
-_Bool same = Cell__int_equals(&x, &y);
+_Bool same = Cell_int_equals(&x, &y);
 ```
 
 ## Limits
@@ -383,8 +383,8 @@ A function template with `[[cccc::operator(sym)]]` is instantiated from the oper
 }
 
 @inst(int) Vec2 a = {3, 4};
-@inst(int) Vec2 c = a + a;     // vadd__int
-@inst(int) Vec2 d = a * 2;     // vscale__int
+@inst(int) Vec2 c = a + a;     // vadd_int
+@inst(int) Vec2 d = a * 2;     // vscale_int
 ```
 
 | Rule | Detail |
@@ -402,13 +402,13 @@ An error inside an instance points at the line in the template body and adds a n
 
 ```
 error: not a struct nor a union
-  note: in instantiation of template 'bad' (bad__int) at main.c:7:13
+  note: in instantiation of template 'bad' (bad_int) at main.c:7:13
 ```
 
-Using an instance whose body had an error again reports the first error: `instantiation of 'bad__int' failed earlier: not a struct nor a union`.
+Using an instance whose body had an error again reports the first error: `instantiation of 'bad_int' failed earlier: not a struct nor a union`.
 
 [^linkage]: A shared instance is a weak symbol named by its mangled name in objects written with `-c=object`, so separately compiled files merge when linked. A whole program built with `-c=native` keeps it `static`, which lets the host compiler inline it.
 
-[^blockscope]: A type declared inside a function is named after that function (`struct_S__in_f`), and numbered in declaration order from the second same-spelled type in it (`__2`). A type inside a block literal or an OpenMP region takes the enclosing function's name, and one in a GNU nested function `g` of `f` takes `f_g`. A type declared in a parameter list cannot be a template argument. Types declared at file scope are never suffixed and have the same name in every file.
+[^blockscope]: A type declared inside a function is named after that function (`struct_S_in_f`), and numbered in declaration order from the second same-spelled type in it (`_2`). A type inside a block literal or an OpenMP region takes the enclosing function's name, and one in a GNU nested function `g` of `f` takes `f_g`. A type declared in a parameter list cannot be a template argument. Types declared at file scope are never suffixed and have the same name in every file.
 
 [^enumname]: Enumerators sharing a value name one instance, by the first enumerator declared with it. When a value without an enumerator would be spelled like an existing enumerator (`n3` for `-3`), the instantiation is an error.

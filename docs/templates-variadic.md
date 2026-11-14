@@ -3,11 +3,11 @@
 A template whose last parameter ends in `...` takes any number of arguments there. The body expands the pack with `...` in the same way as C++ variadic templates.
 
 ```c
-@template(Ts...) struct Tuple { Ts... v; };           // struct Tuple__int__char { int v0; char v1; };
+@template(Ts...) struct Tuple { Ts... v; };           // struct Tuple_int_char { int v0; char v1; };
 @template(Ts...) int sum(Ts... xs) { return (xs + ... + 0); }
 
 @inst(int, char) Tuple t = {40, 2};
-int s = sum@(int, long)(40, 2);                        // sum__int__long
+int s = sum@(int, long)(40, 2);                        // sum_int_long
 ```
 
 ## Declaring a pack
@@ -35,9 +35,9 @@ Parameters before the pack may have defaults. Arguments fill the parameters left
 ```c
 @template(T, U = T, Ts...) struct X { T a; U b; Ts... rest; };
 
-@inst(int) X p;                // X__int__int: U is int, the pack is empty
-@inst(int, char) X q;          // X__int__char
-@inst(int, char, long) X r;    // X__int__char__long: Ts is (long)
+@inst(int) X p;                // X_int_int: U is int, the pack is empty
+@inst(int, char) X q;          // X_int_char
+@inst(int, char, long) X r;    // X_int_char_long: Ts is (long)
 ```
 
 Every filled default is in the instance name, so `@inst(int) X` and `@inst(int, int) X` are one instance.
@@ -225,13 +225,13 @@ The body sees the pack variable as a pack: `sizeof...(Ts)`, `Ts...[k]`, `Ts... n
 
 ## Instance names
 
-An instance is `Name__Arg` for each argument, as for any template[^names].
+An instance is `Name_Arg` for each argument, as for any template[^names].
 
 | Instance | Name |
 |---|---|
-| `@inst(int, char) Tuple` | `Tuple__int__char` |
+| `@inst(int, char) Tuple` | `Tuple_int_char` |
 | `@inst Tuple` (empty pack) | `Tuple` |
-| `@inst(int, 2, 3) Nd` | `Nd__int__2__3` |
+| `@inst(int, 2, 3) Nd` | `Nd_int_2_3` |
 
 ## Limits
 
@@ -239,4 +239,4 @@ An instance is `Name__Arg` for each argument, as for any template[^names].
 |---|---|
 | A pack parameter in the middle of the list, or two packs | Compile error |
 
-[^names]: Two argument lists can mangle to one name, for example when an argument's own name contains `__`. The instance clash check compares the argument count and each argument, so such a pair is an error (`cannot name the instance`), not a silent merge.
+[^names]: Two argument lists can mangle to one name, for example `Tuple@(struct a, struct b)` and `Tuple@(struct a_struct_b)`. The instance clash check compares the argument count and each argument, so such a pair is an error (`cannot name the instance`), not a silent merge.

@@ -114,7 +114,7 @@ void test_function_template_as_type(void) {
     @inst(int) ident v;
 }
 
-[[cccc::test(error = "is also the name of a different instance")]]
+[[cccc::test(error = "is the name of both")]]
 void test_pointer_spelling_clashes_with_tag(void) {
     @inst(struct a_ptr) Vec a;
     @inst(struct a *) Vec   b;
@@ -214,7 +214,7 @@ void test_function_for_object_pointer(void) {
     @inst(fn_one) objptr();
 }
 
-[[cccc::test(error = "is also the name of a different instance")]]
+[[cccc::test(error = "is the name of both")]]
 void test_null_clashes_with_function_named_null(void) {
     @inst(null) fnptr_a();
     @inst(0) fnptr_a();

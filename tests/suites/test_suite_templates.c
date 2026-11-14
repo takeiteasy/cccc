@@ -149,22 +149,22 @@ void test_instances_are_distinct_types(void) {
 [[cccc::test]]
 void test_mangled_names_are_usable(void) {
     @inst(int) Vec  v;
-    struct Vec__int w = {0};
+    struct Vec_int w = {0};
     AssertEq(sizeof(v), sizeof(w));
-    AssertEq(max__int(1, 9), 9);
+    AssertEq(max_int(1, 9), 9);
 }
 
 [[cccc::test]]
 void test_typedef_mangles_to_canonical_type(void) {
     @inst(size_t) Vec         a;
-    struct Vec__unsigned_long b;
+    struct Vec_unsigned_long b;
     AssertEq(sizeof(a), sizeof(b));
 }
 
 [[cccc::test]]
 void test_pointer_argument(void) {
     @inst(int *) Vec    v = {0};
-    struct Vec__int_ptr w;
+    struct Vec_int_ptr w;
     AssertEq(sizeof(v), sizeof(w));
     AssertEq(sizeof(*v.data), sizeof(int *));
 }
@@ -172,7 +172,7 @@ void test_pointer_argument(void) {
 [[cccc::test]]
 void test_const_argument(void) {
     @inst(const char *) Vec    v = {0};
-    struct Vec__const_char_ptr w;
+    struct Vec_const_char_ptr w;
     AssertEq(sizeof(v), sizeof(w));
 }
 
@@ -180,7 +180,7 @@ void test_const_argument(void) {
 void test_struct_argument(void) {
     struct Point pt = {1, 2};
     @inst(struct Point, struct Point) Pair  pp = {pt, pt};
-    struct Pair__struct_Point__struct_Point q;
+    struct Pair_struct_Point_struct_Point q;
     AssertEq(pp.second.y, 2);
     AssertEq(sizeof(pp), sizeof(q));
 }
@@ -188,7 +188,7 @@ void test_struct_argument(void) {
 [[cccc::test]]
 void test_two_parameters(void) {
     @inst(int, float) Pair  p = {3, 1.5f};
-    struct Pair__int__float q;
+    struct Pair_int_float q;
     AssertEq(p.first, 3);
     AssertEq(sizeof(p), sizeof(q));
 }
@@ -219,7 +219,7 @@ void test_same_instance_from_two_sites(void) {
     a.len = 3;
     b.len = a.len;
     AssertEq(b.len, (size_t)3);
-    AssertEq(@inst(int) max(1, 2), max__int(1, 2));
+    AssertEq(@inst(int) max(1, 2), max_int(1, 2));
 }
 
 [[cccc::test]]
@@ -258,8 +258,8 @@ void test_derive_runs_on_the_instance(void) {
     @inst(int) Cell a = {1, 2};
     @inst(int) Cell b = {1, 2};
     @inst(int) Cell c = {1, 3};
-    AssertTrue(Cell__int_equals(&a, &b));
-    AssertFalse(Cell__int_equals(&a, &c));
+    AssertTrue(Cell_int_equals(&a, &b));
+    AssertFalse(Cell_int_equals(&a, &c));
 }
 
 [[cccc::test]]
@@ -281,9 +281,9 @@ void test_pointer_parameter_in_function_template(void) {
 
 [[cccc::test]]
 void test_forced_instance_exists(void) {
-    struct Cell__long a = {1, 2}, b = {1, 2};
-    AssertTrue(Cell__long_equals(&a, &b));
-    AssertEq(twice__long(21), 42);
+    struct Cell_long a = {1, 2}, b = {1, 2};
+    AssertTrue(Cell_long_equals(&a, &b));
+    AssertEq(twice_long(21), 42);
 }
 
 typedef @inst(short) Vec ShortVec;
@@ -306,7 +306,7 @@ void test_constant_parameter_sizes_array(void) {
 [[cccc::test]]
 void test_constant_expressions_share_an_instance(void) {
     @inst(int, 16) Arr    a;
-    struct Arr__int__16 *p = &a;
+    struct Arr_int_16 *p = &a;
     @inst(int, 0x10) Arr  b;
     @inst(int, 8 * 2) Arr c;
     AssertEq(sizeof(*p), sizeof(b));
@@ -323,7 +323,7 @@ void test_constant_parameter_type_names_type_parameter(void) {
 [[cccc::test]]
 void test_negative_constant(void) {
     AssertEq(@inst(-3) signed_n(), -3);
-    AssertEq(signed_n__n3(), -3);
+    AssertEq(signed_n_n3(), -3);
 }
 
 [[cccc::test]]
@@ -356,53 +356,53 @@ void test_nested_instance_uses_constant_expression(void) {
 
 [[cccc::test]]
 void test_derive_on_constant_template(void) {
-    struct Pad__int__2 a = {{1, 2}}, b = {{1, 2}};
-    AssertTrue(Pad__int__2_equals(&a, &b));
+    struct Pad_int_2 a = {{1, 2}}, b = {{1, 2}};
+    AssertTrue(Pad_int_2_equals(&a, &b));
 }
 
 [[cccc::test]]
 void test_enum_constant_named_by_enumerator(void) {
     AssertEq(@inst(GREEN) shade(), 1);
-    AssertEq(shade__GREEN(), 1);
+    AssertEq(shade_GREEN(), 1);
     AssertEq(@inst(BLUE) shade(), 2);
 }
 
 [[cccc::test]]
 void test_aliased_enumerators_share_first_name(void) {
     AssertEq(@inst(CRIMSON) shade(), 0);
-    AssertEq(shade__RED(), 0);
+    AssertEq(shade_RED(), 0);
     AssertEq(@inst(RED) shade(), @inst(CRIMSON) shade());
 }
 
 [[cccc::test]]
 void test_enum_value_without_enumerator_uses_number(void) {
     AssertEq(@inst((enum Color)7) shade(), 7);
-    AssertEq(shade__7(), 7);
+    AssertEq(shade_7(), 7);
 }
 
 [[cccc::test]]
 void test_enum_through_type_parameter(void) {
     AssertEq(@inst(enum Flags, FB) tagged(), 2);
-    AssertEq(tagged__enum_Flags__FB(), 2);
+    AssertEq(tagged_enum_Flags_FB(), 2);
     AssertEq(@inst(enum Flags, FA | FB) tagged(), 3);
-    AssertEq(tagged__enum_Flags__3(), 3);
+    AssertEq(tagged_enum_Flags_3(), 3);
 }
 
 [[cccc::test]]
 void test_bool_constant_named_true_false(void) {
-    AssertEq(flag__true(), 1);
-    AssertEq(flag__false(), 2);
+    AssertEq(flag_true(), 1);
+    AssertEq(flag_false(), 2);
 }
 
 [[cccc::test]]
 void test_typedef_template_is_a_named_typedef(void) {
     int x = 42;
     @inst(int) Ptr p        = &x;
-    Ptr__int q        = p;
+    Ptr_int q        = p;
     AssertEq(*q, 42);
     AssertEq(sizeof(@inst(char) Ptr), sizeof(char *));
     @inst(long) Ptr  lp = 0;
-    Ptr__long        lq = lp;
+    Ptr_long        lq = lp;
     AssertEq(sizeof(lq), sizeof(long *));
 }
 
@@ -410,7 +410,7 @@ void test_typedef_template_is_a_named_typedef(void) {
 void test_typedef_template_with_constant_parameter(void) {
     @inst(int, 4) Row r = {1, 2, 3, 4};
     AssertEq(sizeof(r), 4 * sizeof(int));
-    Row__int__4 *same = &r;
+    Row_int_4 *same = &r;
     AssertEq((*same)[3], 4);
 }
 
@@ -420,7 +420,7 @@ static int sub2(int a, int b) { return a - b; }
 [[cccc::test]]
 void test_typedef_template_function_pointer(void) {
     @inst(int, int) Op  f = add2;
-    Op__int__int        g = sub2;
+    Op_int_int        g = sub2;
     AssertEq(f(40, 2), 42);
     AssertEq(g(44, 2), 42);
 }
@@ -434,14 +434,14 @@ static struct Wrap wrap_fn(int x) {
 static long self_fn(int x) {
     return x;
 }
-static struct Vec__int vec_fn(int x) {
-    return (struct Vec__int){0, (size_t)x, 0};
+static struct Vec_int vec_fn(int x) {
+    return (struct Vec_int){0, (size_t)x, 0};
 }
 
 [[cccc::test]]
 void test_typedef_template_parenthesised_name_after_typedef_name(void) {
     @inst(int) CountFn *a = count_fn;
-    CountFn__int       *b = a;
+    CountFn_int       *b = a;
     AssertEq(b(42), 42);
     @inst(int) ConstCountFn *c = count_fn;
     AssertEq(c(42), 42);
@@ -456,7 +456,7 @@ void test_typedef_template_parenthesised_name_after_tag(void) {
 [[cccc::test]]
 void test_typedef_template_parenthesised_name_after_type_parameter(void) {
     @inst(long) SelfFn *s = self_fn;
-    SelfFn__long       *t = s;
+    SelfFn_long       *t = s;
     AssertEq(t(42), 42);
 }
 
@@ -477,7 +477,7 @@ void test_typedef_template_parenthesised_name_forms_unchanged(void) {
 void test_typedef_template_of_tagged_struct(void) {
     @inst(int) Link   b = {2, 0};
     @inst(int) Link   a = {40, &b};
-    struct Link__int *n = a.next;
+    struct Link_int *n = a.next;
     AssertEq(a.val + n->val, 42);
     @inst(char) Link c = {1, 0};
     AssertEq(sizeof(c.val), (size_t)1);
@@ -487,7 +487,7 @@ void test_typedef_template_of_tagged_struct(void) {
 void test_typedef_template_of_anonymous_struct(void) {
     @inst(int) Range   r = {40, 42};
     @inst(long) Range  w = {1, 2};
-    Range__long        v = w;
+    Range_long        v = w;
     AssertEq(v.lo, 1);
     AssertEq(r.hi, 42);
     AssertEq(w.hi, 2);
@@ -495,11 +495,11 @@ void test_typedef_template_of_anonymous_struct(void) {
 
 [[cccc::test]]
 void test_enum_template_renames_enumerators(void) {
-    @inst(int) Level lv = Level__int__HIGH;
+    @inst(int) Level lv = Level_int_HIGH;
     AssertEq(lv, 3);
-    AssertEq(Level__int__LOW, 0);
-    AssertEq(Level__int__MID, 2);
-    @inst(char) Level small = Level__char__MID;
+    AssertEq(Level_int_LOW, 0);
+    AssertEq(Level_int_MID, 2);
+    @inst(char) Level small = Level_char_MID;
     AssertEq(sizeof(small), (size_t)1);
     AssertEq(sizeof(@inst(long) Level), sizeof(long));
 }
@@ -509,9 +509,9 @@ void test_enum_template_renames_enumerators(void) {
 
 [[cccc::test]]
 void test_enum_template_constant_parameter(void) {
-    AssertEq(Cap__4__SMALL, 4);
-    AssertEq(Cap__4__LARGE, 8);
-    AssertEq(Cap__10__LARGE, 20);
+    AssertEq(Cap_4_SMALL, 4);
+    AssertEq(Cap_4_LARGE, 8);
+    AssertEq(Cap_10_LARGE, 20);
 }
 
 @template(int N) int cap_of(void) {
@@ -551,17 +551,17 @@ enum Shade { RED_D, GREEN_D };
 void test_default_constant_argument(void) {
     @inst(int) Dflt a;
     AssertEq(sizeof(a), sizeof(int) * 8);
-    struct Dflt__int__8 *p = &a;
+    struct Dflt_int_8 *p = &a;
     @inst(int, 8) Dflt   b;
     p = &b;
     AssertEq(sizeof(@inst(int, 4) Dflt), sizeof(int) * 4);
-    AssertEq(sizeof(struct Dflt__char__8), (size_t)8);
+    AssertEq(sizeof(struct Dflt_char_8), (size_t)8);
 }
 
 [[cccc::test]]
 void test_default_type_argument(void) {
     @inst(int) Same        s = {1, 2};
-    struct Same__int__int *p = &s;
+    struct Same_int_int *p = &s;
     AssertEq(p->k + p->v, 3);
     @inst(int, char) Same t = {1, 2};
     AssertEq(sizeof(t.v), (size_t)1);
@@ -570,7 +570,7 @@ void test_default_type_argument(void) {
 [[cccc::test]]
 void test_default_for_every_parameter(void) {
     @inst Opt        o = {5};
-    struct Opt__int *p = &o;
+    struct Opt_int *p = &o;
     AssertEq(p->val, 5);
     @inst(char) Opt c = {1};
     AssertEq(sizeof(c.val), (size_t)1);
@@ -587,7 +587,7 @@ void test_default_names_earlier_parameter(void) {
 [[cccc::test]]
 void test_default_enum_constant_is_named_by_enumerator(void) {
     AssertEq(@inst shade_of(), 1);
-    AssertEq(shade_of__GREEN_D(), 1);
+    AssertEq(shade_of_GREEN_D(), 1);
 }
 
 #define VEC_INT       Vec @(int)
@@ -597,7 +597,7 @@ void test_default_enum_constant_is_named_by_enumerator(void) {
 [[cccc::test]]
 void test_postfix_spelling(void) {
     Vec @(int) v       = {0};
-    struct Vec__int *p = &v;
+    struct Vec_int *p = &v;
     AssertEq(p->len, (size_t)0);
     AssertEq(max @(int)(40, 42), 42);
     AssertEq(sizeof(Pair @(int, long)), sizeof(@inst(int, long) Pair));
@@ -607,7 +607,7 @@ void test_postfix_spelling(void) {
 [[cccc::test]]
 void test_postfix_nests(void) {
     Pair @(int, Vec @(char)) p            = {1, {0}};
-    struct Pair__int__struct_Vec__char *q = &p;
+    struct Pair_int_struct_Vec_char *q = &p;
     AssertEq(q->first, 1);
     @inst(Vec @(char), int) Pair r = {{0}, 2};
     AssertEq(r.second, 2);
@@ -616,7 +616,7 @@ void test_postfix_nests(void) {
 [[cccc::test]]
 void test_empty_postfix_takes_defaults(void) {
     Opt @() o          = {5};
-    struct Opt__int *p = &o;
+    struct Opt_int *p = &o;
     AssertEq(p->val, 5);
     AssertEq(shade_of @()(), 1);
 }
@@ -624,7 +624,7 @@ void test_empty_postfix_takes_defaults(void) {
 [[cccc::test]]
 void test_spellings_in_macros(void) {
     VEC_INT          v = {0};
-    struct Vec__int *p = &v;
+    struct Vec_int *p = &v;
     AssertEq(p->len, (size_t)0);
     AssertEq(max_long(5, 3), 5L);
     PAIR_OF(int, char) q = {1, 2};
@@ -698,8 +698,8 @@ static int ptr_table[3] = {4, 5, 6};
 void test_float_argument_spellings_share_an_instance(void) {
     AssertEq(@inst(1.5) scale(2.0), 3.0);
     AssertEq(@inst(3.0 / 2) scale(2.0), 3.0);
-    AssertTrue(&scale__1p5 == &scale__1p5);
-    AssertEq(sizeof(@inst(1.5) Gain), sizeof(struct Gain__1p5));
+    AssertTrue(&scale_1p5 == &scale_1p5);
+    AssertEq(sizeof(@inst(1.5) Gain), sizeof(struct Gain_1p5));
 }
 
 [[cccc::test]]
@@ -708,8 +708,8 @@ void test_repeat_inst_of_every_constant_kind_is_one_instance(void) {
     int r2 = @inst(int, 4, 1.5, twice, true, GREEN) mixed(30);
     AssertEq(r1, r2);
     AssertEq(r1, 30 + 4 + 1 + 2 + 1 + GREEN);
-    AssertTrue(&mixed__int__4__1p5__twice__true__GREEN ==
-               &mixed__int__4__1p5__twice__true__GREEN);
+    AssertTrue(&mixed_int_4_1p5_twice_true_GREEN ==
+               &mixed_int_4_1p5_twice_true_GREEN);
 }
 
 [[cccc::test]]
@@ -734,27 +734,27 @@ void test_repeat_defaults_naming_earlier_float(void) {
 
 [[cccc::test]]
 void test_float_names(void) {
-    AssertEq(sizeof(@inst(0.25) Gain), sizeof(struct Gain__0p25));
-    AssertEq(sizeof(@inst(-0.25) Gain), sizeof(struct Gain__n0p25));
-    AssertEq(sizeof(@inst(1e-5) Gain), sizeof(struct Gain__1em05));
-    AssertEq(sizeof(@inst(1e20) Gain), sizeof(struct Gain__1e20));
-    AssertEq(sizeof(@inst(100.0) Gain), sizeof(struct Gain__100));
-    AssertEq(sizeof(@inst(0.0) Gain), sizeof(struct Gain__0));
-    AssertEq(sizeof(@inst(-0.0) Gain), sizeof(struct Gain__n0));
-    AssertEq(sizeof(@inst(__builtin_inf()) Gain), sizeof(struct Gain__inf));
-    AssertEq(sizeof(@inst(-__builtin_inf()) Gain), sizeof(struct Gain__ninf));
+    AssertEq(sizeof(@inst(0.25) Gain), sizeof(struct Gain_0p25));
+    AssertEq(sizeof(@inst(-0.25) Gain), sizeof(struct Gain_n0p25));
+    AssertEq(sizeof(@inst(1e-5) Gain), sizeof(struct Gain_1em05));
+    AssertEq(sizeof(@inst(1e20) Gain), sizeof(struct Gain_1e20));
+    AssertEq(sizeof(@inst(100.0) Gain), sizeof(struct Gain_100));
+    AssertEq(sizeof(@inst(0.0) Gain), sizeof(struct Gain_0));
+    AssertEq(sizeof(@inst(-0.0) Gain), sizeof(struct Gain_n0));
+    AssertEq(sizeof(@inst(__builtin_inf()) Gain), sizeof(struct Gain_inf));
+    AssertEq(sizeof(@inst(-__builtin_inf()) Gain), sizeof(struct Gain_ninf));
 }
 
 [[cccc::test]]
 void test_float_parameter_is_named_by_its_own_type(void) {
     AssertEq(@inst(0.1) fsrc(), 0.1f);
-    AssertTrue(&fsrc__0p1 == &fsrc__0p1);
+    AssertTrue(&fsrc_0p1 == &fsrc_0p1);
 }
 
 [[cccc::test]]
 void test_float_argument_converts_from_integer(void) {
     AssertEq(@inst(3) dflt(), 3.0);
-    AssertTrue(&dflt__3 == &dflt__3);
+    AssertTrue(&dflt_3 == &dflt_3);
 }
 
 [[cccc::test]]
@@ -796,7 +796,7 @@ void test_local_hides_float_parameter(void) {
 void test_function_pointer_parameter(void) {
     AssertEq(@inst(int, cmp_int) compare(5, 3), 1002);
     AssertEq(@inst(int, &cmp_int) compare(5, 3), 1002);
-    AssertTrue(&compare__int__cmp_int == &compare__int__cmp_int);
+    AssertTrue(&compare_int_cmp_int == &compare_int_cmp_int);
 }
 
 [[cccc::test]]
@@ -805,7 +805,7 @@ void test_null_function_pointer_parameter(void) {
     AssertEq(@inst(int, 0) compare(5, 3), -1000);
     AssertEq(@inst(int, nullptr) compare(5, 3), -1000);
     AssertEq(@inst(int, (int (*)(int, int))0) compare(5, 3), -1000);
-    AssertTrue(&compare__int__null == &compare__int__null);
+    AssertTrue(&compare_int_null == &compare_int_null);
 }
 
 [[cccc::test]]
@@ -865,8 +865,8 @@ void test_attribute_after_closing_brace(void) {
 
 [[cccc::test]]
 void test_enum_attributes_around_tag(void) {
-    @inst(int) AttrEnum      a = AttrEnum__int__AE_B;
-    @inst(int) AttrEnumTrail b = AttrEnumTrail__int__AET_A;
+    @inst(int) AttrEnum      a = AttrEnum_int_AE_B;
+    @inst(int) AttrEnumTrail b = AttrEnumTrail_int_AET_A;
     AssertEq(a, 1);
     AssertEq(b, 0);
 }
@@ -880,14 +880,14 @@ void test_packed_enum_template(void) {
 [[cccc::test]]
 void test_anonymous_typedef_arguments(void) {
     @inst(AnonPoint, int) Pair p = {{1}, 2};
-    struct Pair__typedef_AnonPoint__int q  = p;
+    struct Pair_typedef_AnonPoint_int q  = p;
     @inst(AnonBits, int) Pair b  = {{.i = 7}, 3};
     @inst(AnonColor, int) Pair c = {AN_GREEN, 4};
     AssertEq(q.first.x, 1);
     AssertEq(b.first.i, 7);
     AssertEq(c.first, AN_GREEN);
-    AssertEq(sizeof(struct Pair__typedef_AnonBits__int), sizeof(b));
-    AssertEq(sizeof(struct Pair__typedef_AnonColor__int), sizeof(c));
+    AssertEq(sizeof(struct Pair_typedef_AnonBits_int), sizeof(b));
+    AssertEq(sizeof(struct Pair_typedef_AnonColor_int), sizeof(c));
 }
 
 [[cccc::test]]
@@ -898,17 +898,17 @@ void test_checked_pointer_arguments(void) {
     int *[[cccc::array, cccc::count(m)]] other = &m;
     int *[[cccc::ntarray]] text        = nullptr;
     @inst(typeof(one), int) Pair a = {one, 1};
-    struct Pair__int_ptr_single__int b = a;
+    struct Pair_int_ptr_single_int b = a;
     @inst(typeof(many), int) Pair c = {many, 2};
     @inst(typeof(other), int) Pair d = {other, 3};
-    struct Pair__int_ptr_array__int e = c;
+    struct Pair_int_ptr_array_int e = c;
     @inst(typeof(text), int) Pair f = {text, 4};
-    struct Pair__int_ptr_ntarray__int g = f;
+    struct Pair_int_ptr_ntarray_int g = f;
     AssertEq(*b.first, 3);
     AssertEq(*e.first, 3);
     AssertEq(*d.first, 5);
     AssertEq(g.second, 4);
-    AssertEq(sizeof(struct Pair__int_ptr_array__int), sizeof(d));
+    AssertEq(sizeof(struct Pair_int_ptr_array_int), sizeof(d));
 }
 
 [[cccc::test]]
@@ -917,8 +917,8 @@ void test_checked_array_arguments(void) {
     char s _Nt_checked[6] = "hello";
     @inst(typeof(a), int) Pair *pa = nullptr;
     @inst(typeof(s), int) Pair *ps = nullptr;
-    struct Pair__int_arr4_checked__int *qa = pa;
-    struct Pair__char_arr6_ntchecked__int *qs = ps;
+    struct Pair_int_arr4_checked_int *qa = pa;
+    struct Pair_char_arr6_ntchecked_int *qs = ps;
     AssertEq(qa == nullptr, 1);
     AssertEq(qs == nullptr, 1);
 }
@@ -928,7 +928,7 @@ void test_address_space_arguments(void) {
     int n = 9;
     [[cccc::global]] int *g = &n;
     @inst(typeof(g), int) Pair a = {g, 1};
-    struct Pair__global_int_ptr__int b = a;
+    struct Pair_global_int_ptr_int b = a;
     AssertEq(*b.first, 9);
 }
 
@@ -936,7 +936,7 @@ void test_address_space_arguments(void) {
 void test_block_argument(void) {
     int (^twice_it)(int) = ^(int x) { return x * 2; };
     @inst(int (^)(int), int) Pair a = {twice_it, 1};
-    struct Pair__fn_int_of_int_end_block__int b = a;
+    struct Pair_fn_int_of_int_end_block_int b = a;
     AssertEq(b.first(21), 42);
 }
 
@@ -954,8 +954,8 @@ struct Ambient {
 void test_tag_and_anonymous_typedef_are_different_instances(void) {
     @inst(struct Tagged) Vec    a;
     @inst(Tagged) Vec           b;
-    struct Vec__struct_Tagged  *ap = &a;
-    struct Vec__typedef_Tagged *bp = &b;
+    struct Vec_struct_Tagged  *ap = &a;
+    struct Vec_typedef_Tagged *bp = &b;
     AssertEq(sizeof *a.data, 3);
     AssertEq(sizeof *b.data, 20);
     (void)ap;
@@ -984,7 +984,7 @@ void test_same_named_block_scope_aggregates(void) {
     AssertEq(block_scope_wide(), 803);
     @inst(struct Ambient, int) Pair file_scope = {{7}, 1};
     AssertEq(file_scope.first.x, 7);
-    AssertEq(sizeof(struct Pair__struct_Ambient__int), sizeof file_scope);
+    AssertEq(sizeof(struct Pair_struct_Ambient_int), sizeof file_scope);
 }
 
 static int block_scope_function_instance(void) {
@@ -1013,7 +1013,7 @@ static int local_name_first(void) {
         int x;
     };
     @inst(struct Named, int) Pair                        p    = {{4}, 1};
-    struct Pair__struct_Named__in_local_name_first__int *same = &p;
+    struct Pair_struct_Named_in_local_name_first_int *same = &p;
     return same->first.x + same->second;
 }
 
@@ -1022,7 +1022,7 @@ static int local_name_second(void) {
         long x;
     };
     @inst(struct Named, int) Pair                         p    = {{5}, 2};
-    struct Pair__struct_Named__in_local_name_second__int *same = &p;
+    struct Pair_struct_Named_in_local_name_second_int *same = &p;
     return (int)same->first.x + same->second;
 }
 
@@ -1043,7 +1043,7 @@ static int local_name_nested_blocks(void) {
             char c[3];
         };
         @inst(struct Named, int) Pair inner = {{{1, 2, 3}}, 1};
-        struct Pair__struct_Named__in_local_name_nested_blocks__2__int *same =
+        struct Pair_struct_Named_in_local_name_nested_blocks_2_int *same =
             &inner;
         sum += (int)sizeof same->first;
     }

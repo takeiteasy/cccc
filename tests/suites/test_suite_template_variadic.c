@@ -133,16 +133,16 @@ __template(Ts...) int keyword(Ts... xs) {
 void test_member_per_element(void) {
     @inst(int, char) Tuple t = {40, 2};
     AssertTrue(t.v0 + t.v1 == 42);
-    AssertTrue(sizeof(t) == sizeof(struct Tuple__int__char));
+    AssertTrue(sizeof(t) == sizeof(struct Tuple_int_char));
     AssertTrue(sizeof(@inst(int, char, long) Tuple) ==
-               sizeof(struct Tuple__int__char__long));
+               sizeof(struct Tuple_int_char_long));
 }
 
 [[cccc::test]]
 void test_every_spelling_is_one_instance(void) {
     Tuple @(int, char) a      = {1, 2};
     @inst(int, char) Tuple  b = a;
-    struct Tuple__int__char c = b;
+    struct Tuple_int_char c = b;
     AssertTrue(c.v0 == 1 && c.v1 == 2);
 }
 
@@ -165,8 +165,8 @@ void test_pointer_pattern_member(void) {
 [[cccc::test]]
 void test_derive_attribute_sees_the_members(void) {
     @inst(int, int) Cell a = {1, 2}, b = {1, 2}, c = {1, 3};
-    AssertTrue(Cell__int__int_equals(&a, &b));
-    AssertFalse(Cell__int__int_equals(&a, &c));
+    AssertTrue(Cell_int_int_equals(&a, &b));
+    AssertFalse(Cell_int_int_equals(&a, &c));
 }
 
 [[cccc::test]]
@@ -190,7 +190,7 @@ void test_exact_specialization_of_a_pack(void) {
 void test_fixed_parameter_then_pack(void) {
     @inst(int, char, long) Wrap w = {{1, 2, 3}};
     AssertTrue(w.t.v2 == 3);
-    AssertTrue(sizeof(@inst(int) Wrap) == sizeof(struct Tuple__int));
+    AssertTrue(sizeof(@inst(int) Wrap) == sizeof(struct Tuple_int));
 }
 
 [[cccc::test]]
@@ -203,7 +203,7 @@ void test_function_pack(void) {
 [[cccc::test]]
 void test_function_instance_is_shared(void) {
     int (*a)(int, long) = sum @(int, long);
-    int (*b)(int, long) = sum__int__long;
+    int (*b)(int, long) = sum_int_long;
     AssertTrue(a == b);
 }
 

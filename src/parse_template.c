@@ -730,8 +730,8 @@ static void mb_put_fn_chain(MangleBuf *mb, Obj *fn) {
 }
 
 // An aggregate is named by its tag (`struct_S`), else by the typedef that names
-// it (`typedef_P`). A block-scope aggregate also takes `__in_<function>`, and
-// `__N` from the second same-spelled one in that function, in declaration
+// it (`typedef_P`). A block-scope aggregate also takes `_in_<function>`, and
+// `_N` from the second same-spelled one in that function, in declaration
 // order.
 static void mangle_tag(MangleBuf *mb, Type *ty, Token *tag, const char *kw,
                        Token *site) {
@@ -760,10 +760,10 @@ static void mangle_tag(MangleBuf *mb, Type *ty, Token *tag, const char *kw,
                   "a %s declared outside a function body cannot be a template "
                   "argument",
                   kw);
-    mb_puts(mb, "__in_");
+    mb_puts(mb, "_in_");
     mb_put_fn_chain(mb, agg->scope_fn);
     if (agg->scope_ord > 1) {
-        mb_puts(mb, "__");
+        mb_puts(mb, "_");
         mb_putu(mb, agg->scope_ord);
     }
     HashMap *owners = tmpl_aggs(mb->vm);
@@ -856,18 +856,18 @@ static void mangle_base(MangleBuf *mb, Type *ty, Token *site) {
         case TY_LDOUBLE:
             return mb_puts(mb, "long_double");
         case TY_FLOAT16:
-            return mb_puts(mb, "_Float16");
+            return mb_puts(mb, "Float16");
         case TY_DECIMAL32:
-            return mb_puts(mb, "_Decimal32");
+            return mb_puts(mb, "Decimal32");
         case TY_DECIMAL64:
-            return mb_puts(mb, "_Decimal64");
+            return mb_puts(mb, "Decimal64");
         case TY_DECIMAL128:
-            return mb_puts(mb, "_Decimal128");
+            return mb_puts(mb, "Decimal128");
         case TY_NULLPTR_T:
             return mb_puts(mb, "nullptr_t");
         case TY_BITINT:
-            mb_puts(mb, ty->is_unsigned ? "unsigned__" : "");
-            mb_puts(mb, "_BitInt");
+            mb_puts(mb, u);
+            mb_puts(mb, "BitInt");
             return mb_putu(mb, ty->bit_width);
         case TY_COMPLEX:
             mb_puts(mb, "complex_");
@@ -1926,7 +1926,8 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
             c->len = strlen(mangled);
         } else if (enums && p->kind == TK_IDENT && is_enumerator(enums, nenum, p) &&
                    !(prev && (equal(prev, ".") || equal(prev, "->")))) {
-            char *renamed = arena_format(vm, "%s__%.*s", mangled, (int)p->len, p->loc);
+            char *renamed =
+                arena_format(vm, "%s_%.*s", mangled, (int)p->len, p->loc);
             c->loc        = renamed;
             c->len        = strlen(renamed);
         }
@@ -2429,6 +2430,48 @@ static void mangle_arg(MangleBuf *mb, Template *t, int i, Type *ty,
                           num, num);
     }
     mb_puts(mb, num);
+}
+
+// A type argument as written, so two spellings that mangle alike (`struct
+// a_ptr` and `struct a *`) read differently.
+static void spell_type(MangleBuf *mb, Type *ty, Token *site) {
+    if (ty->kind != TY_PTR)
+        return mangle_type(mb, ty, site);
+    spell_type(mb, ty->base, site);
+    mb_puts(mb, " *");
+}
+
+// `Pair@(int, double)`: the template and each argument, for a diagnostic that
+// tells two instances of one mangled name apart.
+static const char *instance_spelling(VirtualMachine *vm, Template *t,
+                                     const TemplateArg *args, int nargs,
+                                     Token *site) {
+    MangleBuf mb;
+    mb_init(&mb, vm);
+    mb_puts(&mb, t->name);
+    mb_puts(&mb, "@(");
+    for (int i = 0; i < nargs; i++) {
+        int                  pi = i < t->nparams ? i : t->nparams - 1;
+        const TemplateParam *p  = &t->params[pi];
+        mb_puts(&mb, i ? ", " : "");
+        if (!p->type_start) {
+            spell_type(&mb, args[i].ty, site);
+            continue;
+        }
+        Type *pty = param_type(vm, t, pi);
+        if (pty->kind != TY_PTR) {
+            mangle_arg(&mb, t, pi, pty, &args[i], site);
+            continue;
+        }
+        if (args[i].sym) {
+            mb_puts(&mb, "&");
+            mb_puts(&mb, args[i].sym->name);
+        } else {
+            mb_puts(&mb, "0");
+        }
+    }
+    mb_puts(&mb, ")");
+    return arena_strndup(vm, mb.p, (int)mb.len);
 }
 
 // Parses a constant template argument at `tok` into `out`. Its value is taken
@@ -3173,7 +3216,7 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         state[i].ty = p->type_start ? param_type(vm, t, pi) : args[i].ty;
         if (p->type_start)
             param_value(vm, t, pi, state[i].ty, &args[i], site);
-        mb_puts(&mb, "__");
+        mb_puts(&mb, "_");
         mangle_arg(&mb, t, pi, state[i].ty, &args[i], site);
         if (p->needed && !p->is_pack)
             bind_state(vm, t, i, state, args, &bindings);
@@ -3222,9 +3265,12 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                       mb.p);
         if (clash)
             error_tok(vm, site,
-                      "cannot name the instance: '%s' is also the name of "
-                      "a different instance",
-                      mb.p);
+                      "cannot name the instance: '%s' is the name of both %s "
+                      "and %s",
+                      mb.p,
+                      instance_spelling(vm, found->tmpl, found->args,
+                                        found->nargs, site),
+                      instance_spelling(vm, t, args, total, site));
         if (!from_spec) {
             snapshot_restore(vm, &snap);
             vm->error_jmp_buf = saved_jb;

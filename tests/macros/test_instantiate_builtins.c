@@ -19,7 +19,7 @@ typedef struct {
 
 @comptime Node *biggest(Node *a, Node *b) {
     Obj *fn = InstantiateFunction("maxof", "int");
-    return Quote("maxof__int($1, $2)", a, b);
+    return Quote("maxof_int($1, $2)", a, b);
 }
 
 @comptime Node *bytes(void) {

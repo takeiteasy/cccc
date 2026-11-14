@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: redefinition of specialization 'Vec__int'
+// CCCC_EXPECT_STDERR: redefinition of specialization 'Vec_int'
 @template(T) struct Vec {
     T a;
 };

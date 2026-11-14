@@ -349,10 +349,10 @@ void test_instance_pattern_nested(void) {
 [[cccc::test]]
 void test_instance_names_ignore_the_partial(void) {
     @inst(char *, int, long) Tuple     a;
-    struct Tuple__char_ptr__int__long *b = &a;
+    struct Tuple_char_ptr_int_long *b = &a;
     AssertTrue(b == &a);
     @inst(int, char) Tuple   c;
-    struct Tuple__int__char *d = &c;
+    struct Tuple_int_char *d = &c;
     AssertTrue(d == &c);
 }
 

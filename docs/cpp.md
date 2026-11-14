@@ -26,7 +26,7 @@ A template is a pattern that becomes a real type or function per argument list. 
 | Overloads | Many functions share one name | One template per name; a function name is one function |
 | Constraints | Concepts, SFINAE, `requires` | None |
 | Checking | Names and syntax at definition, the rest at instantiation | Tokens only until instantiation |
-| Instance name | Mangled by the compiler | Plain C name you can write: `Vec__int`, `max__int` |
+| Instance name | Mangled by the compiler | Plain C name you can write: `Vec_int`, `max_int` |
 | Linkage | Inline: one definition across files | Shared weak symbol; `static` template gives a private copy per file |
 
 ### Instantiation is textual
@@ -48,7 +48,7 @@ An instance is an ordinary C name, so the generated code is usable from C, from 
 @equals
 struct Cell { T a, b; };
 @inst(int) Cell x = {1, 2}, y = {1, 2};
-_Bool same = Cell__int_equals(&x, &y);     // name derived from the instance
+_Bool same = Cell_int_equals(&x, &y);     // name derived from the instance
 ```
 
 Two arguments that name the same type (`size_t` and `unsigned long`) are one instance, as in C++. A tagged `struct P` and a typedef'd anonymous `P` are different instances.
@@ -95,7 +95,7 @@ An rvalue receiver (`make().len()`) passed to a `T *` parameter is copied into a
 
 ### Templates and members
 
-A method or operator written in a struct template's body belongs to every instance; the receiver is `struct Vec2 *`, as the template name stands for the instance. An operator written once as a function template is instantiated from its operands, so `a + b` over a `Vec2@(int)` makes `vadd__int`:
+A method or operator written in a struct template's body belongs to every instance; the receiver is `struct Vec2 *`, as the template name stands for the instance. An operator written once as a function template is instantiated from its operands, so `a + b` over a `Vec2@(int)` makes `vadd_int`:
 
 ```c
 @template(T) struct Vec2 {
@@ -170,7 +170,7 @@ _Bool older = a < b;      // Version_compare(&a, &b) < 0
 _Bool same  = a == b;     // Version_equals(&a, &b)
 ```
 
-A derived function applies to a template instance and carries its mangled name (`Cell__int_equals`).
+A derived function applies to a template instance and carries its mangled name (`Cell_int_equals`).
 
 ### Ownership
 

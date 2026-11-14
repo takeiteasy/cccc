@@ -109,7 +109,7 @@ void test_struct_specialization(void) {
 void test_every_spelling_selects_it(void) {
     Vec @(bool) a      = {1, 1};
     @inst(bool) Vec  b = {2, 2};
-    struct Vec__bool c = {3, 3};
+    struct Vec_bool c = {3, 3};
     AssertTrue(a.bits == 1 && b.bits == 2 && c.bits == 3);
 }
 
@@ -144,9 +144,9 @@ void test_function_specialization_recurses_into_itself(void) {
 
 [[cccc::test]]
 void test_enum_specialization(void) {
-    @inst(char) Level lv = Level__char__HIGH;
+    @inst(char) Level lv = Level_char_HIGH;
     AssertTrue(lv == 9);
-    AssertTrue(Level__char__LOW == 1);
+    AssertTrue(Level_char_LOW == 1);
 }
 
 [[cccc::test]]
@@ -177,8 +177,8 @@ void test_specialization_reached_through_a_default(void) {
 void test_specialization_has_its_own_attributes(void) {
     @inst(int) Cell  x = {1, 2, 3}, y = {1, 2, 4};
     @inst(long) Cell z = {1, 1};
-    AssertTrue(Cell__int_equals(&x, &x));
-    AssertTrue(Cell__long_equals(&z, &z));
+    AssertTrue(Cell_int_equals(&x, &x));
+    AssertTrue(Cell_long_equals(&z, &z));
 }
 
 [[cccc::test]]

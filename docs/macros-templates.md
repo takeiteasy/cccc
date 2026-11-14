@@ -117,7 +117,7 @@ A `Quote` or `QuoteLazy` template can name [template](templates.md) instances wi
 @template(T) T max(T a, T b) { return a > b ? a : b; }
 
 @comptime Node *biggest(Node *a, Node *b) {
-    return Quote("@inst(int) max($1, $2)", a, b);   // calls max__int
+    return Quote("@inst(int) max($1, $2)", a, b);   // calls max_int
 }
 
 int main(void) { return biggest(40, 42); }
@@ -155,8 +155,8 @@ int ct_answer(void) { return @inst(int) twice(21); }
 }
 
 @comptime Node *biggest(Node *a, Node *b) {
-    Obj *fn = InstantiateFunction("maxof", "int");       // maxof__int
-    return Quote("maxof__int($1, $2)", a, b);
+    Obj *fn = InstantiateFunction("maxof", "int");       // maxof_int
+    return Quote("maxof_int($1, $2)", a, b);
 }
 ```
 
@@ -183,7 +183,7 @@ Arguments are matched to parameters in order, and a pack takes the rest. A type 
 
 ### At file scope
 
-A file-scope call (`gen();`) sees the templates of its own input file, including those from the headers it includes. The instances it makes are the ones the file's own code names afterwards, so `Box @(int)` after `gen()` reuses `Box__int`. A call runs before the file's own `@inst` lines, so a generator that uses an instance calls `InstantiateType` itself. `Quote("@inst(...)")` works there too.[^filescope]
+A file-scope call (`gen();`) sees the templates of its own input file, including those from the headers it includes. The instances it makes are the ones the file's own code names afterwards, so `Box @(int)` after `gen()` reuses `Box_int`. A call runs before the file's own `@inst` lines, so a generator that uses an instance calls `InstantiateType` itself. `Quote("@inst(...)")` works there too.[^filescope]
 
 ```c
 @template(T) struct Box { T value; };
@@ -220,7 +220,7 @@ gen();
 ```
 
 ```sh
-cccc -c=generated -o ten.gen.c ten.c   # ten.gen.c defines ten() and static twice__int()
+cccc -c=generated -o ten.gen.c ten.c   # ten.gen.c defines ten() and static twice_int()
 ```
 
 [^filescope]: `Quote` with `@inst` follows the same rules.

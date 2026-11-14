@@ -56,7 +56,7 @@ typedef struct {
 @comptime Node *doubled(Node *x) {
     TemplateArgument a[] = {TypeArg(GetType("int"))};
     Obj             *fn  = InstantiateFunctionWith("twice", a, 1);
-    return Quote("twice__int($1)", x);
+    return Quote("twice_int($1)", x);
 }
 
 int main(void) {

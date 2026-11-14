@@ -25,7 +25,7 @@
                     MakeReturn(MakeIntLiteral(TypeSize(box) + TypeSize(arr))));
 
     Obj *ten = MakeFunction("ten", GetType("int"));
-    FunctionSetBody(ten, MakeReturn(Quote("twice__int(5)")));
+    FunctionSetBody(ten, MakeReturn(Quote("twice_int(5)")));
 }
 gen();
 

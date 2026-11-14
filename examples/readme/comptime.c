@@ -12,7 +12,7 @@
 // the instance.
 @comptime Node *emit_vec2_int(void) {
     InstantiateType("Vec2", "int");
-    return Quote("{ int vec2_dot(struct Vec2__int a, struct Vec2__int b) {"
+    return Quote("{ int vec2_dot(struct Vec2_int a, struct Vec2_int b) {"
                  "      return a.x * b.x + a.y * b.y; } }");
 }
 emit_vec2_int();

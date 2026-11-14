@@ -20,13 +20,13 @@ struct Vec2 {
 }
 
 int main(void) {
-    Vec2@(int) a = Vec2__int_new(3, 4), b = Vec2__int_new(1, 2);
-    Vec2@(int) c = a + b;                       // vec2_add__int(a, b)
+    Vec2@(int) a = Vec2_int_new(3, 4), b = Vec2_int_new(1, 2);
+    Vec2@(int) c = a + b;                       // vec2_add_int(a, b)
 
     char buf[64];
-    Vec2__int_to_json(&c, buf, sizeof buf);
+    Vec2_int_to_json(&c, buf, sizeof buf);
     puts(buf);                                  // {"x":4,"y":6}
 
     printf("%d %d\n", a.dot(&b), a < c);        // 11 1
-    return c == Vec2__int_new(4, 6) ? 42 : 1;   // == comes from @equals, < from @compare
+    return c == Vec2_int_new(4, 6) ? 42 : 1;   // == comes from @equals, < from @compare
 }

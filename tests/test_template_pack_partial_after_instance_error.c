@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: partial specialization of 'A' after 'A__int__char' was instantiated
+// CCCC_EXPECT_STDERR: partial specialization of 'A' after 'A_int_char' was instantiated
 @template(Ts...) struct A {
     Ts... v;
 };

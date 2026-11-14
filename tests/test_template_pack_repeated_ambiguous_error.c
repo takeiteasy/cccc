@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: ambiguous partial specializations of 'W' for 'W__struct_P'
+// CCCC_EXPECT_STDERR: ambiguous partial specializations of 'W' for 'W_struct_P'
 @template(Ts...) struct P {
     char k;
 };

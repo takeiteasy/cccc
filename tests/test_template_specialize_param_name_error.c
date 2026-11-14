@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: in instantiation of template 'Vec' \(Vec__int\)
+// CCCC_EXPECT_STDERR: in instantiation of template 'Vec' \(Vec_int\)
 @template(T) struct Vec {
     T a;
 };

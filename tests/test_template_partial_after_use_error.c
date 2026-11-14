@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: partial specialization of 'Vec' after 'Vec__int_ptr' was instantiated
+// CCCC_EXPECT_STDERR: partial specialization of 'Vec' after 'Vec_int_ptr' was instantiated
 @template(T) struct Vec {
     T a;
 };

@@ -22,25 +22,25 @@ cat >file_scope.c <<'EOF'
 @comptime void gen(void) {
     InstantiateFunction("twice", "int");
     Obj *ten = MakeFunction("ten", GetType("int"));
-    FunctionSetBody(ten, MakeReturn(Quote("twice__int(5)")));
+    FunctionSetBody(ten, MakeReturn(Quote("twice_int(5)")));
 }
 gen();
 int main(void) { return ten() + 32; }
 EOF
-check file_scope twice__int
+check file_scope twice_int
 
 cat >in_function.c <<'EOF'
 @template(T) T twice(T a) { return a + a; }
 @comptime Node *gen(void) {
     InstantiateFunction("twice", "int");
     Obj *ten = MakeFunction("ten", GetType("int"));
-    FunctionSetBody(ten, MakeReturn(Quote("twice__int(5)")));
+    FunctionSetBody(ten, MakeReturn(Quote("twice_int(5)")));
     return MakeIntLiteral(0);
 }
 int ten(void);
 int main(void) { return gen() + ten() + 32; }
 EOF
-check in_function twice__int
+check in_function twice_int
 
 cat >quote_inst.c <<'EOF'
 @template(T) T twice(T a) { return a + a; }
@@ -51,7 +51,7 @@ cat >quote_inst.c <<'EOF'
 gen();
 int main(void) { return ten() + 32; }
 EOF
-check quote_inst twice__int
+check quote_inst twice_int
 
 # An instance reached only through another instance.
 cat >nested.c <<'EOF'
@@ -64,8 +64,8 @@ cat >nested.c <<'EOF'
 gen();
 int main(void) { return ten() + 32; }
 EOF
-check nested quad__int
-grep -q "^static .* twice__int(.*) {" nested.gen.c || fail "nested: twice__int missing"
+check nested quad_int
+grep -q "^static .* twice_int(.*) {" nested.gen.c || fail "nested: twice_int missing"
 
 # An instance whose parameter type is itself an instance.
 cat >type_param.c <<'EOF'
@@ -78,7 +78,7 @@ cat >type_param.c <<'EOF'
 gen();
 int main(void) { return ten() + 32; }
 EOF
-check type_param unbox__int
+check type_param unbox_int
 
 # A bound float parameter becomes a constant the instance reads.
 cat >float_param.c <<'EOF'
@@ -91,8 +91,8 @@ gen();
 int main(void) { return (int)ten() + 32; }
 EOF
 MAIN='double ten(void); int main(void) { return (int)ten() + 32; }'
-check float_param scale__2p5
-grep -q "__cccc_tp_scale__2p5__V = 2.5" float_param.gen.c || fail "float_param: constant missing"
+check float_param scale_2p5
+grep -q "__cccc_tp_scale_2p5__V = 2.5" float_param.gen.c || fail "float_param: constant missing"
 
 # Instances nothing generated uses stay out of the output.
 cat >unused.c <<'EOF'
@@ -101,11 +101,11 @@ cat >unused.c <<'EOF'
 @comptime void gen(void) {
     InstantiateFunction("twice", "int");
     Obj *ten = MakeFunction("ten", GetType("int"));
-    FunctionSetBody(ten, MakeReturn(Quote("twice__int(5)")));
+    FunctionSetBody(ten, MakeReturn(Quote("twice_int(5)")));
 }
 gen();
 int main(void) { return ten() + thrice @(int)(1) + 29; }
 EOF
 MAIN='int main(void) { return ten() + 32; }'
-check unused twice__int
+check unused twice_int
 ! grep -q thrice unused.gen.c || fail "unused: an instance generated code never calls was written"

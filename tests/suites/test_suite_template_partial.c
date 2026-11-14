@@ -142,8 +142,8 @@ void test_function_partial(void) {
 
 [[cccc::test]]
 void test_enum_and_typedef_partials(void) {
-    @inst(char) Level   a = Level__char__HIGH;
-    @inst(char *) Level b = Level__char_ptr__PTR_HIGH;
+    @inst(char) Level   a = Level_char_HIGH;
+    @inst(char *) Level b = Level_char_ptr_PTR_HIGH;
     @inst(int) Alias    c = 1;
     @inst(int *) Alias  d = 1;
     AssertEq(a, 5);
@@ -157,14 +157,14 @@ void test_partial_carries_its_own_attributes(void) {
     @inst(int) Cell   x = {1, 2}, y = {1, 2};
     int               z = 1;
     @inst(int *) Cell p = {&z, &z, 0}, q = {&z, &z, 0};
-    AssertTrue(Cell__int_equals(&x, &y));
-    AssertTrue(Cell__int_ptr_equals(&p, &q));
+    AssertTrue(Cell_int_equals(&x, &y));
+    AssertTrue(Cell_int_ptr_equals(&p, &q));
 }
 
 [[cccc::test]]
 void test_instance_names_ignore_the_partial(void) {
     @inst(int *) Vec     a;
-    struct Vec__int_ptr *b = &a;
+    struct Vec_int_ptr *b = &a;
     AssertTrue(b == &a);
 }
 
