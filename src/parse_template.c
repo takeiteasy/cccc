@@ -28,7 +28,6 @@
 #include "./parse_internal.h"
 
 #define TMPL_MAX_DEPTH 64
-#define TMPL_MAX_ARGS  16
 
 static Token *skip_parens(Token *tok) {
     int depth = 0;
@@ -2656,6 +2655,10 @@ typedef struct {
     Deduced        *d;
     Token          *site;
     bool            padding; // matching an element of the argument list's tail
+    bool            call;    // deducing a call: a pointee may add qualifiers
+    bool            conflict; // `call`: a variable met two types
+    int             conflict_var;
+    Type           *conflict_a, *conflict_b;
 } Matcher;
 
 // A constant argument: a value, or variable `var` of the argument pattern.
@@ -3005,7 +3008,7 @@ static bool match_type(Matcher *m, Type *pat, Type *arg) {
     int             k  = pattern_var(m->pt, pat);
     if (k >= 0) {
         Deduced *d = m->d;
-        if (!quals_within(pat, arg))
+        if (!m->call && !quals_within(pat, arg))
             return false;
         Type *bound = arg;
         if (pat->is_const || pat->is_volatile || pat->is_restrict ||
@@ -3016,9 +3019,14 @@ static bool match_type(Matcher *m, Type *pat, Type *arg) {
             bound->is_restrict &= !pat->is_restrict;
             bound->is_atomic   &= !pat->is_atomic;
         }
-        if (d->ty[k])
-            return !d->pad[k] && !m->padding &&
-                   same_arg_type(vm, d->ty[k], bound, m->site);
+        if (d->ty[k]) {
+            bool same = !d->pad[k] && !m->padding &&
+                        same_arg_type(vm, d->ty[k], bound, m->site);
+            if (!same && m->call && !m->conflict)
+                m->conflict = true, m->conflict_var = k,
+                m->conflict_a = d->ty[k], m->conflict_b = bound;
+            return same;
+        }
         d->ty[k]  = bound;
         d->pad[k] = m->padding;
         return true;
@@ -3435,20 +3443,12 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
     return instantiate(vm, t, args, nargs, site, NULL);
 }
 
-// Parses the operand types of operator template `t` as patterns, once: each
-// type parameter stands for a placeholder, and `@inst(T) Vec2` for an instance
-// pattern, as in a partial specialization.
-static void operator_prepare(VirtualMachine *vm, Template *t) {
-    if (t->op_ready)
-        return;
-    if (tmpl_has_pack(t))
-        error_tok(vm, t->name_tok,
-                  "an operator template cannot have a parameter pack");
-    if (t->nparams > TMPL_MAX_ARGS)
-        error_tok(vm, t->name_tok,
-                  "an operator template takes at most %d parameters",
-                  TMPL_MAX_ARGS);
+// Runs `body` with the parameters of `t` bound as in a partial specialization's
+// pattern: each type parameter is a placeholder type (`t->vars`).
+typedef void (*PatternBody)(VirtualMachine *vm, Template *t);
 
+static void in_pattern_scope(VirtualMachine *vm, Template *t,
+                             PatternBody body) {
     TmplSnapshot snap;
     snapshot_save(vm, &snap);
     jmp_buf  jb;
@@ -3465,27 +3465,45 @@ static void operator_prepare(VirtualMachine *vm, Template *t) {
     Scope *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
     memset(bindings, 0, sizeof(Scope));
     vm->compiler.tmpl_bindings = bindings;
+    body(vm, t);
+    snapshot_restore(vm, &snap);
+    vm->error_jmp_buf = saved_jb;
+}
 
-    t->vars =
-        arena_alloc(&vm->compiler.parser_arena, sizeof(Type *) * t->nparams);
-    memset(t->vars, 0, sizeof(Type *) * t->nparams);
+// Creates the placeholder of each type parameter, once, and binds it. With
+// `integers_only`, a constant parameter must be an integer that does not
+// depend on another parameter.
+static void pattern_vars(VirtualMachine *vm, Template *t, bool integers_only) {
+    if (!t->vars) {
+        t->vars = arena_alloc(&vm->compiler.parser_arena,
+                              sizeof(Type *) * t->nparams);
+        memset(t->vars, 0, sizeof(Type *) * t->nparams);
+    }
     for (int k = 0; k < t->nparams; k++) {
         TemplateParam *p = &t->params[k];
         if (p->type_start) {
-            if (p->dependent || !is_integer(param_type(vm, t, k)))
+            if (integers_only &&
+                (p->dependent || !is_integer(param_type(vm, t, k))))
                 error_tok(vm, p->name,
                           "an operator template deduces type and integer "
                           "parameters only");
             continue;
         }
-        Type *ph                         = struct_type(vm);
-        ph->size                         = 1;
-        type_agg_mut(vm, ph)->struct_tag = p->name;
-        t->vars[k]                       = ph;
-        Obj *unused                      = NULL;
-        bind_param(vm, t, k, ph, NULL, bindings, &unused);
+        if (!t->vars[k]) {
+            Type *ph                         = struct_type(vm);
+            ph->size                         = 1;
+            type_agg_mut(vm, ph)->struct_tag = p->name;
+            t->vars[k]                       = ph;
+        }
+        Obj *unused = NULL;
+        bind_param(vm, t, k, t->vars[k], NULL, vm->compiler.tmpl_bindings,
+                   &unused);
     }
+}
 
+// The function type of `t` as a pattern: its parameter types name the
+// placeholders.
+static Type *pattern_signature(VirtualMachine *vm, Template *t) {
     Token *p = t->marker_end;
     for (;;) {
         Token *q = skip_attr_groups(p);
@@ -3501,8 +3519,13 @@ static void operator_prepare(VirtualMachine *vm, Template *t) {
     Token   *toks = clone_range(vm, p, t->body_open);
     Type    *ty   = declspec(vm, &rest, toks, NULL);
     DeclName dn;
-    ty = declarator(vm, &rest, rest, ty, &dn);
-    int n = 0;
+    return declarator(vm, &rest, rest, ty, &dn);
+}
+
+static void operator_body(VirtualMachine *vm, Template *t) {
+    pattern_vars(vm, t, true);
+    Type *ty = pattern_signature(vm, t);
+    int   n  = 0;
     for (Type *prm = ty->kind == TY_FUNC ? ty->params : NULL; prm;
          prm       = prm->next, n++) {
         if (n == 2)
@@ -3527,10 +3550,23 @@ static void operator_prepare(VirtualMachine *vm, Template *t) {
                       "operator template parameter '%.*s' is not deduced by "
                       "its operands",
                       (int)t->params[k].name->len, t->params[k].name->loc);
-
     t->op_ready = true;
-    snapshot_restore(vm, &snap);
-    vm->error_jmp_buf = saved_jb;
+}
+
+// Parses the operand types of operator template `t` as patterns, once: each
+// type parameter stands for a placeholder, and `@inst(T) Vec2` for an instance
+// pattern, as in a partial specialization.
+static void operator_prepare(VirtualMachine *vm, Template *t) {
+    if (t->op_ready)
+        return;
+    if (tmpl_has_pack(t))
+        error_tok(vm, t->name_tok,
+                  "an operator template cannot have a parameter pack");
+    if (t->nparams > TMPL_MAX_ARGS)
+        error_tok(vm, t->name_tok,
+                  "an operator template takes at most %d parameters",
+                  TMPL_MAX_ARGS);
+    in_pattern_scope(vm, t, operator_body);
 }
 
 typedef struct {
@@ -3663,6 +3699,179 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
     }
     *rest = skip(vm, tok, ")");
     return instantiate_template(vm, t, args, n, site);
+}
+
+// ---- deduction at a call --------------------------------------------------
+
+static void call_body(VirtualMachine *vm, Template *t) {
+    pattern_vars(vm, t, false);
+    Type *ty = pattern_signature(vm, t);
+    if (ty->kind != TY_FUNC)
+        error_tok(vm, t->name_tok, "'%s' is not a function", t->name);
+    int n = 0;
+    for (Type *prm = ty->params; prm; prm = prm->next)
+        n++;
+    t->call_pat =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(Type *) * (n + 1));
+    n = 0;
+    for (Type *prm = ty->params; prm; prm = prm->next)
+        t->call_pat[n++] = unqualified(vm, prm);
+    t->call_n        = n;
+    t->call_variadic = ty->is_variadic;
+    t->call_ready    = true;
+}
+
+// The type of an argument as a parameter receives it: arrays and functions
+// decayed, top-level qualifiers dropped.
+static Type *decayed_arg_type(VirtualMachine *vm, Type *ty) {
+    if (ty->kind == TY_ARRAY || ty->kind == TY_VLA)
+        ty = pointer_to(vm, ty->base);
+    else if (ty->kind == TY_FUNC)
+        ty = pointer_to(vm, ty);
+    return unqualified(vm, ty);
+}
+
+static const char *spelled(VirtualMachine *vm, Type *ty, Token *site) {
+    MangleBuf mb;
+    mb_init(&mb, vm);
+    spell_type(&mb, ty, site);
+    return arena_strndup(vm, mb.p, (int)mb.len);
+}
+
+// Whether every variable of `pat` is one of the first `nexplicit` parameters,
+// which the call named itself: such a parameter takes conversions, not
+// deduction.
+static bool pattern_explicit(const Template *t, Type *pat, int nexplicit) {
+    bool used[TMPL_MAX_ARGS] = {};
+    pattern_mark_vars(t, pat, used, true);
+    for (int k = nexplicit; k < t->nparams; k++)
+        if (used[k])
+            return false;
+    return true;
+}
+
+// The instance of function template `t` that the call with argument nodes
+// `args` (a list) names. The first `nexplicit` parameters are given in `expl`;
+// the rest come from the argument types, then from their defaults.
+TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
+                                 const TemplateArg *expl, int nexplicit,
+                                 Node *args, Token *site) {
+    if (tmpl_has_pack(t))
+        // TODO(#2080): deduce a trailing parameter pack from the remaining
+        // arguments
+        error_tok(vm, site,
+                  "cannot deduce the arguments of variadic template '%s'; "
+                  "write '@inst(...)'",
+                  t->name);
+    if (t->nparams > TMPL_MAX_ARGS)
+        error_tok(vm, site,
+                  "a template called without '@inst' takes at most "
+                  "%d parameters",
+                  TMPL_MAX_ARGS);
+    if (nexplicit > t->nparams)
+        error_tok(vm, site, "template '%s' takes %d argument%s, %d given",
+                  t->name, t->nparams, t->nparams == 1 ? "" : "s", nexplicit);
+    if (!t->call_ready)
+        in_pattern_scope(vm, t, call_body);
+
+    Deduced d = {};
+    Matcher m = {.vm = vm, .pt = t, .d = &d, .site = site, .call = true};
+    for (int k = 0; k < nexplicit; k++)
+        if (!t->params[k].type_start)
+            d.ty[k] = expl[k].ty;
+
+    int i = 1;
+    for (Node *a = args; a && i <= t->call_n; a = a->next, i++) {
+        Type *pat = t->call_pat[i - 1];
+        if (!pattern_has_var(t, pat) || pattern_explicit(t, pat, nexplicit) ||
+            a->ty->kind == TY_ERROR)
+            continue;
+        Type *aty = decayed_arg_type(vm, a->ty);
+        if (match_type(&m, pat, aty))
+            continue;
+        if (m.conflict)
+            error_tok(vm, a->tok,
+                      "cannot deduce '%.*s' for '%s': argument %d is '%s', but "
+                      "'%s' was deduced before",
+                      (int)t->params[m.conflict_var].name->len,
+                      t->params[m.conflict_var].name->loc, t->name, i,
+                      spelled(vm, m.conflict_b, site),
+                      spelled(vm, m.conflict_a, site));
+        error_tok(vm, a->tok,
+                  "cannot deduce the arguments of '%s': argument %d ('%s') "
+                  "does not match its parameter",
+                  t->name, i, spelled(vm, aty, site));
+    }
+
+    TemplateArg out[TMPL_MAX_ARGS];
+    bool        set[TMPL_MAX_ARGS] = {};
+    memset(out, 0, sizeof(out));
+    int given = 0;
+    for (int k = 0; k < t->nparams; k++) {
+        TemplateParam *p = &t->params[k];
+        if (k < nexplicit) {
+            out[k] = expl[k];
+            set[k] = true;
+        } else if (p->type_start) {
+            if (d.set[k]) {
+                out[k].expr = new_long(vm, d.cv[k].val, site);
+                set[k]      = true;
+            }
+        } else if (d.ty[k]) {
+            out[k].ty = strip_arg_bounds(vm, d.ty[k]);
+            set[k]    = true;
+        }
+        if (set[k])
+            given = k + 1;
+        else if (!p->def)
+            error_tok(vm, site,
+                      "template parameter '%.*s' is not deduced by the "
+                      "arguments",
+                      (int)p->name->len, p->name->loc);
+    }
+    for (int k = 0; k < given; k++)
+        if (!set[k])
+            error_tok(vm, site,
+                      "template parameter '%.*s' has a default but a later "
+                      "parameter is deduced; give it in '@inst(...)'",
+                      (int)t->params[k].name->len, t->params[k].name->loc);
+    return instantiate_template(vm, t, out, given, site);
+}
+
+// `__cccc_inst ( Name {, Arg} )` at `tok` before a `(`, naming a function
+// template and fewer arguments than it requires: the call deduces the rest.
+// Parses the arguments into `out` (room for TMPL_MAX_ARGS) and returns the
+// template; NULL, consuming nothing, for any other `@inst`.
+Template *cc_parse_partial_inst(VirtualMachine *vm, Token **rest, Token *tok,
+                                TemplateArg *out, int *n) {
+    if (!equal(tok->next, "("))
+        return NULL;
+    Template *t = cc_find_template(vm, tok->next->next);
+    if (!t || t->kind != TMPL_FUNC || tmpl_has_pack(t))
+        return NULL;
+    int required = t->nparams;
+    while (required > 0 && t->params[required - 1].def)
+        required--;
+    Token *args  = tok->next->next->next;
+    int    given = count_inst_args(args);
+    if (given >= required || given > TMPL_MAX_ARGS)
+        return NULL;
+    Token *close = tok->next;
+    for (int depth = 0; close->kind != TK_EOF;) {
+        depth += equal(close, "(") - equal(close, ")");
+        close  = close->next;
+        if (!depth)
+            break;
+    }
+    if (!equal(close, "("))
+        return NULL;
+    *n = 0;
+    while (equal(args, ",")) {
+        parse_inst_arg(vm, t, *n, &args, args->next, &out[*n]);
+        (*n)++;
+    }
+    *rest = skip(vm, args, ")");
+    return t;
 }
 
 // `@inst(Types...) Name` where a type is expected.

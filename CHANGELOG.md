@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: a function template called by name deduces its template arguments from the argument types, so `maxof(40, 42)` is the instance `@inst(int) maxof(40, 42)` names. Arrays and functions decay, top-level qualifiers drop, `const T *` takes a plain pointer, and `Vec@(T)`, `Arr@(T, N)`, `T (*)[N]` and function pointer parameters bind their variables. `@inst(int) f(x, y)` names the leading arguments and deduces the rest. A conflict (`maxof(1, 2.0)`), a parameter the arguments do not give and a parameter pack are errors that say so; a template with a pack is still instantiated with `@inst`.
+
 ## [0.35.0] - 2026-11-14
 
 - Added: a partial specialization's pack variable can stand for the parameters before the pack that have no default, so `@specialize(Ts *...)` matches `@template(T, Ts...)` with every argument, the first included, a pointer. A constant pack variable over a parameter of another kind (`int... Ms` over `double D`) is an error.

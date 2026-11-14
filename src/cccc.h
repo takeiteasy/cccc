@@ -4224,6 +4224,12 @@ typedef struct Template {
     bool          op_ready;
     int           op_n;
     struct Type  *op_pat[2];
+    // A function template called without `@inst`: the function's parameter
+    // types as patterns, parsed on first use.
+    bool          call_ready;
+    bool          call_variadic;
+    int           call_n;
+    struct Type **call_pat;
 } Template;
 
 // A template definition found by the comptime index, kept so a file-scope call

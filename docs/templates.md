@@ -158,6 +158,8 @@ Writing both argument lists (`@inst(int) Vec@(int)`) or `@inst(int)` with no nam
 
 The first use of an argument list instantiates the template; later uses share that instance. A struct, union, enum or typedef template names a type, a function template names a function; using one as the other is an error.
 
+A function template can also be called by name, `maxof(40, 42)`: the arguments are deduced from the types of the call's arguments, see [templates-deduction.md](templates-deduction.md).
+
 ### Marker spellings
 
 Each marker also has an attribute and a keyword spelling, and all mix freely in one file:

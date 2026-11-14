@@ -4,7 +4,7 @@ Where CCCC's features behave like their C++ counterparts and where they differ. 
 
 | C++ feature | CCCC counterpart | Same idea | Main difference |
 |---|---|---|---|
-| Class and function templates | [`@template`](templates.md) | Instantiate per argument list, specialise, packs, defaults | Explicit arguments, except that operator templates are deduced from their operands; no constraints or overloads |
+| Class and function templates | [`@template`](templates.md) | Instantiate per argument list, specialise, packs, defaults | Function templates deduce their arguments from a call and operator templates from their operands; struct, union, enum and typedef templates take explicit arguments; no constraints or overloads |
 | Operator overloading | [`[[cccc::operator]]`](operators.md) | `a + b` calls a user function | Free functions bound by attribute; exact operand types; fewer operators |
 | Member functions | [`[[cccc::method]]`](methods.md) | `s.f(x)`, `T.f(x)` | Statically dispatched, explicit receiver, no `this`, no inheritance; a `static` member is called through the type |
 | `constexpr`, `consteval`, `if constexpr` | [`@comptime`](macros.md) | Code runs during compilation | Runs arbitrary C and builds syntax trees; not part of the type system |
@@ -18,7 +18,7 @@ A template is a pattern that becomes a real type or function per argument list. 
 
 | | C++ | CCCC |
 |---|---|---|
-| Arguments | Deduced from a call (`max(1, 2)`) | Always written: `max@(int)(1, 2)`[^spelling] |
+| Arguments | Deduced from a call (`max(1, 2)`) | Function templates: deduced from a call, `max(1, 2)`, or written, `max@(int)(1, 2)`[^spelling]; type templates: written, `Vec@(int)` |
 | Parameter kinds | Types, constants, templates (template template) | Types and constants: integers, `float`, `double`, function and object pointers |
 | Defaults | Yes | Yes, last, and may name earlier parameters |
 | Packs and folds | `Ts...`, `sizeof...`, fold expressions | Same, see [templates-variadic.md](templates-variadic.md) |

@@ -455,6 +455,14 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
                                        Token *site);
 TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
                                          Token *tok);
+// The most parameters a function template can have when called without
+// `@inst`, and the most a partial specialization or operator can bind.
+#define TMPL_MAX_ARGS 16
+TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
+                                 const TemplateArg *expl, int nexplicit,
+                                 Node *args, Token *site);
+Template *cc_parse_partial_inst(VirtualMachine *vm, Token **rest, Token *tok,
+                                TemplateArg *out, int *n);
 void cc_parse_file_scope_chain(VirtualMachine *vm, Token *tok);
 Type *cc_template_inst_type(VirtualMachine *vm, Token **rest, Token *tok);
 int cc_template_pattern_length_var(VirtualMachine *vm, Token *tok);

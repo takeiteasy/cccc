@@ -18,6 +18,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | [macros.md](macros.md) | *hub* — `@comptime` functions, the return model, AST building and quoting |
 | [derive.md](derive.md) | *hub* — attributes that generate code for a type: `@serialize`, `@to_json`, `@to_string`, ... |
 | [templates.md](templates.md) | `@template`, `@inst` and `@specialize`: generic structs, unions and functions |
+| [templates-deduction.md](templates-deduction.md) | Calling a function template without `@inst`: argument types give the template arguments |
 | [templates-variadic.md](templates-variadic.md) | Template parameter packs: `Ts...`, `sizeof...`, pattern expansion and folds |
 | [cpp.md](cpp.md) | CCCC and C++: how templates, operators, methods, compile-time code and derived members are alike and differ |
 | [comptime-policy.md](comptime-policy.md) | What comptime code may call, and `--comptime-allow` |

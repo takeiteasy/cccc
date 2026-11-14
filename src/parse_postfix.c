@@ -377,6 +377,8 @@ bool is_compound_literal_head(VirtualMachine *vm, Token *tok) {
 
 static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
                      Node *recv);
+static Node *funcall_parsed(VirtualMachine *vm, Token **rest, Token *close,
+                            Node *fn, Node *args);
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok);
 static bool is_keyed_arg(Token *tok);
 static Node *check_call_arg(VirtualMachine *vm, CheckedCallWatch *watch,
@@ -1882,8 +1884,10 @@ static Node *prepend_call_prelude(VirtualMachine *vm, Node *call, Node *prelude,
 }
 
 // `recv`, when set, is an already-built first argument (a method receiver).
-static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
-                     Node *recv) {
+// `pre`, when set, is the list of arguments already parsed, and `tok` the
+// closing `)`.
+static Node *funcall_impl(VirtualMachine *vm, Token **rest, Token *tok,
+                          Node *fn, Node *recv, Node *pre) {
     add_type(vm, fn);
 
     if (fn->ty->kind != TY_FUNC &&
@@ -1910,27 +1914,36 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
             cur = cur->next = recv;
     }
 
-    while (!equal(tok, ")")) {
-        if (parsed_arg)
-            tok = skip(vm, tok, ",");
-        parsed_arg = true;
+    Node *next_pre = pre;
+    while (pre ? next_pre != NULL : !equal(tok, ")")) {
+        Node *arg;
+        if (pre) {
+            arg       = next_pre;
+            next_pre  = arg->next;
+            arg->next = NULL;
+        } else {
+            if (parsed_arg)
+                tok = skip(vm, tok, ",");
+            parsed_arg = true;
 
-        if (!deferred_splice && is_keyed_arg(tok)) {
-            KeyedArg *k =
-                arena_alloc(&vm->compiler.parser_arena, sizeof(KeyedArg));
-            k->key   = tok->next;
-            tok      = tok->next->next->next;
-            k->value = assign(vm, &tok, tok);
-            add_type(vm, k->value);
-            *keyed_tail = k;
-            keyed_tail  = &k->next;
-            continue;
+            if (!deferred_splice && is_keyed_arg(tok)) {
+                KeyedArg *k =
+                    arena_alloc(&vm->compiler.parser_arena, sizeof(KeyedArg));
+                k->key   = tok->next;
+                tok      = tok->next->next->next;
+                k->value = assign(vm, &tok, tok);
+                add_type(vm, k->value);
+                *keyed_tail = k;
+                keyed_tail  = &k->next;
+                continue;
+            }
+            if (keyed && !equal(tok, ")"))
+                error_tok(vm, tok,
+                          "positional argument after a keyed argument");
+
+            arg = assign(vm, &tok, tok);
+            add_type(vm, arg);
         }
-        if (keyed && !equal(tok, ")"))
-            error_tok(vm, tok, "positional argument after a keyed argument");
-
-        Node *arg = assign(vm, &tok, tok);
-        add_type(vm, arg);
 
         // Detect $@k splice placeholder: defer all arity/cast checks from here
         // on.
@@ -1958,6 +1971,48 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
         node = prepend_call_prelude(vm, node, hoisted, tok);
     *rest = skip(vm, tok, ")");
     return node;
+}
+
+static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
+                     Node *recv) {
+    return funcall_impl(vm, rest, tok, fn, recv, NULL);
+}
+
+static Node *funcall_parsed(VirtualMachine *vm, Token **rest, Token *close,
+                            Node *fn, Node *args) {
+    return funcall_impl(vm, rest, close, fn, NULL, args);
+}
+
+// The call `Name(args)` of function template `t` whose arguments are deduced:
+// `tok` is the `(`, `expl` the `nexplicit` arguments the call gave.
+static Node *deduced_call(VirtualMachine *vm, Token **rest, Token *tok,
+                          Template *t, const TemplateArg *expl, int nexplicit,
+                          Token *site) {
+    Token *p    = tok->next;
+    Node   head = {};
+    Node  *cur  = &head;
+    while (!equal(p, ")")) {
+        if (cur != &head)
+            p = skip(vm, p, ",");
+        if (is_keyed_arg(p))
+            error_tok(vm, p,
+                      "a call of template '%s' that deduces its arguments "
+                      "takes positional arguments; write '@inst(...)'",
+                      t->name);
+        Node *arg = assign(vm, &p, p);
+        add_type(vm, arg);
+        if (arg->kind == ND_VAR && arg->var && arg->var->is_splice_placeholder)
+            error_tok(vm, arg->tok,
+                      "a call of template '%s' that deduces its arguments "
+                      "cannot take a splice placeholder; write '@inst(...)'",
+                      t->name);
+        cur = cur->next = arg;
+    }
+    TemplateInstance *inst =
+        cc_deduce_call(vm, t, expl, nexplicit, head.next, site);
+    mark_function_referenced(vm, inst->fn);
+    return funcall_parsed(vm, rest, p, new_var_node(vm, inst->fn, site),
+                          head.next);
 }
 
 // __builtin_kernel_launch(kernel, global, local, args...) (cccc_launch in
@@ -4814,6 +4869,13 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (vm->compiler.saw_templates && equal(tok, "__cccc_inst")) {
+        TemplateArg expl[TMPL_MAX_ARGS];
+        int         nexplicit;
+        Token      *after;
+        Template   *deduced =
+            cc_parse_partial_inst(vm, &after, tok, expl, &nexplicit);
+        if (deduced)
+            return deduced_call(vm, rest, after, deduced, expl, nexplicit, tok);
         TemplateInstance *inst = cc_parse_template_inst(vm, rest, tok);
         if (inst->tmpl->kind != TMPL_FUNC)
             error_tok(vm, tok, "template '%s' is a type, not a function",
@@ -5007,6 +5069,13 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 }
                 return num;
             }
+        }
+
+        // A function template named by a bare call: its arguments are deduced.
+        if (!sc && vm->compiler.saw_templates && equal(tok->next, "(")) {
+            Template *t = cc_find_template(vm, tok);
+            if (t && t->kind == TMPL_FUNC)
+                return deduced_call(vm, rest, tok->next, t, NULL, 0, tok);
         }
 
         // Check if this is a macro call. When parsing macro bytecode itself,
