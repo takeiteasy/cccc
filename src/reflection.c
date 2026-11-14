@@ -22,6 +22,7 @@
 
 #include "./internal.h"
 #include "./serialize_internal.h"
+#include "./parse_internal.h"
 
 // reflection.h's prototypes make any drift from a definition below a compile
 // error (conflicting declaration).
@@ -3872,6 +3873,23 @@ void __builtin_ast_add_attribute(Obj *fn, const char *attr_text) {
     reflect_require(vm, fn, "AddAttribute: function");
     reflect_require(vm, attr_text, "AddAttribute: attribute text");
     cc_apply_attr_to_fn(vm, fn, attr_text, vm->compiler.macro_call_tok);
+}
+
+CC_BUILTIN(__builtin_ast_register_method, 4);
+void __builtin_ast_register_method(Obj *fn, Type *recv, const char *name,
+                                   int is_static) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
+        return;
+    reflect_require(vm, fn, "RegisterMethod: function");
+    reflect_require(vm, recv, "RegisterMethod: receiver type");
+    reflect_require(vm, name, "RegisterMethod: method name");
+    Type *fty = fn->ty;
+    reflect_require(vm, fty, "RegisterMethod: function type");
+    type_attrs_mut(vm, fty)->method_of     = recv;
+    type_attrs_mut(vm, fty)->method_name   = arena_strdup(vm, name);
+    type_attrs_mut(vm, fty)->method_static = is_static != 0;
+    register_method(vm, fn, fty, vm->compiler.macro_call_tok);
 }
 
 // Thin helper for MarkAsBuildTarget(fn, kind) — composes the kind string at

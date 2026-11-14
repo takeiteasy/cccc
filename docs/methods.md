@@ -30,6 +30,8 @@ The optional second argument names the method, so two structs can each have a `l
 
 The attribute works on structs and unions you do not own. The function is declared before the call that uses it.
 
+The functions [derive attributes](derive.md#methods) generate are registered as methods of their struct.
+
 ## Defining in the struct
 
 A function written in a struct or union body is a method of that type. It becomes an ordinary file-scope function named `<T>_<f>` and adds no member, so the layout is unchanged.

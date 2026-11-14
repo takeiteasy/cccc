@@ -1984,6 +1984,20 @@ Obj *__builtin_ast_function_prototype(const char *name, Type *return_type);
  */
 void __builtin_ast_add_attribute(Obj *fn, const char *attr_text);
 
+/**
+ * @brief Bind a programmatically created function as a method of a struct or
+ *        union. Convenience wrappers: RegisterMethod, RegisterStaticMethod.
+ * @param fn The function, already published.
+ * @param recv The struct or union type the method belongs to.
+ * @param name The method name callers write after the dot.
+ * @param is_static Nonzero for a receiver-less method called as `T.name(...)`.
+ * @details The same checks as `[[cccc::method]]` apply: an instance method
+ * takes `T`, `T *` or `const T *` first, and a name already bound for the type
+ * is an error.
+ */
+void __builtin_ast_register_method(Obj *fn, Type *recv, const char *name,
+                                   int is_static);
+
 // Internal helper for MarkAsBuildTarget: composes "cccc::build_target(kind=…)"
 // at runtime so the macro doesn't require string concatenation.
 void __builtin_ast_add_build_target_attr(Obj *fn, const char *kind);
@@ -3320,6 +3334,22 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param text Attribute text as it would appear between [[ and ]], e.g.
  * "cccc::test", "nodiscard", or "@myattr". */
 #define AddAttribute(fn, text) __builtin_ast_add_attribute(fn, text)
+/*! @def RegisterMethod
+ * @brief Make a generated function the instance method `name` of a struct or
+ * union, so `s.name(...)` calls it.
+ * @param fn The function object, taking the receiver first.
+ * @param type The struct or union type.
+ * @param name The method name. */
+#define RegisterMethod(fn, type, name)                                         \
+    __builtin_ast_register_method(fn, type, name, 0)
+/*! @def RegisterStaticMethod
+ * @brief Make a generated function the static method `name` of a struct or
+ * union, called as `T.name(...)`.
+ * @param fn The function object.
+ * @param type The struct or union type.
+ * @param name The method name. */
+#define RegisterStaticMethod(fn, type, name)                                   \
+    __builtin_ast_register_method(fn, type, name, 1)
 /*! @def MarkAsTest
  * @brief Shorthand for @c AddAttribute(fn, "cccc::test").
  * @param fn The function object. */

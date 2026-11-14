@@ -103,6 +103,22 @@ AddAttribute(fn, "@myattr");           // custom attribute handler
 
 `MarkAsTest(fn)`, `MarkAsBuild(fn)` and `MarkAsBuildTarget(fn, kind)` are shorthands; use `AddAttribute` for test options or standard attributes.
 
+## Methods on generated functions
+
+`RegisterMethod(fn, type, "name")` makes a published function an instance [method](methods.md) of a struct or union, and `RegisterStaticMethod(fn, type, "name")` a static one. They take the `Type *`, so they work for a tag-only struct or a template instance, where an attribute spelling would need the type written out.
+
+```c
+@comptime void gen_len(Type *ty) {
+    Obj *fn = MakeFunction("vec_len", GetType("int"));
+    FunctionAddParam(fn, "self", MakePointer(ty));
+    WithFn(fn) { FunctionSetBody(fn, Quote("return 0;")); }
+    PublishNode(fn);
+    RegisterMethod(fn, ty, "len");     // v.len() calls vec_len(&v)
+}
+```
+
+The same checks as `[[cccc::method]]` apply: the receiver comes first and a name already bound for the type is an error. Register after `PublishNode`.
+
 ## Directives while a macro runs
 
 ```c

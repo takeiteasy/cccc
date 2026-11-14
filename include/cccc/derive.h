@@ -129,6 +129,9 @@
                 FunctionSetBody(fn, MakeReturn(MakeMember(self, field)));
             }
             PublishNode(fn);
+            char method[256];
+            __builtin_accessor_name(method, "", "get", field);
+            RegisterMethod(fn, self_ty, method);
         }
 
         if (setters) {
@@ -148,6 +151,9 @@
                 FunctionSetBody(fn, MakeExprStmt(store));
             }
             PublishNode(fn);
+            char method[256];
+            __builtin_accessor_name(method, "", "set", field);
+            RegisterMethod(fn, self_ty, method);
         }
     }
 }
@@ -229,6 +235,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterStaticMethod(fn, ty, "new");
 }
 
 // @getters struct Foo {...}; publishes get_<field>(struct Foo *self)
@@ -1253,6 +1260,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "to_json");
 }
 
 // @from_json struct Foo {...}; publishes
@@ -1327,6 +1335,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "from_json");
 }
 
 // ---- @equals / @hash / @dump
@@ -1777,6 +1786,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "equals");
     AddAttribute(fn, "cccc::operator(==)");
 }
 
@@ -1813,6 +1823,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "hash");
 }
 
 // The dump engine writes through a sink: sink[0] is the FILE * for @dump, or
@@ -2108,6 +2119,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "dump");
 }
 
 // ---- @to_string / @from_string ----------------------------------------------
@@ -2142,6 +2154,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "to_string");
 }
 
 // @to_string enum Color {...}; publishes
@@ -2599,6 +2612,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "from_string");
 }
 
 // @from_string enum Color {...}; publishes
@@ -2889,6 +2903,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "destroy");
 }
 
 // @clone struct Foo {...}; publishes
@@ -2940,6 +2955,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "clone");
 
     char sname[256];
     __builtin_json_fn_name(sname, prefix, tname, "_clone_size");
@@ -3229,6 +3245,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "serialize");
 
     Obj *size_fn = MakeFunction(sname, GetType("unsigned long"));
     WithFn(size_fn) {
@@ -3246,6 +3263,7 @@
         FunctionSetBody(size_fn, block);
     }
     PublishNode(size_fn);
+    RegisterMethod(size_fn, ty, "serialize_size");
 }
 
 // @deserialize struct Foo {...}; publishes
@@ -3295,6 +3313,7 @@
         FunctionSetBody(read_fn, block);
     }
     PublishNode(read_fn);
+    RegisterMethod(read_fn, ty, "deserialize_read");
 
     char cname[128];
     char iname[128];
@@ -3371,6 +3390,7 @@
         FunctionSetBody(into, block);
     }
     PublishNode(into);
+    RegisterMethod(into, ty, "deserialize_into");
 
     Obj *fn = MakeFunction(fname, ty);
     FunctionAddParam(fn, "buf", MakePointer(GetType("void")));
@@ -3389,6 +3409,7 @@
         }
     }
     PublishNode(fn);
+    RegisterStaticMethod(fn, ty, "deserialize");
 }
 
 // ---- @compare ------------------------------------------------------------------
@@ -3646,6 +3667,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "compare");
     AddAttribute(fn, "cccc::operator(<=>)");
 }
 
@@ -4198,6 +4220,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "validate");
 }
 
 // @clamp struct Foo {...}; publishes
@@ -4223,6 +4246,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    RegisterMethod(fn, ty, "clamp");
 }
 
 #endif // CCCC_DERIVE_H

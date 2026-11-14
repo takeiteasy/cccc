@@ -18,6 +18,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Fixed: a parameter `@default` on a function written in a struct body was rejected as given twice.
 - Added: a static method is called through its type, `Vec2.make(3, 4)`. Write `static` on a function in a struct or union body, or bind a free function with `[[cccc::static_method(T)]]` (`[[cccc::static_method(T, name)]]` to name it). `T.f(...)` also calls an instance method with the receiver passed as the first argument, and `T` may be a typedef name, `struct S`, `union U` or a template instance (`Box@(int).wrap(7)`).
 - Changed: `static` on a function in a struct body, other than an operator, makes a static method instead of giving it internal linkage; `s.f()` on it is an error that names `T.f(...)`.
+- Added: the functions derive attributes generate are methods of their struct or union: `p.get_x()`, `Point.new(3, 4)`, `a.equals(&b)`, `p.to_json(buf, n)`, `dst.clone(&src)`, `Point.deserialize(buf)`. The method name leaves out the type and the prefix, and the function stays callable by name. A name already bound for the type is `method 'f' is already defined for this type`.
+- Added: `RegisterMethod(fn, type, name)` and `RegisterStaticMethod(fn, type, name)` bind a generated function as a method of a struct or union.
 
 ## [0.34.2] - 2026-11-13
 

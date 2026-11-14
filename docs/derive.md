@@ -319,6 +319,40 @@ as C does, and the C emitted for `-c=native` has no initializers.
 | member of a named nested struct | needs `@ctor` on that struct |
 
 
+## Methods
+
+Every derived function on a struct or union is also a [method](methods.md) of it, named without the type or prefix. The function stays callable by its full name.
+
+```c
+@ctor
+@equals
+@to_json
+typedef struct { int x; int y; } Point;
+
+Point a = Point.new(3, 4);       // Point_new(3, 4)
+Point b = Point.new(3, 4);
+a.equals(&b);                    // Point_equals(&a, &b)
+char buf[64];
+a.to_json(buf, sizeof buf);      // Point_to_json(&a, buf, sizeof buf)
+```
+
+| Attribute | Method | Call |
+|---|---|---|
+| `@getters`, `@setters` | `get_<field>`, `set_<field>` | `p.get_x()`, `p.set_x(5)` |
+| `@ctor` | `new` (static) | `Point.new(3, 4)` |
+| `@deserialize` | `deserialize` (static) | `Point.deserialize(buf)` |
+| `@deserialize` | `deserialize_into`, `deserialize_read` | `p.deserialize_into(buf, len)` |
+| `@serialize` | `serialize`, `serialize_size` | `p.serialize(buf)` |
+| `@to_json`, `@from_json` | `to_json`, `from_json` | `p.from_json(text)` |
+| `@to_string`, `@from_string` (struct) | `to_string`, `from_string` | `p.from_string(text)` |
+| `@equals`, `@hash`, `@compare`, `@dump` | `equals`, `hash`, `compare`, `dump` | `a.compare(&b)` |
+| `@clone`, `@destroy` | `clone`, `destroy` | `dst.clone(&src)`, `p.destroy()` |
+| `@validate`, `@clamp` | `validate`, `clamp` | `p.clamp()` |
+
+A function that writes into its first argument keeps that order: `dst.clone(&src)` calls `T_clone(&dst, &src)`.
+
+The prefix names only the function: `@equals("app")` gives `app_T_equals` and the method `equals`. A method name already bound for the type, by another derive with a different prefix or by `[[cccc::method]]`, is the `method 'equals' is already defined for this type` error. Enum derives (`@bitflags`, an enum's `@to_string` and `@from_string`) add no methods.
+
 ## Bundles
 
 A bundle runs a pair of attributes on one type, as `@accessors` runs
