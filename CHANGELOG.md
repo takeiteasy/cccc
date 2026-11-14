@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: a partial specialization's pack variable can stand for the parameters before the pack that have no default, so `@specialize(Ts *...)` matches `@template(T, Ts...)` with every argument, the first included, a pointer. A constant pack variable over a parameter of another kind (`int... Ms` over `double D`) is an error.
+- Fixed: partial specializations that differ only in which parameters their pack variable stands for are ordered by the arguments they can match, so `(int, Ts...)` and `(int, U, Us...)` over `(T, U = T, Us...)` report `redefinition of partial specialization`.
+
 - Fixed: partial specializations whose constant variables differ only in type (`float F` and `double D`, `char N` and `long N`) are no longer a redefinition of each other; the narrower type is the more specialised partial.
 
 ## [0.34.2] - 2026-11-13

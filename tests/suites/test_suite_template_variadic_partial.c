@@ -662,3 +662,36 @@ void test_pattern_without_pack_variable_stops_early(void) {
     AssertEq(sizeof(a.kind), 2);
     AssertEq(sizeof(b.kind), 1);
 }
+
+// A pack variable also stands where the primary has required parameters.
+@template(T, Ts...) struct Req {
+    char kind[1];
+};
+@template(Ts...) @specialize(Ts *...) struct Req {
+    char kind[2];
+};
+@template(T, Us...) @specialize(T *, Us...) struct Req {
+    char kind[3];
+};
+
+[[cccc::test]]
+void test_pack_variable_spans_a_required_parameter(void) {
+    @inst(int *) Req         a;
+    @inst(int *, char *) Req b;
+    @inst(int) Req           c;
+    AssertEq(sizeof(a.kind), 2);
+    AssertEq(sizeof(b.kind), 2);
+    AssertEq(sizeof(c.kind), 1);
+}
+
+[[cccc::test]]
+void test_leading_pointer_pattern_takes_a_mixed_list(void) {
+    @inst(int *, char) Req a;
+    AssertEq(sizeof(a.kind), 3);
+}
+
+[[cccc::test]]
+void test_every_argument_pattern_is_narrower_than_a_leading_one(void) {
+    @inst(int *, int *, int *) Req a;
+    AssertEq(sizeof(a.kind), 2);
+}

@@ -1,9 +1,9 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: takes at least 1 argument, 0 given
-@template(T, Ts...) struct A {
+// CCCC_EXPECT_STDERR: takes at least 2 arguments, 1 given
+@template(T, U, Ts...) struct A {
     T v;
 };
-@template(Ts...) @specialize(Ts...) struct A {
+@template(T) @specialize(T *) struct A {
     int q;
 };
 int main(void) {

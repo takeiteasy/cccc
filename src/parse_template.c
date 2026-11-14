@@ -2600,6 +2600,7 @@ typedef struct {
     int                var[TMPL_MAX_ARGS]; // or the argument pattern's variable
     bool               set[TMPL_MAX_ARGS];
     bool               is_var[TMPL_MAX_ARGS];
+    bool               pad[TMPL_MAX_ARGS]; // bound at a padded argument
     PackBind           pk[TMPL_MAX_ARGS];
 } Deduced;
 
@@ -2611,6 +2612,7 @@ typedef struct {
     const Template *arg_pt;
     Deduced        *d;
     Token          *site;
+    bool            padding; // matching an element of the argument list's tail
 } Matcher;
 
 // A constant argument: a value, or variable `var` of the argument pattern.
@@ -2772,11 +2774,12 @@ static bool bind_const(Matcher *m, int k, ConstArg c) {
                   : !var_within(m->vm, arg_var_type(m, c.var), c.slot, vty))
         return false;
     if (d->set[k]) {
-        if (d->is_var[k] != (c.var >= 0))
+        if (d->pad[k] || m->padding || d->is_var[k] != (c.var >= 0))
             return false;
         return c.var >= 0 ? d->var[k] == c.var : same_const(&d->cv[k], c.arg);
     }
     d->set[k]    = true;
+    d->pad[k]    = m->padding;
     d->is_var[k] = c.var >= 0;
     d->var[k]    = c.var;
     d->cv[k]     = *c.arg;
@@ -2835,12 +2838,12 @@ static bool bind_tail(Matcher *m, const Template *t, const PatList *pl,
                         slot_type(m, t, t->nparams - 1, apl->tail), vty))
             return false;
     }
-    const TemplateArg *els     = args + from;
+    int                n       = nargs > from ? nargs - from : 0;
+    const TemplateArg *els     = args + (nargs < from ? nargs : from);
     Type              *open_ty = NULL;
     if (pl->tail_pat) {
-        TemplateArg *own =
-            arena_alloc(&m->vm->compiler.parser_arena,
-                        sizeof(TemplateArg) * (nargs - from + 1));
+        TemplateArg *own = arena_alloc(&m->vm->compiler.parser_arena,
+                                       sizeof(TemplateArg) * (n + 1));
         for (int i = from; i < nargs; i++) {
             d->ty[k] = NULL;
             if (!match_type(m, pl->tail_pat, args[i].ty))
@@ -2861,8 +2864,8 @@ static bool bind_tail(Matcher *m, const Template *t, const PatList *pl,
     } else if (open && !m->pt->params[k].type_start) {
         open_ty = apl->tail_pat ? apl->tail_pat : m->arg_pt->vars[apl->tail];
     }
-    PackBind got = {els,  nargs - from, apl ? apl->pat_var + from : NULL,
-                    open, open_ty,      open ? apl->tail : -1};
+    PackBind got = {els,  n,       apl ? apl->pat_var + from : NULL,
+                    open, open_ty, open ? apl->tail : -1};
     if (d->set[k])
         return same_pack(m, k, &d->pk[k], &got);
     d->set[k] = true;
@@ -2870,16 +2873,45 @@ static bool bind_tail(Matcher *m, const Template *t, const PatList *pl,
     return true;
 }
 
+// Matches entry `i` of `pl`, which an open argument list `apl` has no entry
+// for, against one element of its tail. The element is unknown, so a variable
+// bound to it is not equal to any other binding.
+static bool match_padded(Matcher *m, const Template *t, const PatList *pl,
+                         int i, const PatList *apl) {
+    static const TemplateArg unknown;
+    int                      pi = param_at(t, i);
+    bool                     ok;
+    m->padding = true;
+    if (!t->params[pi].type_start) {
+        ok = match_type(m, pl->pat[i].ty,
+                        apl->tail_pat ? apl->tail_pat
+                                      : m->arg_pt->vars[apl->tail]);
+    } else {
+        ConstArg c = {&unknown, apl->tail, slot_type(m, t, pi, apl->tail)};
+        ok         = pl->pat_var[i] >= 0 && bind_const(m, pl->pat_var[i], c);
+    }
+    m->padding = false;
+    return ok;
+}
+
 // Matches the `nargs` arguments of template `t` against `pl`. `apl` is the
 // argument list's own pattern when `args` is one, whose variables the
 // constant arguments then are; its pack variable makes the list open-ended.
 static bool match_args(Matcher *m, const Template *t, const PatList *pl,
                        const TemplateArg *args, int nargs, const PatList *apl) {
-    if (pl->tail < 0 ? (apl && apl->tail >= 0) || nargs != pl->n
-                     : nargs < pl->n)
+    bool open = apl && apl->tail >= 0;
+    // An open argument list stands for at least the parameters before the
+    // pack, so it covers a pattern's entries up to those.
+    if (pl->tail < 0 ? open || nargs != pl->n
+                     : nargs < pl->n && !(open && pl->n < t->nparams))
         return false;
     for (int i = 0; i < pl->n; i++) {
         int pi = param_at(t, i);
+        if (i >= nargs) {
+            if (!match_padded(m, t, pl, i, apl))
+                return false;
+            continue;
+        }
         if (!t->params[pi].type_start) {
             if (!match_type(m, pl->pat[i].ty, args[i].ty))
                 return false;
@@ -2942,8 +2974,10 @@ static bool match_type(Matcher *m, Type *pat, Type *arg) {
             bound->is_atomic   &= !pat->is_atomic;
         }
         if (d->ty[k])
-            return same_arg_type(vm, d->ty[k], bound, m->site);
-        d->ty[k] = bound;
+            return !d->pad[k] && !m->padding &&
+                   same_arg_type(vm, d->ty[k], bound, m->site);
+        d->ty[k]  = bound;
+        d->pad[k] = m->padding;
         return true;
     }
     InstPat *ip = inst_pat_of(m->pt, pat);
@@ -4007,21 +4041,31 @@ static Token *parse_pattern_args(VirtualMachine *vm, Template *pt, Template *t,
     int  required = fixed;
     while (pack && required > 0 && t->params[required - 1].def)
         required--;
-    if (pack && given < required)
+    if (pack && pl->tail < 0 && given < required)
         error_tok(vm, site,
                   "template '%s' takes at least %d argument%s, %d given",
                   t->name, required, required == 1 ? "" : "s", given);
     if (pack && pl->tail >= 0) {
-        // The pack variable also takes the defaulted parameters it stands at.
-        for (int i = given; i < fixed; i++)
-            if (!t->params[i].type_start != !t->params[fixed].type_start)
+        // The pack variable also takes the parameters it stands at.
+        for (int i = given; i < fixed; i++) {
+            const TemplateParam *p  = &t->params[i];
+            const TemplateParam *pv = &pt->params[pl->tail];
+            if (!p->type_start != !t->params[fixed].type_start)
                 error_tok(vm, site,
                           "pack variable '%.*s' cannot stand for '%.*s', %s "
                           "parameter",
-                          (int)pt->params[pl->tail].name->len,
-                          pt->params[pl->tail].name->loc,
-                          (int)t->params[i].name->len, t->params[i].name->loc,
-                          t->params[i].type_start ? "a constant" : "a type");
+                          (int)pv->name->len, pv->name->loc, (int)p->name->len,
+                          p->name->loc,
+                          p->type_start ? "a constant" : "a type");
+            if (p->type_start && !p->dependent &&
+                strcmp(const_kind(param_type(vm, pt, pl->tail)),
+                       const_kind(param_type(vm, t, i))))
+                error_tok(vm, site,
+                          "pack variable '%.*s' cannot stand for '%.*s', which "
+                          "has %s type",
+                          (int)pv->name->len, pv->name->loc, (int)p->name->len,
+                          p->name->loc, const_kind(param_type(vm, t, i)));
+        }
         return a;
     }
     int end = pack ? fixed : t->nparams;

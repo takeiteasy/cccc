@@ -191,6 +191,10 @@ struct Ptrs { Ts... pointee; };  // every argument a pointer
 @template(Ts...)
 @specialize(Ts **...)
 struct Ptrs { Ts... pointee; };  // narrower: every argument a pointer to pointer
+@template(T, Ts...) struct Head { char kind[1]; };
+@template(Ts...)
+@specialize(Ts *...)
+struct Head { char kind[2]; };  // every argument a pointer, `T` included
 @template(T, Ts...)
 @specialize(T, Pair@(T, Ts)...)
 struct Links { Ts... rest; }; // a leading variable may repeat
@@ -215,9 +219,9 @@ The body sees the pack variable as a pack: `sizeof...(Ts)`, `Ts...[k]`, `Ts... n
 |---|---|
 | Length | Without a pack variable a pattern matches that many arguments, defaults filled in; with one, that many or more. `(T, Ts...)` matches one argument or more |
 | Selection | The most specialised matching partial wins: `(T, U)` over `(T, U, Ts...)` over `(T, Ts...)`, `(int, Ts...)` over `(T, Ts...)`, and `(Ts *...)` over `(Ts...)`. Partials where none is narrower than all the others are an error. An empty pack matches every element pattern, so the narrowest wins |
-| Pack variable | A pack parameter of the `@template`, of the same kind (types or constants) as the pack it takes, written `Ts...` or `<pattern of Ts>...` as the last item of a list; it may stand where the primary has defaulted parameters, and then takes their arguments too (`(int, Ts...)` for `(T, U = T, Us...)`). Used again (`Pack@(Ts...), Ts...`), it stands for one argument list: the same length, and each element the same type or value |
+| Pack variable | A pack parameter of the `@template`, of the same kind (types or constants) as the pack it takes, written `Ts...` or `<pattern of Ts>...` as the last item of a list; it may stand where the primary has parameters before the pack, required or defaulted, and then takes their arguments too (`(int, Ts...)` for `(T, U = T, Us...)`, `(Ts *...)` for `(T, Ts...)`); a constant pack variable stands only for parameters of its own kind. Used again (`Pack@(Ts...), Ts...`), it stands for one argument list: the same length, and each element the same type or value |
 | Element pattern | Type packs only. It names the pack variable, and any other variable in it must also be deduced by a leading item |
-| Errors | `a pack in a pattern is written alone as the last item, 'Ts...'`, `the pattern before '...' names no pack variable`, `cannot expand pack 'Ts' into template 'Pair', which is not variadic`, `a partial specialization must be more specific than the primary template` |
+| Errors | `a pack in a pattern is written alone as the last item, 'Ts...'`, `the pattern before '...' names no pack variable`, `cannot expand pack 'Ts' into template 'Pair', which is not variadic`, `a partial specialization must be more specific than the primary template`, `pack variable 'Ts' cannot stand for 'N', a constant parameter` |
 
 ## Instance names
 
