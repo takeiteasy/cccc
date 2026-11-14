@@ -37,8 +37,8 @@ void test_serialize_skip(void) {
 [[cccc::test]]
 void test_accessor_skip(void) {
     struct A a = {5, 6};
-    set_shown(&a, 7);
-    AssertEq(get_shown(&a), 7);
+    A_set_shown(&a, 7);
+    AssertEq(A_get_shown(&a), 7);
     AssertEq(a.hidden, 6);
 }
 

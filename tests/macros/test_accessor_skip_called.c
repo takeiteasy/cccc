@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: undeclared function 'get_hidden'
+// CCCC_EXPECT_STDERR: undeclared function 'A_get_hidden'
 #include <cccc/derive.h>
 
 @getters struct A {
@@ -9,5 +9,5 @@
 
 int main(void) {
     struct A a = {1, 2};
-    return get_hidden(&a);
+    return A_get_hidden(&a);
 }

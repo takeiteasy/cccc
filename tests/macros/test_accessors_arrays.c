@@ -3,7 +3,7 @@
 
 #include <cccc/derive.h>
 
-@accessors("S") @ctor struct S {
+@accessors @ctor struct S {
     int arr[4];
     int grid[2][3];
     struct {

@@ -10,16 +10,16 @@
 int main(void) {
     struct Point p = {1, 2};
 
-    if (get_x(&p) != 1)
+    if (Point_get_x(&p) != 1)
         return 1;
-    if (get_y(&p) != 2)
+    if (Point_get_y(&p) != 2)
         return 2;
 
-    set_x(&p, 10);
-    set_y(&p, 20);
-    if (get_x(&p) != 10)
+    Point_set_x(&p, 10);
+    Point_set_y(&p, 20);
+    if (Point_get_x(&p) != 10)
         return 3;
-    if (get_y(&p) != 20)
+    if (Point_get_y(&p) != 20)
         return 4;
     if (p.x != 10)
         return 5;

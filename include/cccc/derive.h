@@ -96,12 +96,26 @@
     strcat(out, field);
 }
 
+@comptime void __builtin_json_fn_name(char *out, const char *prefix,
+                                      const char *tname, const char *suffix);
+
+// [<prefix>_]<tname>_<method>: the function behind an accessor method.
+@comptime void __builtin_accessor_fn_name(char *out, const char *prefix,
+                                          const char *tname,
+                                          const char *method) {
+    char suffix[300];
+    strcpy(suffix, "_");
+    strcat(suffix, method);
+    __builtin_json_fn_name(out, prefix, tname, suffix);
+}
+
 // Publishes the getter and/or setter of every member of struct/union `ty`
 // (fields of anonymous struct/union members included) taking `self_ty *`.
 // An array member's getter returns a pointer to its first element and its
 // setter copies the whole array from a pointer.
-@comptime void __builtin_accessors(Type *self_ty, Type *ty, const char *prefix,
-                                   bool getters, bool setters) {
+@comptime void __builtin_accessors(Type *self_ty, Type *ty, const char *tname,
+                                   const char *prefix, bool getters,
+                                   bool setters) {
     int count = StructMemberCount(ty);
     for (int i = 0; i < count; i++) {
         Member     *m     = StructMemberAt(ty, i);
@@ -110,7 +124,8 @@
         if (!field) {
             int tk = GetTypeKind(fty);
             if (tk == TK_STRUCT || tk == TK_UNION)
-                __builtin_accessors(self_ty, fty, prefix, getters, setters);
+                __builtin_accessors(self_ty, fty, tname, prefix, getters,
+                                    setters);
             continue;
         }
         if (MemberHasAttr(m, "accessor_skip"))
@@ -120,7 +135,9 @@
         char name[256];
 
         if (getters) {
-            __builtin_accessor_name(name, prefix, "get", field);
+            char method[256];
+            __builtin_accessor_name(method, "", "get", field);
+            __builtin_accessor_fn_name(name, prefix, tname, method);
             Obj *fn =
                 MakeFunction(name, is_array ? MakePointer(TypeBase(fty)) : fty);
             FunctionAddParam(fn, "self", MakePointer(self_ty));
@@ -129,13 +146,13 @@
                 FunctionSetBody(fn, MakeReturn(MakeMember(self, field)));
             }
             PublishNode(fn);
-            char method[256];
-            __builtin_accessor_name(method, "", "get", field);
             RegisterMethod(fn, self_ty, method);
         }
 
         if (setters) {
-            __builtin_accessor_name(name, prefix, "set", field);
+            char method[256];
+            __builtin_accessor_name(method, "", "set", field);
+            __builtin_accessor_fn_name(name, prefix, tname, method);
             Obj *fn = MakeFunction(name, GetType("void"));
             FunctionAddParam(fn, "self", MakePointer(self_ty));
             FunctionAddParam(fn, "value",
@@ -151,8 +168,6 @@
                 FunctionSetBody(fn, MakeExprStmt(store));
             }
             PublishNode(fn);
-            char method[256];
-            __builtin_accessor_name(method, "", "set", field);
             RegisterMethod(fn, self_ty, method);
         }
     }
@@ -238,33 +253,36 @@
     RegisterStaticMethod(fn, ty, "new");
 }
 
-// @getters struct Foo {...}; publishes get_<field>(struct Foo *self)
-// for each member, returning self->field. @getters("Foo") names them
-// Foo_get_<field>.
+// @getters struct Foo {...}; publishes Foo_get_<field>(struct Foo *self)
+// for each member, returning self->field, and the method get_<field>.
+// @getters("P") names the functions P_Foo_get_<field>.
 @comptime(attribute("getters")) void __builtin_attr_getters(AttrTarget *target,
                                                             ...) {
     Type       *ty     = __builtin_attr_type_target(target, "@getters", false);
     const char *prefix = __builtin_attr_prefix_arg("@getters");
-    __builtin_accessors(ty, ty, prefix, true, false);
+    const char *tname  = __builtin_attr_type_name(target, "@getters");
+    __builtin_accessors(ty, ty, tname, prefix, true, false);
 }
 
-// @setters struct Foo {...}; publishes set_<field>(struct Foo *self,
-// <FieldType> value) for each member, assigning self->field = value.
-// @setters("Foo") names them Foo_set_<field>.
+// @setters struct Foo {...}; publishes Foo_set_<field>(struct Foo *self,
+// <FieldType> value) for each member, assigning self->field = value, and the
+// method set_<field>. @setters("P") names the functions P_Foo_set_<field>.
 @comptime(attribute("setters")) void __builtin_attr_setters(AttrTarget *target,
                                                             ...) {
     Type       *ty     = __builtin_attr_type_target(target, "@setters", false);
     const char *prefix = __builtin_attr_prefix_arg("@setters");
-    __builtin_accessors(ty, ty, prefix, false, true);
+    const char *tname  = __builtin_attr_type_name(target, "@setters");
+    __builtin_accessors(ty, ty, tname, prefix, false, true);
 }
 
 // @accessors struct Foo {...}; publishes both the getter and the
-// setter of every member. @accessors("Foo") prefixes both names.
+// setter of every member. @accessors("P") prefixes both function names.
 @comptime(attribute("accessors")) void __builtin_attr_accessors(
     AttrTarget *target, ...) {
     Type       *ty = __builtin_attr_type_target(target, "@accessors", false);
     const char *prefix = __builtin_attr_prefix_arg("@accessors");
-    __builtin_accessors(ty, ty, prefix, true, true);
+    const char *tname  = __builtin_attr_type_name(target, "@accessors");
+    __builtin_accessors(ty, ty, tname, prefix, true, true);
 }
 
 // @ctor struct Foo {...}; publishes

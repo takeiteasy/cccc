@@ -110,8 +110,8 @@ cat >m_p.c <<'EOS'
 int from_q(void);
 int main(void) {
     struct M m = {0};
-    set_a(&m, 3);
-    return 39 + get_a(&m) + from_q();
+    M_set_a(&m, 3);
+    return 39 + M_get_a(&m) + from_q();
 }
 EOS
 cat >m_q.c <<'EOS'

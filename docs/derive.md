@@ -17,7 +17,7 @@ int main(void) {
     Point p = {3, 4};
     char buf[sizeof(Point)];
     Point_serialize(&p, buf);
-    return get_x(&p) + get_y(&p) + 35;   // 42
+    return p.get_x() + p.get_y() + 35;   // 42
 }
 ```
 
@@ -29,8 +29,8 @@ int main(void) {
 | `@to_string` | struct | `size_t T_to_string(const T *self, char *buf, size_t cap)` |
 | `@from_string` | enum | `T T_from_string(const char *s)` |
 | `@from_string` | struct | `int T_from_string(T *out, const char *s)` |
-| `@getters` | struct/union | `get_<field>(T *self)` per member |
-| `@setters` | struct/union | `set_<field>(T *self, <FieldType> value)` per member |
+| `@getters` | struct/union | `T_get_<field>(T *self)` per member |
+| `@setters` | struct/union | `T_set_<field>(T *self, <FieldType> value)` per member |
 | `@accessors` | struct/union | getters and setters |
 | `@ctor` | struct/union | `T T_new(<member>, ...)` |
 | `@to_json` | struct | `size_t T_to_json(const T *self, char *buf, size_t cap)` |
@@ -155,25 +155,26 @@ struct Session {
 | Attribute | Effect |
 |---|---|
 | `@serialize_skip` | The member's bytes are not written; `T_deserialize` leaves it zero. `T_serialize` still returns `sizeof(T)` and the other members keep their offsets. The `Serialize` / `Deserialize` builders skip it too. Not valid on a bit-field. |
-| `@accessor_skip` | No `get_<field>` or `set_<field>`. |
+| `@accessor_skip` | No `T_get_<field>` or `T_set_<field>`. |
 | `@ctor_skip` | No `T_new` parameter; the member is zero-initialised. |
 | `@to_string_skip` | A struct's `@to_string` leaves the member out. `@dump_skip` does the same and also hides it from `@dump`. |
 
 ## Accessors and Constructors
 
-`@getters`, `@setters` and `@accessors` publish one
-function per member. An optional string literal prefix names them
-`<prefix>_get_<field>`, which keeps two structs with a shared field name
-apart. `""` means no prefix.
+`@getters`, `@setters` and `@accessors` publish one function per member, named
+`<T>_get_<field>` and `<T>_set_<field>`, and the [methods](#methods) `get_<field>`
+and `set_<field>`. An optional string literal prefix goes in front of the
+function name, as for the other attributes.
 
 ```c
 @accessors
 struct Point { int x; int y; };
-// get_x, get_y, set_x, set_y
+// Point_get_x, Point_get_y, Point_set_x, Point_set_y
+// p.get_x(), p.set_x(5)
 
-@accessors("Size")
+@accessors("app")
 struct Size { int x; };
-// Size_get_x, Size_set_x
+// app_Size_get_x, app_Size_set_x; the methods are still get_x and set_x
 ```
 
 | Member | Getter | Setter |
@@ -351,7 +352,7 @@ a.to_json(buf, sizeof buf);      // Point_to_json(&a, buf, sizeof buf)
 
 A function that writes into its first argument keeps that order: `dst.clone(&src)` calls `T_clone(&dst, &src)`.
 
-The prefix names only the function: `@equals("app")` gives `app_T_equals` and the method `equals`. A method name already bound for the type, by another derive with a different prefix or by `[[cccc::method]]`, is the `method 'equals' is already defined for this type` error. Enum derives (`@bitflags`, an enum's `@to_string` and `@from_string`) add no methods.
+The prefix namespaces the exported C function only: `@equals("app")` gives `app_T_equals` and the method `equals`. A method name already bound for the type, by another derive with a different prefix or by `[[cccc::method]]`, is the `method 'equals' is already defined for this type` error. Enum derives (`@bitflags`, an enum's `@to_string` and `@from_string`) add no methods.
 
 ## Bundles
 

@@ -4,7 +4,7 @@
 
 #include <string.h>
 
-@serialize @deserialize @ctor @getters("Pt") @setters("Pt") typedef struct {
+@serialize @deserialize @ctor @getters @setters typedef struct {
     int x;
     int y;
 } Pt;

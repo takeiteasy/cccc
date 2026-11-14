@@ -58,7 +58,7 @@ struct Cell {
     Pt p = Pt.new(3, 4);
     AssertEq(p.get_x(), 3);
     p.set_x(5);
-    AssertEq(get_x(&p), 5);
+    AssertEq(Pt_get_x(&p), 5);
     p.set_y(9);
     AssertEq(p.get_y(), 9);
 }
