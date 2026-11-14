@@ -18,6 +18,9 @@ typedef struct Vec2 {
         return self->x + self->y;
     }
     static Vec2 origin(void);
+    static int defaulted(int a, int b @default(10)) {
+        return a + b;
+    }
 } Vec2;
 
 Vec2 Vec2_origin(void) {
@@ -122,6 +125,8 @@ int test_static_method_defaults_and_keys(void) {
         return 1;
     if (Plain.defaulted(1, .b = 2) != 3)
         return 2;
+    if (Vec2.defaulted(1) != 11 || Vec2.defaulted(1, .b = 2) != 3)
+        return 3;
     return 42;
 }
 

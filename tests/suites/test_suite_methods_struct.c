@@ -11,6 +11,10 @@ typedef struct Vec2 {
         return self->later() * 0 + self->len() * 2;
     }
     int later(Vec2 *self);
+    int scaled(Vec2 *self, int k @default(3)) {
+        return self->x * k;
+    }
+    int offset(const Vec2 *self, int d @default(5), int e @default(d * 2));
     int sum(const Vec2 *self, int k) {
         return self->x + self->y + k;
     }
@@ -29,6 +33,10 @@ typedef struct Vec2 {
 
 int Vec2_later(Vec2 *self) {
     return 1;
+}
+
+int Vec2_offset(const Vec2 *self, int d, int e) {
+    return self->x + d + e;
 }
 
 typedef struct {
@@ -117,6 +125,16 @@ int test_struct_method_no_layout_change(void) {
         return 1;
     Vec2 v = {1, 2};
     if (v.width() != sizeof(Vec2))
+        return 2;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_struct_method_parameter_defaults(void) {
+    Vec2 v = {4, 0};
+    if (v.scaled() != 12 || v.scaled(2) != 8 || v.scaled(.k = 5) != 20)
+        return 1;
+    if (v.offset() != 4 + 5 + 10 || v.offset(1) != 4 + 1 + 2)
         return 2;
     return 42;
 }

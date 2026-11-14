@@ -2425,6 +2425,39 @@ static Token *method_copy(VirtualMachine *vm, Token *t) {
     return copy;
 }
 
+// The token after the balanced `open`..`close` group starting at tok. Sets
+// *has_default when a token inside is `default`.
+static Token *skip_group_for_default(Token *tok, const char *open,
+                                     const char *close, bool *has_default) {
+    int depth = 0;
+    for (; tok->kind != TK_EOF; tok = tok->next) {
+        *has_default |= equal(tok, "default");
+        if (equal(tok, open))
+            depth++;
+        else if (equal(tok, close) && --depth == 0)
+            return tok->next;
+    }
+    return tok;
+}
+
+// The token after a `@default(...)` attribute at tok, or NULL when tok starts
+// something else. The attribute may also be spelled `[[default(...)]]` or
+// `__attribute__((default(...)))`.
+static Token *skip_param_default(Token *tok) {
+    bool   has_default = false;
+    Token *after;
+    if (equal(tok, "@") && equal(tok->next, "default") &&
+        equal(tok->next->next, "("))
+        return skip_group_for_default(tok->next->next, "(", ")", &has_default);
+    if (equal(tok, "[") && equal(tok->next, "["))
+        after = skip_group_for_default(tok, "[", "]", &has_default);
+    else if (equal(tok, "__attribute__") || equal(tok, "__attribute"))
+        after = skip_group_for_default(tok->next, "(", ")", &has_default);
+    else
+        return NULL;
+    return has_default ? after : NULL;
+}
+
 // The method as a file-scope declaration of `fname`, bound to `recv` by
 // [[cccc::method]]. A prototype ends after the parameter list; a bare `inline`
 // becomes `static inline` so the hoisted function links from a shared header.
@@ -2479,8 +2512,21 @@ static Token *method_decl(VirtualMachine *vm, PendingMethod *m,
             }
         }
     }
-    for (Token *t = params; t != stop; t = t->next)
+    // The prototype pass declared the parameter defaults; a definition
+    // repeating one is an error.
+    bool strip_defaults = !prototype && m->has_body;
+    int  depth          = 0;
+    for (Token *t = params; t != stop;) {
+        Token *after =
+            strip_defaults && depth > 0 ? skip_param_default(t) : NULL;
+        if (after) {
+            t = after;
+            continue;
+        }
+        depth += equal(t, "(") - equal(t, ")");
         cur = cur->next = method_copy(vm, t);
+        t               = t->next;
+    }
     if (prototype && m->has_body)
         cur = cur->next = method_token(vm, ";");
 
@@ -2548,7 +2594,6 @@ void run_pending_methods(VirtualMachine *vm) {
                                  m->is_static ? "static_" : "", recv, mname);
                 fname = arena_format(vm, "%s_%s", bname, mname);
             }
-            // TODO(#2076): a parameter @default is given by both passes.
             Token *chain = method_decl(vm, m, attr_text, fname, pass == 0);
             parse_file_scope_decls(vm, chain);
             if (m->operator_sym && pass == 0)

@@ -53,6 +53,7 @@ Vec2_len(&v);    // the same function, callable and addressable by name
 | Bodies | parsed after the declaration, so they can use `sizeof(T)`, members and methods defined later |
 | `static` | makes a [static method](#static-methods); linkage stays external |
 | `inline` | becomes `static inline`, so a struct in a shared header links |
+| Parameter defaults | `@default` on a parameter works as on a free function, on the declaration or the definition ([derive.md](derive.md#parameter-defaults)) |
 | Block scope | not allowed: `methods are only allowed in file-scope structs and unions` |
 | No name | `a struct with methods needs a tag or a typedef name` |
 

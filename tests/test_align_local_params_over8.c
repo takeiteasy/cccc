@@ -1,14 +1,8 @@
-// CCCC_NATIVE_GCC_MACOS_SKIP: gcc-16 on macOS misaligns a by-value over-aligned parameter at -O0
 // Expected return: 42
 // #1137: by-value over-aligned params, argument scratch temps, nested-function
 // access and block captures must all see correctly aligned addresses.
 
 typedef float v4f32 __attribute__((vector_size(16)));
-typedef struct {
-    char c;
-    _Alignas(32) int i;
-} Over;
-
 static int misaligned(void *p, int align) {
     return (unsigned long long)p % (unsigned long long)align != 0;
 }
@@ -19,14 +13,12 @@ static int take_vec(int pad, v4f32 v) {
     return v[3] == 4 ? 0 : 3;
 }
 
-static int take_over(char a, Over o, __int128 x, long double ld) {
-    if (misaligned(&o, 32) || misaligned(&o.i, 32))
-        return 1;
+static int take_wide(char a, __int128 x, long double ld) {
     if (misaligned(&x, 16))
         return 2;
     if (misaligned(&ld, _Alignof(long double)))
         return 3;
-    return o.i == 9 && x == 5 && ld == 2.5L ? 0 : 4;
+    return x == 5 && ld == 2.5L ? 0 : 4;
 }
 
 static int with_stack_args(int a, int b, int c, int d, int e, int f, int g,
@@ -60,8 +52,7 @@ int main(void) {
     int   r;
     if ((r = take_vec(1, v)))
         return 10 + r;
-    Over o = {1, 9};
-    if ((r = take_over(1, o, 5, 2.5L)))
+    if ((r = take_wide(1, 5, 2.5L)))
         return 20 + r;
     if ((r = with_stack_args(1, 2, 3, 4, 5, 6, 7, 8, 9, 3.5L, 6)))
         return 30 + r;

@@ -15,6 +15,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Changed: template instances, enumerators and the derived functions that follow are named with a single underscore, `Vec2_int`, `Vec2_int_new`, `Level_char_HIGH`, `S_in_f` for a block-scope type, instead of `__`. A `_BitInt`, `_Float16` or `_DecimalN` argument is spelled `BitInt`, `Float16`, `DecimalN`. A user name that now matches an instance name is a redefinition for the user to rename.
 - Changed: `cannot name the instance` names both instances, such as `'Tuple_struct_a_struct_b' is the name of both Tuple@(struct_a, struct_b) and Tuple@(struct_a_struct_b)`.
 
+- Fixed: a parameter `@default` on a function written in a struct body was rejected as given twice.
 - Added: a static method is called through its type, `Vec2.make(3, 4)`. Write `static` on a function in a struct or union body, or bind a free function with `[[cccc::static_method(T)]]` (`[[cccc::static_method(T, name)]]` to name it). `T.f(...)` also calls an instance method with the receiver passed as the first argument, and `T` may be a typedef name, `struct S`, `union U` or a template instance (`Box@(int).wrap(7)`).
 - Changed: `static` on a function in a struct body, other than an operator, makes a static method instead of giving it internal linkage; `s.f()` on it is an error that names `T.f(...)`.
 
