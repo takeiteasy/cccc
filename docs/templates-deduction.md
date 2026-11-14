@@ -57,6 +57,32 @@ double d = @inst(int) widen(1, 2.0);    // T is int, U is double
 double e = @inst(double) maxof(1, 2.5); // T is double; 1 converts
 ```
 
+## Parameter packs
+
+A function pack, `Ts... xs`, takes one type per argument that the fixed parameters leave over.
+
+```c
+@template(Ts...) int sum(Ts... xs) { return (xs + ... + 0); }
+@template(T, Ts...) int lead(T a, Ts... rest) { return a * 100 + (rest + ... + 0); }
+@template(Ts...) int tail(Ts... xs, int last) { return last + (xs + ... + 0); }
+
+sum(40, 2L);        // sum@(int, long)
+sum();              // sum@(): an empty pack
+lead(5, 1, 2);      // T is int, Ts is (int, int)
+tail(1, 2, 3);      // Ts is (int, int); 3 is `last`
+```
+
+The pack may come after fixed parameters or before them. An element may be a pattern, as in `Ts *... ps`: each argument must match it, and the pack holds what `Ts` matched.
+
+```c
+@template(Ts...) int derefs(Ts *... ps) { return (*ps + ... + 0); }
+
+int a = 5; char b = 6;
+derefs(&a, &b);     // Ts is (int, char)
+```
+
+Each argument is typed as for any other parameter (arrays decay, top-level qualifiers drop). A call that names its arguments with `@inst` gives the whole list, pack included: `@inst(int) sum(5)` is `sum@(int)`.
+
 ## Defaults
 
 A deduced value wins over a default. A default fills a parameter the arguments do not give.
@@ -77,7 +103,9 @@ A defaulted parameter that is skipped while a later one is deduced is an error: 
 | A parameter that appears only in the return type | `template parameter 'U' is not deduced by the arguments`; name it with `@inst` |
 | An array length through `T a[N]` | The parameter is `T *`, so `N` is not deduced; write `T (*p)[N]` or an `Arr` instance |
 | A float or pointer constant | Name it with `@inst` |
-| A trailing parameter pack (`Ts... xs`) | `cannot deduce the arguments of variadic template 'f'`; use `@inst` |
+| A pack before C `...` (`Ts... xs, ...`) | `cannot deduce the pack of 'f' before '...'`; use `@inst` |
+| A pack that is not a function parameter, or only in the return type | `template parameter 'Ts' is not deduced by the arguments` or `cannot deduce the arguments of variadic template 'f'`; use `@inst` |
+| A defaulted parameter before a deduced pack | `template parameter 'U' has a default but a later parameter is deduced`; give it in `@inst` |
 | A keyed (`.b = 2`) argument or a splice placeholder | Positional arguments only; use `@inst` |
 | A shape that does not fit | `cannot deduce the arguments of 'f': argument 1 ('int') does not match its parameter` |
 

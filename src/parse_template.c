@@ -3503,7 +3503,8 @@ static void pattern_vars(VirtualMachine *vm, Template *t, bool integers_only) {
 
 // The function type of `t` as a pattern: its parameter types name the
 // placeholders.
-static Type *pattern_signature(VirtualMachine *vm, Template *t) {
+static Type *pattern_signature(VirtualMachine *vm, Template *t,
+                               Token *skip_from, Token *skip_to) {
     Token *p = t->marker_end;
     for (;;) {
         Token *q = skip_attr_groups(p);
@@ -3515,16 +3516,25 @@ static Type *pattern_signature(VirtualMachine *vm, Template *t) {
             break;
     }
     vm->compiler.tmpl_pattern = t;
+    Token  head               = {};
+    Token *cur                = &head;
+    for (Token *q = p; q != t->body_open; q = q->next) {
+        if (q == skip_from)
+            q = skip_to;
+        if (q == t->body_open)
+            break;
+        cur = cur->next = copy_tok(vm, q);
+    }
+    cur->next = synth_token(vm, "");
     Token   *rest;
-    Token   *toks = clone_range(vm, p, t->body_open);
-    Type    *ty   = declspec(vm, &rest, toks, NULL);
+    Type    *ty = declspec(vm, &rest, head.next, NULL);
     DeclName dn;
     return declarator(vm, &rest, rest, ty, &dn);
 }
 
 static void operator_body(VirtualMachine *vm, Template *t) {
     pattern_vars(vm, t, true);
-    Type *ty = pattern_signature(vm, t);
+    Type *ty = pattern_signature(vm, t, NULL, NULL);
     int   n  = 0;
     for (Type *prm = ty->kind == TY_FUNC ? ty->params : NULL; prm;
          prm       = prm->next, n++) {
@@ -3703,19 +3713,88 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
 
 // ---- deduction at a call --------------------------------------------------
 
+static Token *pattern_arg_end(Token *a);
+static int pattern_pack_var(const Template *pt, Type *ty);
+
+// The function parameter `Pattern... name` of `t`: sets `*from`/`*to` to the
+// tokens to drop from the signature (the item and one adjoining comma),
+// `*dots` to its `...`, and returns its position among the parameters; -1 for
+// none. A pack before C `...` is an error, as its end is ambiguous.
+static int call_pack_item(VirtualMachine *vm, Template *t, Token **from,
+                          Token **to, Token **dots, Token **first) {
+    Token *open = t->name_tok->next;
+    if (!equal(open, "("))
+        return -1;
+    int    at   = 0;
+    Token *prev = NULL;
+    for (Token *a = open->next; !equal(a, ")"); at++) {
+        Token *e = pattern_arg_end(a);
+        Token *d = NULL;
+        for (Token *q = a, *last = NULL; q != e; last = q, q = q->next)
+            if (equal(q, "...") && last && q->next != e && q->next->next == e &&
+                q->next->kind == TK_IDENT)
+                d = q;
+        if (d) {
+            if (equal(e, ",") && equal(e->next, "...") &&
+                equal(e->next->next, ")"))
+                error_tok(vm, d,
+                          "cannot deduce the pack of '%s' before '...'; write "
+                          "'@inst(...)'",
+                          t->name);
+            *first = a;
+            *dots  = d;
+            *from  = prev ? prev : a;
+            *to    = prev ? e : (equal(e, ",") ? e->next : e);
+            return at;
+        }
+        prev = e;
+        a    = equal(e, ",") ? e->next : e;
+    }
+    return -1;
+}
+
 static void call_body(VirtualMachine *vm, Template *t) {
     pattern_vars(vm, t, false);
-    Type *ty = pattern_signature(vm, t);
+    Token *from = NULL, *to = NULL, *dots = NULL, *first = NULL;
+    int    pack_at = tmpl_has_pack(t)
+                         ? call_pack_item(vm, t, &from, &to, &dots, &first)
+                         : -1;
+    Type  *ty      = pattern_signature(vm, t, from, to);
     if (ty->kind != TY_FUNC)
-        error_tok(vm, t->name_tok, "'%s' is not a function", t->name);
+        error_tok(vm, t->name_tok,
+                  tmpl_has_pack(t)
+                      ? "cannot deduce the arguments of variadic template "
+                        "'%s'; write '@inst(...)'"
+                      : "'%s' is not a function",
+                  t->name);
+    t->call_pack_at  = pack_at;
+    t->call_pack_pat = NULL;
+    if (pack_at >= 0) {
+        Token *rest;
+        t->pat_elem = true;
+        Type *elem  = typename(vm, &rest, clone_range(vm, first, dots));
+        t->pat_elem = false;
+        if (!pattern_has_var(t, elem) || pattern_pack_var(t, elem) < 0)
+            error_tok(vm, first,
+                      "the pattern before '...' names no pack "
+                      "variable");
+        t->call_pack_pat = elem;
+    }
     int n = 0;
     for (Type *prm = ty->params; prm; prm = prm->next)
         n++;
     t->call_pat =
         arena_alloc(&vm->compiler.parser_arena, sizeof(Type *) * (n + 1));
     n = 0;
-    for (Type *prm = ty->params; prm; prm = prm->next)
-        t->call_pat[n++] = unqualified(vm, prm);
+    for (Type *prm = ty->params; prm; prm = prm->next) {
+        t->call_pat[n] = unqualified(vm, prm);
+        if (tmpl_has_pack(t) && pattern_pack_var(t, t->call_pat[n]) >= 0)
+            error_tok(vm, t->name_tok,
+                      "parameter pack '%.*s' must be expanded with '...'",
+                      (int)t->params[t->nparams - 1].name->len,
+                      t->params[t->nparams - 1].name->loc);
+        n++;
+    }
     t->call_n        = n;
     t->call_variadic = ty->is_variadic;
     t->call_ready    = true;
@@ -3750,19 +3829,39 @@ static bool pattern_explicit(const Template *t, Type *pat, int nexplicit) {
     return true;
 }
 
+// Matches call argument `a` (number `i`, from 1) against parameter pattern
+// `pat`, reporting a mismatch.
+static void deduce_arg(Matcher *m, Template *t, Type *pat, Node *a, int i,
+                       int nexplicit) {
+    VirtualMachine *vm = m->vm;
+    if (!pattern_has_var(t, pat) || pattern_explicit(t, pat, nexplicit) ||
+        a->ty->kind == TY_ERROR)
+        return;
+    Type *aty = decayed_arg_type(vm, a->ty);
+    if (match_type(m, pat, aty))
+        return;
+    if (m->conflict)
+        error_tok(vm, a->tok,
+                  "cannot deduce '%.*s' for '%s': argument %d is '%s', but "
+                  "'%s' was deduced before",
+                  (int)t->params[m->conflict_var].name->len,
+                  t->params[m->conflict_var].name->loc, t->name, i,
+                  spelled(vm, m->conflict_b, m->site),
+                  spelled(vm, m->conflict_a, m->site));
+    error_tok(vm, a->tok,
+              "cannot deduce the arguments of '%s': argument %d ('%s') "
+              "does not match its parameter",
+              t->name, i, spelled(vm, aty, m->site));
+}
+
 // The instance of function template `t` that the call with argument nodes
 // `args` (a list) names. The first `nexplicit` parameters are given in `expl`;
-// the rest come from the argument types, then from their defaults.
+// the rest come from the argument types, then from their defaults. A pack
+// parameter takes the arguments between the fixed ones, one type each.
 TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
                                  const TemplateArg *expl, int nexplicit,
                                  Node *args, Token *site) {
-    if (tmpl_has_pack(t))
-        // TODO(#2080): deduce a trailing parameter pack from the remaining
-        // arguments
-        error_tok(vm, site,
-                  "cannot deduce the arguments of variadic template '%s'; "
-                  "write '@inst(...)'",
-                  t->name);
+    bool has_pack = tmpl_has_pack(t);
     if (t->nparams > TMPL_MAX_ARGS)
         error_tok(vm, site,
                   "a template called without '@inst' takes at most "
@@ -3774,40 +3873,79 @@ TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
     if (!t->call_ready)
         in_pattern_scope(vm, t, call_body);
 
+    int nargs = 0;
+    for (Node *a = args; a; a = a->next)
+        nargs++;
+    Node **av =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(Node *) * (nargs + 1));
+    nargs = 0;
+    for (Node *a = args; a; a = a->next)
+        av[nargs++] = a;
+
+    // The pack takes `npack` arguments from `before`; the fixed parameters
+    // after it take the last ones.
+    bool    packed = has_pack && t->call_pack_at >= 0;
+    int     before = packed ? t->call_pack_at : t->call_n;
+    int     npack  = packed && nargs > t->call_n ? nargs - t->call_n : 0;
+
     Deduced d = {};
     Matcher m = {.vm = vm, .pt = t, .d = &d, .site = site, .call = true};
     for (int k = 0; k < nexplicit; k++)
         if (!t->params[k].type_start)
             d.ty[k] = expl[k].ty;
 
-    int i = 1;
-    for (Node *a = args; a && i <= t->call_n; a = a->next, i++) {
-        Type *pat = t->call_pat[i - 1];
-        if (!pattern_has_var(t, pat) || pattern_explicit(t, pat, nexplicit) ||
-            a->ty->kind == TY_ERROR)
-            continue;
-        Type *aty = decayed_arg_type(vm, a->ty);
-        if (match_type(&m, pat, aty))
-            continue;
-        if (m.conflict)
-            error_tok(vm, a->tok,
-                      "cannot deduce '%.*s' for '%s': argument %d is '%s', but "
-                      "'%s' was deduced before",
-                      (int)t->params[m.conflict_var].name->len,
-                      t->params[m.conflict_var].name->loc, t->name, i,
-                      spelled(vm, m.conflict_b, site),
-                      spelled(vm, m.conflict_a, site));
-        error_tok(vm, a->tok,
-                  "cannot deduce the arguments of '%s': argument %d ('%s') "
-                  "does not match its parameter",
-                  t->name, i, spelled(vm, aty, site));
+    for (int i = 0; i < before && i < nargs; i++)
+        deduce_arg(&m, t, t->call_pat[i], av[i], i + 1, nexplicit);
+    if (packed && nargs >= t->call_n)
+        for (int p = before; p < t->call_n; p++) {
+            int i = p + npack;
+            deduce_arg(&m, t, t->call_pat[p], av[i], i + 1, nexplicit);
+        }
+
+    // Each pack argument matches the element pattern; a variable it shares
+    // with another parameter must agree across the elements.
+    TemplateArg *elems = NULL;
+    if (packed) {
+        int pk = t->nparams - 1;
+        elems  = arena_alloc(&vm->compiler.parser_arena,
+                             sizeof(TemplateArg) * (npack + 1));
+        memset(elems, 0, sizeof(TemplateArg) * (npack + 1));
+        for (int q = 0; q < npack; q++) {
+            Node *a = av[before + q];
+            int   i = before + q + 1;
+            if (a->ty->kind == TY_ERROR)
+                error_tok(vm, a->tok,
+                          "cannot deduce the arguments of '%s': argument %d "
+                          "has no valid type",
+                          t->name, i);
+            Type *aty = decayed_arg_type(vm, a->ty);
+            d.ty[pk]  = NULL;
+            if (!match_type(&m, t->call_pack_pat, aty)) {
+                if (m.conflict)
+                    error_tok(vm, a->tok,
+                              "cannot deduce '%.*s' for '%s': argument %d is "
+                              "'%s', but '%s' was deduced before",
+                              (int)t->params[m.conflict_var].name->len,
+                              t->params[m.conflict_var].name->loc, t->name, i,
+                              spelled(vm, m.conflict_b, site),
+                              spelled(vm, m.conflict_a, site));
+                error_tok(vm, a->tok,
+                          "cannot deduce the arguments of '%s': argument %d "
+                          "('%s') does not match its parameter",
+                          t->name, i, spelled(vm, aty, site));
+            }
+            elems[q].ty = strip_arg_bounds(vm, d.ty[pk]);
+        }
+        d.ty[pk] = NULL;
     }
 
-    TemplateArg out[TMPL_MAX_ARGS];
-    bool        set[TMPL_MAX_ARGS] = {};
-    memset(out, 0, sizeof(out));
-    int given = 0;
-    for (int k = 0; k < t->nparams; k++) {
+    int          nfixed = has_pack ? t->nparams - 1 : t->nparams;
+    TemplateArg  stack[TMPL_STACK_PARAMS];
+    TemplateArg *out = alloc_args(vm, stack, nfixed + npack);
+    memset(out, 0, sizeof(TemplateArg) * (nfixed + npack));
+    bool set[TMPL_MAX_ARGS] = {};
+    int  given              = 0;
+    for (int k = 0; k < nfixed; k++) {
         TemplateParam *p = &t->params[k];
         if (k < nexplicit) {
             out[k] = expl[k];
@@ -3829,12 +3967,26 @@ TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
                       "arguments",
                       (int)p->name->len, p->name->loc);
     }
+    if (has_pack && !packed)
+        error_tok(vm, site,
+                  "template parameter '%.*s' is not deduced by the arguments",
+                  (int)t->params[nfixed].name->len,
+                  t->params[nfixed].name->loc);
     for (int k = 0; k < given; k++)
         if (!set[k])
             error_tok(vm, site,
                       "template parameter '%.*s' has a default but a later "
                       "parameter is deduced; give it in '@inst(...)'",
                       (int)t->params[k].name->len, t->params[k].name->loc);
+    if (npack) {
+        for (int k = given; k < nfixed; k++)
+            error_tok(vm, site,
+                      "template parameter '%.*s' has a default but a later "
+                      "parameter is deduced; give it in '@inst(...)'",
+                      (int)t->params[k].name->len, t->params[k].name->loc);
+        memcpy(out + nfixed, elems, sizeof(TemplateArg) * npack);
+        given = nfixed + npack;
+    }
     return instantiate_template(vm, t, out, given, site);
 }
 

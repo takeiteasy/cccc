@@ -4988,6 +4988,15 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             cc_comptime_resolve_var(vm, tok))
             sc = find_var(vm, tok);
 
+        // An empty pack's instance is named like its template, which a bare
+        // call must still reach.
+        if (sc && sc->var && sc->var->is_tmpl_inst &&
+            vm->compiler.saw_templates && equal(tok->next, "(")) {
+            Template *own = cc_find_template(vm, tok);
+            if (own && own->kind == TMPL_FUNC)
+                sc = NULL;
+        }
+
         if (sc && sc->var)
             mark_function_referenced(vm, sc->var);
 

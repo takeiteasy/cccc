@@ -22,8 +22,23 @@
 @template(T) T broken(T a) {
     return a + missing_name;
 }
-@template(Ts...) int count_of(Ts... xs) {
+@template(Ts...) int derefs(Ts *...ps) {
+    return 0;
+}
+@template(Ts...) int varargs_after(int n, Ts... xs, ...) {
+    return n;
+}
+@template(T, U = T, Ts...) int default_before(T a, Ts... xs) {
+    return 0;
+}
+@template(Ts...) int unexpanded(Ts x) {
+    return 0;
+}
+@template(Ts...) int no_pack_parameter(void) {
     return sizeof...(Ts);
+}
+@template(Ts...) Ts...[0] indexed_return(Ts... xs) {
+    return xs...[0];
 }
 @template(T) int vec_len(@inst(T) Vec v) {
     return 2;
@@ -56,10 +71,39 @@ void test_scalar_does_not_fit_instance_pattern(void) {
     vec_len(5);
 }
 
+[[cccc::test(error = "argument 2 ('int') does not match its parameter")]]
+void test_pack_element_does_not_fit_its_pattern(void) {
+    int a = 0;
+    derefs(&a, 5);
+}
+
+[[cccc::test(error = "cannot deduce the pack of 'varargs_after' before '...'")]]
+void test_pack_before_c_varargs(void) {
+    varargs_after(1, 2, 3);
+}
+
+[[cccc::test(error = "template parameter 'U' has a default but a later "
+                     "parameter is deduced")]]
+void test_default_before_a_deduced_pack(void) {
+    default_before(1, 2.0);
+}
+
+[[cccc::test(error = "parameter pack 'Ts' must be expanded with '...'")]]
+void test_pack_without_expansion(void) {
+    unexpanded(1);
+}
+
+[[cccc::test(error = "template parameter 'Ts' is not deduced by the "
+                     "arguments")]]
+void test_pack_with_no_parameter_for_it(void) {
+    no_pack_parameter();
+}
+
 [[cccc::test(
-    error = "cannot deduce the arguments of variadic template 'count_of'")]]
-void test_pack_template_is_not_deduced(void) {
-    count_of(1, 2);
+    error =
+        "cannot deduce the arguments of variadic template 'indexed_return'")]]
+void test_pack_in_the_return_type(void) {
+    indexed_return(1, 2);
 }
 
 [[cccc::test(error = "takes positional arguments")]]

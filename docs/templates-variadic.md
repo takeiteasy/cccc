@@ -67,6 +67,8 @@ A pattern is the list item before `...`: everything since the last comma, semico
 
 A declared pack has the same length as the template's pack, and expands the same way in the body (`rest...`, `rest...[0]`, `sizeof...(rest)`).
 
+A call that names no `@inst` deduces the pack from its arguments, one type per argument: `sum(40, 2L)` is `sum@(int, long)`. See [deduction](templates-deduction.md#parameter-packs).
+
 ### Patterns
 
 ```c

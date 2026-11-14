@@ -4230,6 +4230,10 @@ typedef struct Template {
     bool          call_variadic;
     int           call_n;
     struct Type **call_pat;
+    // A pack parameter among them (`Ts... xs`, not counted in call_n): its
+    // position and element pattern; call_pack_at is -1 when there is none.
+    int          call_pack_at;
+    struct Type *call_pack_pat;
 } Template;
 
 // A template definition found by the comptime index, kept so a file-scope call
