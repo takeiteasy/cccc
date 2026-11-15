@@ -37,6 +37,21 @@
 @template(Ts...) size_t bytes(Ts... xs) {
     return (sizeof(xs) + ... + 0);
 }
+@template(Ts...) int elem_sizes(Ts... xs) {
+    return (sizeof(Ts) + ...);
+}
+@template(T, Ts...) int lead_sizes(T a, Ts... rest) {
+    return (sizeof(Ts) + ... + 0);
+}
+@template(Ts...) int tail_sizes(Ts... xs, int last) {
+    return (sizeof(Ts) + ... + 0) + last;
+}
+@template(Ts...) int pack_only_in_args(void) {
+    return sizeof...(Ts);
+}
+@template(Ts...) int varargs_after(int n, Ts... xs, ...) {
+    return n + sizeof...(Ts);
+}
 @template(Ts...) Ts...[0] first(Ts... xs) {
     return xs...[0];
 }
@@ -140,4 +155,43 @@ void test_return_type_names_the_pack(void) {
 [[cccc::test]]
 void test_function_pointer_return_type(void) {
     AssertTrue(identity_fn(1) == NULL);
+}
+
+[[cccc::test]]
+void test_inst_names_leading_pack_elements(void) {
+    AssertEq(@inst(int) sum(5, 2.0), 7);
+    AssertEq(@inst(char) elem_sizes(1, 2L), 1 + (int)sizeof(long));
+    AssertEq(@inst(double) elem_sizes(1, 2),
+             (int)sizeof(double) + (int)sizeof(int));
+    AssertTrue((void *)sum_int_double != NULL);
+}
+
+[[cccc::test]]
+void test_inst_naming_the_whole_pack_is_the_same_instance(void) {
+    AssertEq(@inst(int) sum(5), 5);
+    AssertEq(@inst(int, long) count(1, 2), 2);
+    AssertEq(@inst(int, int) sum(40, 2), 42);
+    AssertEq(@inst(int, long) count(1, 2, 3, 4), 4);
+}
+
+[[cccc::test]]
+void test_inst_names_fixed_parameter_then_pack_elements(void) {
+    AssertEq(@inst(int) lead(5, 1, 2), 503);
+    AssertEq(@inst(int) lead_sizes(5, 1, 2L),
+             (int)sizeof(int) + (int)sizeof(long));
+    AssertEq(@inst(int, char) lead_sizes(5, 1, 2L), 1 + (int)sizeof(long));
+    AssertEq(@inst(int, char, short) lead_sizes(5, 1, 2L), 1 + 2);
+}
+
+[[cccc::test]]
+void test_inst_names_elements_before_fixed_parameters(void) {
+    AssertEq(@inst(long) tail_sizes(1, 2, 3),
+             (int)sizeof(long) + (int)sizeof(int) + 3);
+    AssertEq(@inst(long) tail(1, 2, 3), 6);
+}
+
+[[cccc::test]]
+void test_inst_without_a_pack_parameter_is_the_whole_list(void) {
+    AssertEq(@inst(int, char) pack_only_in_args(), 2);
+    AssertEq(@inst(int) varargs_after(1, 2), 2);
 }

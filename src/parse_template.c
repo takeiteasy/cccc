@@ -3733,9 +3733,11 @@ static int pattern_pack_var(const Template *pt, Type *ty);
 // The function parameter `Pattern... name` of `t`: sets `*from`/`*to` to the
 // tokens to drop from the signature (the item and one adjoining comma),
 // `*dots` to its `...`, and returns its position among the parameters; -1 for
-// none. A pack before C `...` is an error, as its end is ambiguous.
-static int call_pack_item(VirtualMachine *vm, Template *t, Token **from,
-                          Token **to, Token **dots, Token **first) {
+// none. A pack before C `...` is an error, as its end is ambiguous; with
+// `!report` it counts as none.
+static int call_pack_item(VirtualMachine *vm, Template *t, bool report,
+                          Token **from, Token **to, Token **dots,
+                          Token **first) {
     Token *open = t->name_tok->next;
     if (!equal(open, "("))
         return -1;
@@ -3750,11 +3752,14 @@ static int call_pack_item(VirtualMachine *vm, Template *t, Token **from,
                 d = q;
         if (d) {
             if (equal(e, ",") && equal(e->next, "...") &&
-                equal(e->next->next, ")"))
+                equal(e->next->next, ")")) {
+                if (!report)
+                    return -1;
                 error_tok(vm, d,
                           "cannot deduce the pack of '%s' before '...'; write "
                           "'@inst(...)'",
                           t->name);
+            }
             *first = a;
             *dots  = d;
             *from  = prev ? prev : a;
@@ -3770,9 +3775,9 @@ static int call_pack_item(VirtualMachine *vm, Template *t, Token **from,
 static void call_body(VirtualMachine *vm, Template *t) {
     pattern_vars(vm, t, false);
     Token *from = NULL, *to = NULL, *dots = NULL, *first = NULL;
-    int    pack_at = tmpl_has_pack(t)
-                         ? call_pack_item(vm, t, &from, &to, &dots, &first)
-                         : -1;
+    int pack_at = tmpl_has_pack(t)
+                      ? call_pack_item(vm, t, true, &from, &to, &dots, &first)
+                      : -1;
     Type  *ty      = pattern_signature(vm, t, true, from, to);
     if (ty->kind != TY_FUNC)
         error_tok(vm, t->name_tok,
@@ -3881,7 +3886,7 @@ TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
                   "a template called without '@inst' takes at most "
                   "%d parameters",
                   TMPL_MAX_ARGS);
-    if (nexplicit > t->nparams)
+    if (!has_pack && nexplicit > t->nparams)
         error_tok(vm, site, "template '%s' takes %d argument%s, %d given",
                   t->name, t->nparams, t->nparams == 1 ? "" : "s", nexplicit);
     if (!t->call_ready)
@@ -3896,24 +3901,30 @@ TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
     for (Node *a = args; a; a = a->next)
         av[nargs++] = a;
 
-    // The pack takes `npack` arguments from `before`; the fixed parameters
-    // after it take the last ones.
-    bool    packed = has_pack && t->call_pack_at >= 0;
-    int     before = packed ? t->call_pack_at : t->call_n;
-    int     npack  = packed && nargs > t->call_n ? nargs - t->call_n : 0;
+    // The pack takes `actual` arguments from `before`; the fixed parameters
+    // after it take the last ones. Elements the call names (`kexp` of them,
+    // after the fixed parameters it names) are given, so the pack is as long
+    // as the longer of the two.
+    bool    packed      = has_pack && t->call_pack_at >= 0;
+    int     nfixed      = has_pack ? t->nparams - 1 : t->nparams;
+    int     nfixed_expl = nexplicit < nfixed ? nexplicit : nfixed;
+    int     kexp        = packed ? nexplicit - nfixed_expl : 0;
+    int     before      = packed ? t->call_pack_at : t->call_n;
+    int     actual      = packed && nargs > t->call_n ? nargs - t->call_n : 0;
+    int     npack       = actual > kexp ? actual : kexp;
 
     Deduced d = {};
     Matcher m = {.vm = vm, .pt = t, .d = &d, .site = site, .call = true};
-    for (int k = 0; k < nexplicit; k++)
+    for (int k = 0; k < nfixed_expl; k++)
         if (!t->params[k].type_start)
             d.ty[k] = expl[k].ty;
 
     for (int i = 0; i < before && i < nargs; i++)
-        deduce_arg(&m, t, t->call_pat[i], av[i], i + 1, nexplicit);
+        deduce_arg(&m, t, t->call_pat[i], av[i], i + 1, nfixed_expl);
     if (packed && nargs >= t->call_n)
         for (int p = before; p < t->call_n; p++) {
-            int i = p + npack;
-            deduce_arg(&m, t, t->call_pat[p], av[i], i + 1, nexplicit);
+            int i = p + actual;
+            deduce_arg(&m, t, t->call_pat[p], av[i], i + 1, nfixed_expl);
         }
 
     // Each pack argument matches the element pattern; a variable it shares
@@ -3924,7 +3935,9 @@ TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
         elems  = arena_alloc(&vm->compiler.parser_arena,
                              sizeof(TemplateArg) * (npack + 1));
         memset(elems, 0, sizeof(TemplateArg) * (npack + 1));
-        for (int q = 0; q < npack; q++) {
+        for (int q = 0; q < kexp; q++)
+            elems[q] = expl[nfixed + q];
+        for (int q = kexp; q < actual; q++) {
             Node *a = av[before + q];
             int   i = before + q + 1;
             if (a->ty->kind == TY_ERROR)
@@ -3953,7 +3966,6 @@ TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
         d.ty[pk] = NULL;
     }
 
-    int          nfixed = has_pack ? t->nparams - 1 : t->nparams;
     TemplateArg  stack[TMPL_STACK_PARAMS];
     TemplateArg *out = alloc_args(vm, stack, nfixed + npack);
     memset(out, 0, sizeof(TemplateArg) * (nfixed + npack));
@@ -4005,7 +4017,9 @@ TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
 }
 
 // `__cccc_inst ( Name {, Arg} )` at `tok` before a `(`, naming a function
-// template and fewer arguments than it requires: the call deduces the rest.
+// template and fewer arguments than it requires: the call deduces the rest. A
+// template with a pack parameter takes the arguments as a prefix: the fixed
+// template parameters, then the first elements of the pack.
 // Parses the arguments into `out` (room for TMPL_MAX_ARGS) and returns the
 // template; NULL, consuming nothing, for any other `@inst`.
 Template *cc_parse_partial_inst(VirtualMachine *vm, Token **rest, Token *tok,
@@ -4013,14 +4027,20 @@ Template *cc_parse_partial_inst(VirtualMachine *vm, Token **rest, Token *tok,
     if (!equal(tok->next, "("))
         return NULL;
     Template *t = cc_find_template(vm, tok->next->next);
-    if (!t || t->kind != TMPL_FUNC || tmpl_has_pack(t))
+    if (!t || t->kind != TMPL_FUNC)
         return NULL;
+    bool has_pack = tmpl_has_pack(t);
+    if (has_pack) {
+        Token *from, *to, *dots, *first;
+        if (call_pack_item(vm, t, false, &from, &to, &dots, &first) < 0)
+            return NULL;
+    }
     int required = t->nparams;
     while (required > 0 && t->params[required - 1].def)
         required--;
     Token *args  = tok->next->next->next;
     int    given = count_inst_args(args);
-    if (given >= required || given > TMPL_MAX_ARGS)
+    if (given > TMPL_MAX_ARGS || (!has_pack && given >= required))
         return NULL;
     Token *close = tok->next;
     for (int depth = 0; close->kind != TK_EOF;) {

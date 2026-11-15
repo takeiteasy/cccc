@@ -22,6 +22,9 @@
 @template(T) T broken(T a) {
     return a + missing_name;
 }
+@template(Ts...) int sum(Ts... xs) {
+    return (xs + ... + 0);
+}
 @template(Ts...) int derefs(Ts *...ps) {
     return 0;
 }
@@ -94,6 +97,11 @@ void test_pack_without_expansion(void) {
                      "arguments")]]
 void test_pack_with_no_parameter_for_it(void) {
     no_pack_parameter();
+}
+
+[[cccc::test(error = "too few arguments")]]
+void test_more_pack_elements_named_than_arguments(void) {
+    int x = @inst(int, long) sum(5);
 }
 
 [[cccc::test(error = "takes positional arguments")]]

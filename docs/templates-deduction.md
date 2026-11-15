@@ -83,7 +83,15 @@ derefs(&a, &b);     // Ts is (int, char)
 
 The return type takes no part in deduction, so it may name the pack: `@template(Ts...) Ts...[0] first(Ts... xs)` called as `first(42, 2.0)` returns an `int`.
 
-Each argument is typed as for any other parameter (arrays decay, top-level qualifiers drop). A call that names its arguments with `@inst` gives the whole list, pack included: `@inst(int) sum(5)` is `sum@(int)`.
+Each argument is typed as for any other parameter (arrays decay, top-level qualifiers drop). `@inst` names the leading template arguments, the first pack elements included, and the call deduces the rest. A named element takes conversions, as a named parameter does.
+
+```c
+sum(5, 2.0);                // sum@(int, double)
+@inst(double) sum(5, 2);    // sum@(double, int): 5 converts
+@inst(int) lead(5, 1, 2);   // T is int, Ts is (int, int)
+```
+
+A template with no pack among its function parameters, or one before C `...`, takes the whole list: `@inst(int, char) f()`.
 
 ## Defaults
 
