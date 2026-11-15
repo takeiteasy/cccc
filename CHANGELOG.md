@@ -9,6 +9,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 - Added: a function template called by name deduces its template arguments from the argument types, so `maxof(40, 42)` is the instance `@inst(int) maxof(40, 42)` names. Arrays and functions decay, top-level qualifiers drop, `const T *` takes a plain pointer, and `Vec@(T)`, `Arr@(T, N)`, `T (*)[N]` and function pointer parameters bind their variables. `@inst(int) f(x, y)` names the leading arguments and deduces the rest. A conflict (`maxof(1, 2.0)`), and a parameter the arguments do not give, are errors that say so.
 - Added: a function template's parameter pack is deduced from a call's arguments, one type per argument, so `sum(40, 2L)` is the instance `sum@(int, long)` and `tail(1, 2, 3)` binds `Ts` to `(int, int)` before the fixed `last`. A pack element pattern such as `Ts *... ps` must match each argument. A pack before C `...` and a defaulted parameter before a deduced pack are errors that say so.
+- Fixed: a function template whose return type names its pack, such as `Ts...[0] first(Ts... xs)`, is deduced at a call; deduction reads only the parameter list.
 
 ## [0.35.0] - 2026-11-14
 

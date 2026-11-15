@@ -37,6 +37,12 @@
 @template(Ts...) size_t bytes(Ts... xs) {
     return (sizeof(xs) + ... + 0);
 }
+@template(Ts...) Ts...[0] first(Ts... xs) {
+    return xs...[0];
+}
+@template(T) T (*identity_fn(T x))(T) {
+    return NULL;
+}
 
 [[cccc::test]]
 void test_pack_takes_every_argument(void) {
@@ -122,4 +128,16 @@ void test_more_than_sixteen_arguments(void) {
 [[cccc::test]]
 void test_deduced_call_inside_a_template(void) {
     AssertEq(forward(40, 2), 42);
+}
+
+[[cccc::test]]
+void test_return_type_names_the_pack(void) {
+    AssertEq(first(42, 2.0), 42);
+    AssertEq(first(2.5, 1), 2.5);
+    AssertTrue((void *)first_int_double != NULL);
+}
+
+[[cccc::test]]
+void test_function_pointer_return_type(void) {
+    AssertTrue(identity_fn(1) == NULL);
 }

@@ -37,9 +37,6 @@
 @template(Ts...) int no_pack_parameter(void) {
     return sizeof...(Ts);
 }
-@template(Ts...) Ts...[0] indexed_return(Ts... xs) {
-    return xs...[0];
-}
 @template(T) int vec_len(@inst(T) Vec v) {
     return 2;
 }
@@ -97,13 +94,6 @@ void test_pack_without_expansion(void) {
                      "arguments")]]
 void test_pack_with_no_parameter_for_it(void) {
     no_pack_parameter();
-}
-
-[[cccc::test(
-    error =
-        "cannot deduce the arguments of variadic template 'indexed_return'")]]
-void test_pack_in_the_return_type(void) {
-    indexed_return(1, 2);
 }
 
 [[cccc::test(error = "takes positional arguments")]]

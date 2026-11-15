@@ -81,6 +81,8 @@ int a = 5; char b = 6;
 derefs(&a, &b);     // Ts is (int, char)
 ```
 
+The return type takes no part in deduction, so it may name the pack: `@template(Ts...) Ts...[0] first(Ts... xs)` called as `first(42, 2.0)` returns an `int`.
+
 Each argument is typed as for any other parameter (arrays decay, top-level qualifiers drop). A call that names its arguments with `@inst` gives the whole list, pack included: `@inst(int) sum(5)` is `sum@(int)`.
 
 ## Defaults
@@ -104,7 +106,7 @@ A defaulted parameter that is skipped while a later one is deduced is an error: 
 | An array length through `T a[N]` | The parameter is `T *`, so `N` is not deduced; write `T (*p)[N]` or an `Arr` instance |
 | A float or pointer constant | Name it with `@inst` |
 | A pack before C `...` (`Ts... xs, ...`) | `cannot deduce the pack of 'f' before '...'`; use `@inst` |
-| A pack that is not a function parameter, or only in the return type | `template parameter 'Ts' is not deduced by the arguments` or `cannot deduce the arguments of variadic template 'f'`; use `@inst` |
+| A pack that is not a function parameter | `template parameter 'Ts' is not deduced by the arguments`; use `@inst` |
 | A defaulted parameter before a deduced pack | `template parameter 'U' has a default but a later parameter is deduced`; give it in `@inst` |
 | A keyed (`.b = 2`) argument or a splice placeholder | Positional arguments only; use `@inst` |
 | A shape that does not fit | `cannot deduce the arguments of 'f': argument 1 ('int') does not match its parameter` |

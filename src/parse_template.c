@@ -3502,9 +3502,12 @@ static void pattern_vars(VirtualMachine *vm, Template *t, bool integers_only) {
 }
 
 // The function type of `t` as a pattern: its parameter types name the
-// placeholders.
+// placeholders. With `params_only`, the return type is left out (it may not
+// parse as a pattern, as `Ts...[0]` does not) and so is all after the
+// parameter list.
 static Type *pattern_signature(VirtualMachine *vm, Template *t,
-                               Token *skip_from, Token *skip_to) {
+                               bool params_only, Token *skip_from,
+                               Token *skip_to) {
     Token *p = t->marker_end;
     for (;;) {
         Token *q = skip_attr_groups(p);
@@ -3518,10 +3521,21 @@ static Type *pattern_signature(VirtualMachine *vm, Template *t,
     vm->compiler.tmpl_pattern = t;
     Token  head               = {};
     Token *cur                = &head;
-    for (Token *q = p; q != t->body_open; q = q->next) {
+    Token *stop               = t->body_open;
+    if (params_only && equal(t->name_tok->next, "(")) {
+        int depth = 0;
+        stop      = t->name_tok->next;
+        do {
+            depth += equal(stop, "(") - equal(stop, ")");
+            stop   = stop->next;
+        } while (depth && stop->kind != TK_EOF);
+        cur = cur->next = synth_token(vm, "void");
+        p               = t->name_tok;
+    }
+    for (Token *q = p; q != stop; q = q->next) {
         if (q == skip_from)
             q = skip_to;
-        if (q == t->body_open)
+        if (q == stop)
             break;
         cur = cur->next = copy_tok(vm, q);
     }
@@ -3534,7 +3548,7 @@ static Type *pattern_signature(VirtualMachine *vm, Template *t,
 
 static void operator_body(VirtualMachine *vm, Template *t) {
     pattern_vars(vm, t, true);
-    Type *ty = pattern_signature(vm, t, NULL, NULL);
+    Type *ty = pattern_signature(vm, t, false, NULL, NULL);
     int   n  = 0;
     for (Type *prm = ty->kind == TY_FUNC ? ty->params : NULL; prm;
          prm       = prm->next, n++) {
@@ -3759,7 +3773,7 @@ static void call_body(VirtualMachine *vm, Template *t) {
     int    pack_at = tmpl_has_pack(t)
                          ? call_pack_item(vm, t, &from, &to, &dots, &first)
                          : -1;
-    Type  *ty      = pattern_signature(vm, t, from, to);
+    Type  *ty      = pattern_signature(vm, t, true, from, to);
     if (ty->kind != TY_FUNC)
         error_tok(vm, t->name_tok,
                   tmpl_has_pack(t)
