@@ -633,7 +633,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --url-max-size=SIZE   Cap fetched URL payload size (e.g., "
            "50MB, default: 10MB)\n");
 #endif
-    printf("\t-D/--define <macro>[=def] Define a macro\n");
+    printf("\t-D/--define <name>[(params)][=def] Define a macro\n");
     printf("\t-U/--undef <macro>       Undefine a macro\n");
     printf("\t-a/--ast                 Dump AST\n");
     printf("\t-p/--print-tokens        Print preprocessed tokens to stdout\n");

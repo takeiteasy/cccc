@@ -341,7 +341,7 @@ Options:
 	   --allow-url           Let #include/#embed <https://...> download files that are not already cached
 	   --url-timeout=SECONDS Set URL fetch timeout in seconds (default: 30)
 	   --url-max-size=SIZE   Cap fetched URL payload size (e.g., 50MB, default: 10MB)
-	-D/--define <macro>[=def] Define a macro
+	-D/--define <name>[(params)][=def] Define a macro
 	-U/--undef <macro>       Undefine a macro
 	-a/--ast                 Dump AST
 	-p/--print-tokens        Print preprocessed tokens to stdout

@@ -2325,6 +2325,14 @@ static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     // Convert pp-numbers to regular numbers
     convert_pp_tokens(vm, expr);
 
+    for (Token *t = expr; t->kind != TK_EOF; t = t->next) {
+        if (t->kind == TK_STR)
+            error_tok(vm, t, "token '%.*s' is not valid in preprocessor expressions",
+                      t->len, t->loc);
+        if (t->kind == TK_NUM && is_flonum(tok_lit(t)->ty))
+            error_tok(vm, t, "floating constant in preprocessor expression");
+    }
+
     Token *rest2;
     long   val = pp_const_expr(vm, &rest2, expr);
     if (rest2->kind != TK_EOF)
@@ -8029,9 +8037,28 @@ void define_std_macros(VirtualMachine *vm) {
     define_macro(vm, "__STDC_VERSION__", (char *)v);
 }
 
+// `name` may carry a parameter list (`-D'F(x,y)=x+y'`), making the macro
+// function-like.
 void define_macro(VirtualMachine *vm, char *name, char *buf) {
-    Token *tok = tokenize(vm, new_file(vm, "<built-in>", 1, buf));
-    add_macro(vm, name, strlen(name), true, tok, NULL);
+    Token *tok    = tokenize(vm, new_file(vm, "<built-in>", 1, buf));
+    char  *lparen = strchr(name, '(');
+    if (!lparen) {
+        add_macro(vm, name, strlen(name), true, tok, NULL);
+        return;
+    }
+
+    Token *params_tok =
+        tokenize(vm, new_file(vm, "<command line>", 1, lparen));
+    char       *va_args_name = NULL;
+    Token      *rest;
+    MacroParam *params =
+        read_macro_params(vm, &rest, params_tok->next, &va_args_name);
+    if (rest->kind != TK_EOF)
+        error_tok(vm, rest, "extra tokens after the macro parameter list");
+
+    Macro *m = add_macro(vm, name, (int)(lparen - name), false, tok, NULL);
+    m->params       = params;
+    m->va_args_name = va_args_name;
 }
 
 char *cc_object_macro_text(VirtualMachine *vm, const char *name) {
