@@ -14,7 +14,7 @@ Opcodes are grouped by function.  Operands are shown as `rd = destination`, `rs 
 | `CALL` | 1 | Direct call: push return address, jump to `target` |
 | `CALLT` | 1 | Tail call: unwind current frame, jump to `target` (direct) |
 | `CALLI` | 1 | Indirect call through register (`rs`) |
-| `CALLN` | 6 | Native-aware indirect call: tries dynamic symbol first, falls back to VM call |
+| `CALLN` | 8 | Native-aware indirect call: tries dynamic symbol first, falls back to VM call |
 | `JMPT` | 3 | Jump table: `table_pc`, `count`, `default_pc`; index in `REG_A0` |
 | `JMPI` | 1 | Indirect jump through register. Only emitted for computed goto (`goto *expr`); a register that resolves to a dynamic-symbol or FFI token target is not a supported use of computed goto and is a runtime error |
 | `JZ3` | 2 | Branch if `regs[rs] == 0` |

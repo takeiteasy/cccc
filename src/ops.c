@@ -3311,7 +3311,8 @@ static inline int op_CALLN_fn(VirtualMachine *vm) {
     long long operands       = cc_read_word(vm);
     int       rs             = (int)(operands & 0xFF);
     InstrWord meta           = cc_read_word(vm);
-    int       actual_nargs   = (int)(meta & 0xFFFF);
+    int       actual_nargs   = (int)(meta & 0x7FFF);
+    int       returns_half   = (int)((meta >> 15) & 1);
     int       returns_double = (int)((meta >> 16) & 1);
     int       returns_float  = (int)((meta >> 17) & 1);
     // #874/#875: callsite-declared variadic shape, so both the
@@ -3323,6 +3324,7 @@ static inline int op_CALLN_fn(VirtualMachine *vm) {
     int            callsite_fixed_param_count = (int)((meta >> 19) & 0x1FFF);
     uint64_t       double_arg_mask            = (uint64_t)cc_read_i64(vm);
     uint64_t       float_arg_mask             = (uint64_t)cc_read_i64(vm);
+    uint64_t       half_arg_mask              = (uint64_t)cc_read_i64(vm);
 
     long long      target_value               = vm->regs[rs];
     DynamicSymbol *sym          = cccc_find_dynamic_symbol(vm, target_value);
@@ -3359,7 +3361,14 @@ static inline int op_CALLN_fn(VirtualMachine *vm) {
         for (int i = 0; i < actual_nargs; i++) {
             bool is_tail_double =
                 callsite_is_variadic && i >= callsite_fixed_param_count;
-            if (i >= 8) {
+            if (i < 64 && (half_arg_mask & (1ULL << i))) {
+                // A half is its bits in an integer register or stack slot;
+                // a host takes it as a float carrying those 16 bits.
+                long long bits =
+                    i >= 8 ? vm->sp[i - 8] : vm->regs[REG_A0 + int_reg_idx++];
+                args[i]         = (long long)(unsigned short)bits;
+                float_arg_mask |= 1ULL << i;
+            } else if (i >= 8) {
                 args[i] = vm->sp[i - 8];
             } else if (i < 64 && (float_arg_mask & (1ULL << i)) &&
                        !(double_arg_mask & (1ULL << i))) {
@@ -3396,12 +3405,15 @@ static inline int op_CALLN_fn(VirtualMachine *vm) {
         } else {
             rc = cccc_call_native_function(
                 vm, sym->func_ptr, sym->name, args, actual_nargs,
-                double_arg_mask, float_arg_mask, returns_double, returns_float,
-                callsite_is_variadic,
+                double_arg_mask, float_arg_mask, returns_double,
+                returns_float || returns_half, callsite_is_variadic,
                 callsite_is_variadic ? callsite_fixed_param_count
                                      : actual_nargs);
         }
         free(heap_args);
+        if (returns_half && rc == 0)
+            vm->regs[REG_A0] =
+                (long long)(unsigned short)cccc_freg_raw_f32(vm, FREG_A0);
         return rc;
     }
 

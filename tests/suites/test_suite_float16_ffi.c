@@ -61,3 +61,42 @@ int test_integer_and_double_arguments(void) {
     __sqrtf16(4); // result discarded
     return 42;
 }
+
+[[cccc::test(return = 42)]]
+int test_call_through_function_pointer(void) {
+    _Float16 (*sq)(_Float16)                       = __sqrtf16;
+    _Float16 (*fma3)(_Float16, _Float16, _Float16) = __fmaf16;
+    _Float16 (*hyp)(_Float16, _Float16)            = __hypotf16;
+    if ((double)sq(16) != 4)
+        return 1;
+    if (bits(sq(2)) != 0x3da8)
+        return 2;
+    if (bits(fma3(16, 2.5f16, -3.25f16)) != 0x5098)
+        return 3;
+    if (bits(hyp(2.5f16, -3.25f16)) != 0x441a)
+        return 4;
+    sq(4); // result discarded
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_function_pointer_table(void) {
+    _Float16 (*fns[])(_Float16) = {__sqrtf16, __fabsf16};
+    if ((double)fns[0](9) != 3)
+        return 1;
+    if ((double)fns[1](-2.5f16) != 2.5)
+        return 2;
+    return 42;
+}
+
+static _Float16 add_halves(int n, _Float16 a, double d, _Float16 b) {
+    return (_Float16)(n + a + d + b);
+}
+
+[[cccc::test(return = 42)]]
+int test_internal_function_pointer(void) {
+    _Float16 (*f)(int, _Float16, double, _Float16) = add_halves;
+    if ((double)f(1, 2.5f16, 0.5, 4) != 8)
+        return 1;
+    return 42;
+}

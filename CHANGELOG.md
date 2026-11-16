@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a call through a function pointer to a host function can take and return `_Float16` (`_Float16 (*f)(_Float16) = __sqrtf16;`); the arguments and result were read from the wrong registers.
 - Fixed: a string literal or floating constant in an `#if` is an error (`token "abc" is not valid in preprocessor expressions`, `floating constant in preprocessor expression`) instead of a crash or a silent 0.
 - Fixed: `-D'F(x)=40'` defines the function-like macro `F`; it was an object-like macro named `F(x)`. A variadic list (`-D'V(...)=__VA_ARGS__'`) works, and a malformed parameter list is an error.
 - Fixed: `-U'F(x)'` undefines `F`, as `-UF` does; the parameter list was part of the name looked up.

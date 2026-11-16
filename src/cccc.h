@@ -56,7 +56,7 @@ extern "C" {
     X(CALL, 1)  /* Call function (direct) */                                         \
     X(CALLT, 1) /* Tail call (direct): reuse current frame */                        \
     X(CALLI, 1) /* Call function (indirect via register) */                          \
-    X(CALLN, 6) /* Native-aware indirect call */                                     \
+    X(CALLN, 8) /* Native-aware indirect call */                                     \
     X(JMPT, 3)  /* Jump table */                                                     \
     X(JMPI, 1)  /* Indirect jump */                                                  \
     /* VM memory operations (self-contained, no system calls) */                     \

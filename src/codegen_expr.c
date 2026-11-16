@@ -3146,10 +3146,17 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int      nargs                = 0;
             uint64_t call_double_arg_mask = 0;
             uint64_t call_float_arg_mask  = 0;
+            uint64_t call_half_arg_mask   = 0;
             for (Node *a = node->args; a; a = a->next) {
                 bool call_arg_is_vararg =
                     is_variadic_call && nargs >= fixed_param_count;
-                if (is_flonum(a->ty)) {
+                if (is_float16(a->ty)) {
+                    if (nargs >= 64)
+                        error_tok(
+                            vm, a->tok,
+                            "too many floating-point native-call arguments");
+                    call_half_arg_mask |= (1ULL << nargs);
+                } else if (is_flonum(a->ty)) {
                     if (nargs >= 64)
                         error_tok(
                             vm, a->tok,
@@ -3523,7 +3530,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     dest_reg == REG_ZERO && node->func_ty &&
                     (node->func_ty->is_pure || node->func_ty->is_func_const);
                 if (!skip_dead_calln) {
-                    // Meta word (InstrWord = uint32_t) layout: bits 0-15 nargs,
+                    // Meta word (InstrWord = uint32_t) layout: bits 0-14 nargs,
+                    // bit 15 returns_half (_Float16: its bits in an integer
+                    // register, passed to a host as a float),
                     // bit 16 returns_double, bit 17 returns_float, bit 18
                     // is_variadic, bits 19-31 fixed_param_count (13 bits, up to
                     // 8191 fixed params) (#874/#875 -- lets op_CALLN_fn tell
@@ -3542,9 +3551,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                              << 17) |
                             ((InstrWord)(is_variadic_call ? 1 : 0) << 18) |
                             ((InstrWord)(fixed_param_count & 0x1FFF) << 19) |
-                            (InstrWord)(nargs & 0xFFFF));
+                            ((InstrWord)(is_float16(node->ty) ? 1 : 0) << 15) |
+                            (InstrWord)(nargs & 0x7FFF));
                     emit_i64(vm, (long long)call_double_arg_mask);
                     emit_i64(vm, (long long)call_float_arg_mask);
+                    emit_i64(vm, (long long)call_half_arg_mask);
                 }
                 free_temp_reg(r_fn);
             }
