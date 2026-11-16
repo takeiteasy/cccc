@@ -659,4 +659,46 @@ int test_blocks_nested_block_calls(void) {
     return outer(inner(1), inner(inner(2))) == 1122 ? 42 : 1;
 }
 
+// The declarator inside `(^ ... )` applies to the block type.
+static int (^make_plus(int k))(int) {
+    return Block_copy(^int(int a) {
+      return a + k;
+    });
+}
+static int (^(*adder_factory)(int))(int) = make_plus;
+
+[[cccc::test(return = 42)]]
+int test_blocks_function_returning_block(void) {
+    int (^add10)(int) = make_plus(10);
+    int r             = add10(5) + make_plus(1)(26);
+    Block_release(add10);
+    return r == 15 + 27 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_blocks_array_of_blocks(void) {
+    int (^table[3])(int);
+    table[0] = ^int(int a) {
+      return a + 1;
+    };
+    table[1] = ^int(int a) {
+      return a * 2;
+    };
+    table[2] = ^int(int a) {
+      return a - 3;
+    };
+    int total = 0;
+    for (int i = 0; i < 3; i++)
+        total += table[i](10);
+    return total == 11 + 20 + 7 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_blocks_function_pointer_returning_block(void) {
+    int (^b)(int) = adder_factory(2);
+    int r         = b(40);
+    Block_release(b);
+    return r;
+}
+
 #pragma cccc suite end

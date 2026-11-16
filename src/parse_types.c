@@ -1445,36 +1445,33 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
                   "variable, or member",
                   tok->origin->len, tok->origin->loc);
 
-    // Handle block type: int (^name)(params)
-    // The ^ indicates this is a block type, not a function pointer
+    // Handle block type: int (^name)(params). The ^ marks a block rather than
+    // a function pointer, and the declarator inside the parentheses applies to
+    // the block type itself: `int (^make(void))(int)` is a function returning
+    // a block, `int (^table[3])(int)` an array of blocks. It is skipped once to
+    // find the block's own parameter list, then parsed again over the block.
     if (equal(tok, "(") && equal(tok->next, "^")) {
-        // Token *start = tok;
-        tok             = tok->next->next; // Skip '(' and '^'
-
-        Token *name     = NULL;
-        Token *name_pos = tok;
-
-        if (tok->kind == TK_IDENT) {
-            name = tok;
-            tok  = tok->next;
-        }
-
-        tok = skip(vm, tok, ")");
+        Token *inner = tok->next->next;
+        Type   dummy = {};
+        Token *after = inner;
+        declarator(vm, &after, inner, &dummy, NULL);
+        after = skip(vm, after, ")");
 
         // Now parse the parameter list: (params)
         // This creates the function signature that the block will have
-        Type *func_ty = type_suffix(vm, rest, tok, ty);
+        Type *func_ty = type_suffix(vm, rest, after, ty);
 
         // Create a block type instead of function pointer
         Type *block_ty = block_type(vm, func_ty->return_ty, func_ty->params);
         block_ty->is_variadic = func_ty->is_variadic;
         block_ty->is_unprototyped = func_ty->is_unprototyped;
         inherit_semantic_attrs(vm, block_ty, ty);
-        if (dn)
-            *dn = (DeclName){name, name_pos};
-        type_attrs_mut(vm, block_ty)->cleanup_fn = cleanup_fn;
 
-        return block_ty;
+        Token *unused;
+        Type  *result = declarator(vm, &unused, inner, block_ty, dn);
+        if (cleanup_fn)
+            type_attrs_mut(vm, result)->cleanup_fn = cleanup_fn;
+        return result;
     }
 
     if (equal(tok, "(")) {
