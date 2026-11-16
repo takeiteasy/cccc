@@ -69,6 +69,6 @@ int test_evaluated_call(void) {
 }
 
 [[cccc::test(error = "_Float16 values are not supported")]]
-int test_unevaluated_arithmetic(void) {
-    return (int)sizeof(half_of(1.0) + 1);
+int test_generic_association_is_evaluated(void) {
+    return _Generic(0, int: global_h + 1);
 }

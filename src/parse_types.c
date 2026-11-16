@@ -2201,8 +2201,8 @@ static Type *typeof_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
     } else {
         vm->compiler.unevaluated++;
         Node *node = expr(vm, &tok, tok);
-        vm->compiler.unevaluated--;
         add_type(vm, node);
+        vm->compiler.unevaluated--;
         ty = node->ty;
     }
     *rest = skip(vm, tok, ")");

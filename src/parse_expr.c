@@ -1873,7 +1873,7 @@ Node *overloaded_subscript(VirtualMachine *vm, Node *base, Node *idx,
 bool arith_operand_ok(Type *ty, bool integer_only) {
     if (is_vector(ty) || is_error_type(ty))
         return true;
-    return integer_only ? is_integer(ty) : is_numeric(ty);
+    return integer_only ? is_integer(ty) : is_numeric(ty) || is_float16(ty);
 }
 
 // The overloaded call for sym, else the built-in node. An operand that is not
@@ -1903,7 +1903,7 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         node->ty   = ty_error;
         return node;
     }
-    if (is_float16(lhs->ty) || is_float16(rhs->ty))
+    if (!vm->compiler.unevaluated && (is_float16(lhs->ty) || is_float16(rhs->ty)))
         error_float16_unsupported(vm, tok);
 
     Node *ov = try_overloaded_op(vm, "+", lhs, rhs, tok);
@@ -1924,7 +1924,8 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
                   "allowed -- it refers to exactly one object");
 
     // num + num
-    if (is_numeric(lhs->ty) && is_numeric(rhs->ty))
+    if ((is_numeric(lhs->ty) || is_float16(lhs->ty)) &&
+        (is_numeric(rhs->ty) || is_float16(rhs->ty)))
         return new_binary(vm, ND_ADD, lhs, rhs, tok);
 
     // vec + vec / vec + scalar (element-wise; GNU vector extension,
@@ -1989,7 +1990,7 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         node->ty   = ty_error;
         return node;
     }
-    if (is_float16(lhs->ty) || is_float16(rhs->ty))
+    if (!vm->compiler.unevaluated && (is_float16(lhs->ty) || is_float16(rhs->ty)))
         error_float16_unsupported(vm, tok);
 
     Node *ov = try_overloaded_op(vm, "-", lhs, rhs, tok);
@@ -2005,7 +2006,8 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
                   "allowed -- it refers to exactly one object");
 
     // num - num
-    if (is_numeric(lhs->ty) && is_numeric(rhs->ty))
+    if ((is_numeric(lhs->ty) || is_float16(lhs->ty)) &&
+        (is_numeric(rhs->ty) || is_float16(rhs->ty)))
         return new_binary(vm, ND_SUB, lhs, rhs, tok);
 
     // vec - vec / vec - scalar (element-wise; GNU vector extension,

@@ -2391,8 +2391,10 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
     tok          = skip(vm, tok, "(");
 
-    Node *ctrl   = assign(vm, &tok, tok);
+    vm->compiler.unevaluated++;
+    Node *ctrl = assign(vm, &tok, tok);
     add_type(vm, ctrl);
+    vm->compiler.unevaluated--;
 
     Type *t1 = ctrl->ty;
     if (t1->kind == TY_FUNC)
@@ -2999,8 +3001,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "sizeof")) {
         vm->compiler.unevaluated++;
         Node *node = unary(vm, rest, tok->next);
-        vm->compiler.unevaluated--;
         add_type(vm, node);
+        vm->compiler.unevaluated--;
         if (node->ty->kind == TY_VLA) {
             Node *size = new_var_node(vm, type_arr(node->ty)->vla_size, tok);
             // A VLA-typed operand is evaluated (C11 6.5.3.4p2); only one
@@ -3034,8 +3036,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "_Alignof") || is_gnu_alignof) {
         vm->compiler.unevaluated++;
         Node *node = unary(vm, rest, tok->next);
-        vm->compiler.unevaluated--;
         add_type(vm, node);
+        vm->compiler.unevaluated--;
         int align = type_alignof(node->ty);
         if (node->kind == ND_VAR && node->var && node->var->align > align)
             align = node->var->align;

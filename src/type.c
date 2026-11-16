@@ -1130,6 +1130,9 @@ static Type *arith_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     if (ty1->kind == TY_FLOAT || ty2->kind == TY_FLOAT)
         return common_keeping_align(vm, ty_float, ty1, ty2);
 
+    if (ty1->kind == TY_FLOAT16 || ty2->kind == TY_FLOAT16)
+        return common_keeping_align(vm, ty_float16, ty1, ty2);
+
     // Step 4: Otherwise, integer promotions are performed on both operands
     ty1 = integer_promotion(ty1);
     ty2 = integer_promotion(ty2);
@@ -1421,7 +1424,7 @@ void add_type(VirtualMachine *vm, Node *node) {
 
     // _Float16 is storage-only: an operand is only legal where its address
     // or type is taken, never its value.
-    if (node->kind != ND_ADDR) {
+    if (node->kind != ND_ADDR && !vm->compiler.unevaluated) {
         Node *const ops[] = {node->lhs, node->rhs, node_ctl(node)->cond};
         for (int i = 0; i < 3; i++)
             if (ops[i] && is_float16(ops[i]->ty))

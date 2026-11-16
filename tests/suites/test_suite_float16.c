@@ -91,3 +91,36 @@ int test_unevaluated_call_and_cast(void) {
         return 2;
     return 42;
 }
+
+[[cccc::test(return = 42)]]
+int test_unevaluated_arithmetic(void) {
+    _Float16 h;
+    if (sizeof(half_of(1.0) + 1) != 2 || sizeof(h + h) != 2)
+        return 1;
+    if (_Alignof(h * h) != 2 || sizeof(-h) != 2 || sizeof(+h) != 2)
+        return 2;
+    __typeof__(h - 1) d;
+    if (sizeof(d) != 2)
+        return 3;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_arithmetic_rank(void) {
+    _Float16 h;
+    if (_Generic(h + 1, _Float16: 1, default: 0) != 1)
+        return 1;
+    if (_Generic(h * 2LL, _Float16: 1, default: 0) != 1)
+        return 2;
+    if (_Generic(h + 1.0f, float: 1, default: 0) != 1)
+        return 3;
+    if (_Generic(h - 1.0, double: 1, default: 0) != 1)
+        return 4;
+    if (_Generic(h + 1.0L, long double: 1, default: 0) != 1)
+        return 5;
+    if (_Generic(-h, _Float16: 1, default: 0) != 1)
+        return 6;
+    if (_Generic(h < h, int: 1, default: 0) != 1)
+        return 7;
+    return 42;
+}

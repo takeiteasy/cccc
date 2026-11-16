@@ -18,6 +18,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Fixed: a variable-length array declared inside a statement expression stays in scope for the statements after it under `-c=native`, `-m` and `-c=generated`.
 - Fixed: a number made up in an `#if` (an identifier read as 0, `defined`, `__has_*`, `__LINE__`) and a token made by `##` report at the token they replace, with the macro notes, instead of at a one-line file holding the new text. An invalid `##` paste reports at the macro use, and an `#if` that ends early reports on its own line as `found end of input`.
 - Fixed: a call or cast that converts to or from `_Float16` is accepted inside a `sizeof`, `_Alignof` or `typeof` operand, which is never evaluated.
+- Fixed: `_Float16` arithmetic is accepted inside a `sizeof`, `_Alignof`, `typeof` or `_Generic` controlling operand, and `_Float16 + int` has type `_Float16` (`float` and `double` operands win), so the SDK headers that size or select on `_Float16` expressions parse. The `_Generic` controlling expression is unevaluated, as in C.
 
 ## [0.35.0] - 2026-11-14
 
