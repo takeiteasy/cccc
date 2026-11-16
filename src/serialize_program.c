@@ -3421,7 +3421,11 @@ static Token *token_expansion_site(Token *t) {
 
 bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                  Obj *obj) {
-    if (!obj_fn(obj)->body || obj->is_macro_generated)
+    // The host compiler names an overload its own way, but the calls here use
+    // the Itanium name this Obj carries, so the header's copy cannot serve
+    // them.
+    if (!obj_fn(obj)->body || obj->is_macro_generated ||
+        obj->ty->is_overloadable)
         return false;
     Token *t = obj->tok;
     if (!t || !t->file)
@@ -3558,6 +3562,8 @@ static void serialize_gnu_inline_weak(FILE *f, Obj *fn) {
 static bool bodyless_decl_from_input_or_bundled(VirtualMachine   *vm,
                                                 SerializeContext *ctx,
                                                 Obj              *obj) {
+    if (obj->ty->is_overloadable)
+        return true;
     Token *t = obj->tok;
     // #1303: a captured header's macro that only *declares* (never
     // defines) a function when invoked -- e.g. a `##`-pasted declarator

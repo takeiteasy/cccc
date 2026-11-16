@@ -106,7 +106,7 @@ An attribute resolves by its name alone, in any spelling and any namespace, so e
 | `__attribute__` | `__attribute__((aligned(16)))` |
 | `@` | `@aligned(16)` |
 
-An unknown name in a namespace is ignored with a `-Wattributes` warning. `__has_c_attribute(ns::name)` reports a known name in any namespace.
+An unknown name in a namespace is ignored with a `-Wattributes` warning. `__has_c_attribute(ns::name)` reports a known name in any namespace, except that the Clang attributes `overloadable` and `unavailable` count only in `clang::` ([attributes-overloadable.md](attributes-overloadable.md)).
 
 `kernel`, `trusted`, `operator` and `method` need no `cccc::`; the OpenCL address spaces `global`, `local`, `constant`, `private` and `generic` keep it.
 

@@ -744,11 +744,20 @@ declspec_done:
 
 // func-params = ("void" | param ("," param)* ("," "...")?)? ")"
 // param       = declspec declarator
+// `T * __attribute__((overloadable)) f(...)`: the attribute written after the
+// return type's `*` belongs to the function.
+static Type *func_of(VirtualMachine *vm, Type *return_ty) {
+    Type *fn = func_type(vm, return_ty);
+    if (return_ty->kind == TY_PTR && return_ty->is_overloadable)
+        fn->is_overloadable = true;
+    return fn;
+}
+
 static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
                          Type *ty) {
     if (equal(tok, "void") && equal(tok->next, ")")) {
         *rest = tok->next->next;
-        return func_type(vm, ty);
+        return func_of(vm, ty);
     }
 
     Type   head        = {};
@@ -925,7 +934,7 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
         // C23: empty () is a prototype accepting no args, identical to (void).
     }
 
-    ty              = func_type(vm, ty);
+    ty                  = func_of(vm, ty);
     ty->params      = head.next;
     ty->is_variadic     = is_variadic;
     ty->is_unprototyped = is_unprototyped;
@@ -2830,9 +2839,9 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
     if (!attr ||
         (!attr->is_maybe_unused && !attr->is_deprecated && !attr->is_noreturn &&
          !attr->is_nodiscard && !attr->is_pure && !attr->is_func_const &&
-         !attr->is_gnu_inline && !attr->is_kernel && !attr->is_trusted &&
-         !attr->operator_sym && !attr->method_of && !attr->format_style &&
-         !attr->cleanup_fn && !attr->attr_error_msg &&
+         !attr->is_gnu_inline && !attr->is_overloadable && !attr->is_kernel &&
+         !attr->is_trusted && !attr->operator_sym && !attr->method_of &&
+         !attr->format_style && !attr->cleanup_fn && !attr->attr_error_msg &&
          !attr->attr_warning_msg && !attr->nonnull_all && !attr->nonnull_mask &&
          !attr->returns_nonnull && !attr->is_constructor &&
          !attr->is_destructor && !attr->is_sentinel && !attr->alloc_size_idx &&
@@ -2855,6 +2864,8 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
         ty->is_func_const = true;
     if (attr->is_gnu_inline && ty->kind == TY_FUNC)
         ty->is_gnu_inline = true;
+    if (attr->is_overloadable && ty->kind == TY_FUNC)
+        ty->is_overloadable = true;
     if (attr->is_kernel && ty->kind == TY_FUNC)
         ty->is_kernel = true;
     if (attr->is_trusted && ty->kind == TY_FUNC)
@@ -2918,6 +2929,7 @@ static void inherit_semantic_attrs(VirtualMachine *vm, Type *dst, Type *src) {
     dst->is_pure         |= src->is_pure;
     dst->is_func_const   |= src->is_func_const;
     dst->is_gnu_inline   |= src->is_gnu_inline;
+    dst->is_overloadable |= src->is_overloadable;
     dst->is_kernel       |= src->is_kernel;
     dst->is_trusted      |= src->is_trusted;
     // Writes allocate dst's attrs group, so only write what src actually sets:
@@ -3549,8 +3561,8 @@ Token *attr_format(VirtualMachine *vm, Token *tok, const AttrSite *site,
 // error("msg") / warning("msg"): a diagnostic when the function is called and
 // the call is not in a statically-dead branch (static_branch_value()).
 static Token *diag_attr(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr,
-                        bool is_error) {
-    char *message = NULL;
+                        bool is_error, char *default_message) {
+    char *message = default_message;
     if (equal(tok, "("))
         tok = skip_attr_args(tok, &message);
     if (!vm->compiler.in_type_lookahead) {
@@ -3575,13 +3587,32 @@ static Token *diag_attr(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr,
 Token *attr_error(VirtualMachine *vm, Token *tok, const AttrSite *site,
                   Type *ty, VarAttr *attr) {
     (void)site;
-    return diag_attr(vm, tok, ty, attr, true);
+    return diag_attr(vm, tok, ty, attr, true, NULL);
 }
 
 Token *attr_warning(VirtualMachine *vm, Token *tok, const AttrSite *site,
                     Type *ty, VarAttr *attr) {
     (void)site;
-    return diag_attr(vm, tok, ty, attr, false);
+    return diag_attr(vm, tok, ty, attr, false, NULL);
+}
+
+// unavailable[("msg")]: an `error` attribute, so calling the function is an
+// error unless the call sits in a statically-dead branch.
+Token *attr_unavailable(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                        Type *ty, VarAttr *attr) {
+    (void)site;
+    return diag_attr(vm, tok, ty, attr, true, "function is unavailable");
+}
+
+Token *attr_overloadable(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                         Type *ty, VarAttr *attr) {
+    (void)vm;
+    (void)site;
+    if (ty && (is_func_type(ty) || ty->kind == TY_PTR))
+        ty->is_overloadable = true;
+    if (attr)
+        attr->is_overloadable = true;
+    return skip_optional_args(tok);
 }
 
 // GNU equivalent of [[nodiscard]].
@@ -3730,7 +3761,8 @@ static Token *apply_attr(VirtualMachine *vm, Token *tok, const AttrSite *site,
     const AttrDef *def      = lookup_attr(name_tok->loc, name_tok->len);
 
     if (def && def->apply &&
-        (!(def->flags & ATTR_NS_CCCC) || site->cccc_scoped)) {
+        (!(def->flags & ATTR_NS_CCCC) || site->cccc_scoped) &&
+        (!(def->flags & ATTR_NS_CLANG) || site->clang_ok)) {
         AttrSite resolved = *site;
         resolved.def      = def;
         return def->apply(vm, tok, &resolved, ty, attr);
@@ -3787,6 +3819,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                              .name_tok       = tok,
                              .shown_tok      = tok,
                              .quiet_if_known = true,
+                             .clang_ok       = true,
                              .allow_ty_align = true};
             tok           = apply_attr(vm, tok->next, &site, ty, attr);
         }
@@ -3837,6 +3870,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 ns               = tok;
                 site.name_tok    = tok->next->next->next;
                 site.cccc_scoped = equal(ns, "cccc");
+                site.clang_ok    = equal(ns, "clang") || equal(ns, "__clang__");
             }
             // An unscoped name is warned about unless it is standard; a
             // namespaced one resolves by name, so a known GNU name is quiet.

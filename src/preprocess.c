@@ -1861,6 +1861,10 @@ static bool is_has_feature_supported(VirtualMachine *vm, char *name) {
         !strcmp(name, "c_static_assert"))
         return vm->compiler.c_std >= CCCC_STD_C11;
 
+    if (!strcmp(name, "attribute_overloadable") ||
+        !strcmp(name, "overloadable_unmarked"))
+        return true;
+
     return false;
 }
 
@@ -1992,9 +1996,12 @@ static bool is_has_builtin_supported(char *name) {
     return false;
 }
 
-static long is_has_c_attribute_supported(char *name) {
+static long is_has_c_attribute_supported(char *name, const char *vendor) {
     const AttrDef *a = lookup_attr(name, strlen(name));
     if (!a)
+        return 0;
+    if ((a->flags & ATTR_NS_CLANG) &&
+        (!vendor || (strcmp(vendor, "clang") && strcmp(vendor, "__clang__"))))
         return 0;
     return a->cat == ATTR_GNU ? a->has_attr : a->date;
 }
@@ -2028,7 +2035,7 @@ static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok,
     if (!strcmp(kind, "__has_builtin"))
         return is_has_builtin_supported(name);
     if (!strcmp(kind, "__has_c_attribute"))
-        return is_has_c_attribute_supported(name);
+        return is_has_c_attribute_supported(name, vendor);
     if (!strcmp(kind, "__has_declspec_attribute"))
         // #1323: CCCC is not MSVC/clang-cl and supports no __declspec
         // attributes -- always 0, but recognised so real SDK headers using

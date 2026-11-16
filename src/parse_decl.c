@@ -493,7 +493,7 @@ static void check_fn_redecl(VirtualMachine *vm, Obj *fn, Type *old_ty,
         is_compatible_fn_redecl(old_ty, old_def, ty, new_def,
                                 vm->compiler.compiler_family))
         return;
-    error_tok(vm, name, "conflicting types for '%s'", fn->name);
+    error_tok(vm, name, "conflicting types for '%s'", obj_display_name(fn));
 }
 
 // Folds redeclaration `ty` into `fn`. A file-scope declaration sets the type
@@ -557,7 +557,8 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
     if (!dn.tok)
         error_tok(vm, dn.pos, "function name omitted");
 
-    char *name_str = get_ident(vm, dn.tok);
+    OverloadName on       = cc_overload_decl_name(vm, ty, dn.tok);
+    char        *name_str = on.name;
     check_sentinel_variadic(vm, ty, dn.tok);
     resolve_type_checked_bounds(vm, ty);
 
@@ -573,8 +574,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
     // because the current parse happens to be inside another function's
     // body (see the matching, larger comment in function()).
     bool   scoped = vm->compiler.current_fn && !attr->is_static;
-    FnDecl found =
-        find_fn_decl(vm, name_str, dn.tok->len, attr->is_static, tok);
+    FnDecl found   = find_fn_decl(vm, name_str, on.len, attr->is_static, tok);
     Obj *fn      = found.fn;
     bool adopted = adopt_hidden_builtin(vm, fn, ty, dn.tok, attr);
     if (fn) {
@@ -612,13 +612,13 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         if (type_attrs(ty)->deprecated_msg)
             obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
         merge_redeclared_fn_type(vm, fn, found.visible_ty, ty, scoped, name_str,
-                                 dn.tok->len);
+                                 on.len);
     } else if (attr->is_static &&
                (fn = generated_static_for_decl(vm, dn.tok, true,
                                                "<inline-macro-fwd>"))) {
-        push_scope(vm, name_str, dn.tok->len)->var = fn;
+        push_scope(vm, name_str, on.len)->var = fn;
     } else {
-        fn                = new_gvar_at(vm, dn.tok, ty);
+        fn                = new_gvar_at(vm, on.tok, ty);
         fn->is_function   = true;
         fn->is_definition = false;
         fn->is_static =
@@ -628,6 +628,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         if (scoped)
             hashmap_put(&vm->compiler.global_decl_map, name_str, fn);
     }
+    cc_overload_declared(vm, fn, ty, dn.tok);
     if (type_attrs(ty)->operator_sym)
         register_operator(vm, fn, ty, tok);
     if (type_attrs(ty)->method_of)
@@ -798,7 +799,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     ty          = apply_var_attrs_to_type(vm, ty, attr);
     if (!dn.tok)
         error_tok(vm, dn.pos, "function name omitted");
-    char *name_str = get_ident(vm, dn.tok);
+    OverloadName on       = cc_overload_decl_name(vm, ty, dn.tok);
+    char        *name_str = on.name;
 
     // `void f(void) _Checked { ... }`
     CheckedScope suffix_scope = cc_checked_scope_keyword(tok);
@@ -846,7 +848,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     bool   defines_body = !equal(tok, ";");
     bool   scoped       = is_nested && !defines_body && !attr->is_static;
     FnDecl found =
-        find_fn_decl(vm, name_str, dn.tok->len,
+        find_fn_decl(vm, name_str, on.len,
                      attr->is_static || (is_nested && defines_body), dn.tok);
     Obj *fn           = found.fn;
     bool adopted      = adopt_hidden_builtin(vm, fn, ty, dn.tok, attr);
@@ -873,7 +875,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                       "redefinition of '%s' with a different signature",
                       name_str);
         Obj *replaced     = fn;
-        fn                = new_gvar_at(vm, dn.tok, ty);
+        fn                = new_gvar_at(vm, on.tok, ty);
         fn->is_function   = true;
         fn->is_definition = true;
         fn->is_static     = new_static;
@@ -936,13 +938,13 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         if (type_attrs(ty)->deprecated_msg)
             obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
         merge_redeclared_fn_type(vm, fn, found.visible_ty, ty, scoped, name_str,
-                                 dn.tok->len);
+                                 on.len);
     } else if (!defines_body && attr->is_static &&
                (fn = generated_static_for_decl(vm, dn.tok, true,
                                                "<inline-macro-fwd>"))) {
-        push_scope(vm, name_str, dn.tok->len)->var = fn;
+        push_scope(vm, name_str, on.len)->var = fn;
     } else {
-        fn                = new_gvar_at(vm, dn.tok, ty);
+        fn                = new_gvar_at(vm, on.tok, ty);
         fn->is_function   = true;
         fn->is_definition = equal(tok, "{");
         fn->is_static =
@@ -952,6 +954,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         if (scoped)
             hashmap_put(&vm->compiler.global_decl_map, name_str, fn);
     }
+    cc_overload_declared(vm, fn, ty, dn.tok);
     merge_param_names(fn, ty);
     claim_param_attrs(vm, fn, ty);
     if (type_attrs(ty)->operator_sym)
@@ -1220,15 +1223,16 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // Not available before C99 — omitting it causes a natural undeclared-
     // identifier error if used in C89 mode.
     if (vm->compiler.c_std >= CCCC_STD_C99) {
+        char *fname                        = obj_display_name(fn);
         push_scope(vm, "__func__", 8)->var = new_string_literal(
-            vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
+            vm, fname, array_of(vm, ty_char, strlen(fname) + 1));
 
         // [GNU] __FUNCTION__ and __PRETTY_FUNCTION__ (the same in C) are
         // yet other names of __func__.
         push_scope(vm, "__FUNCTION__", 12)->var = new_string_literal(
-            vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
+            vm, fname, array_of(vm, ty_char, strlen(fname) + 1));
         push_scope(vm, "__PRETTY_FUNCTION__", 19)->var = new_string_literal(
-            vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
+            vm, fname, array_of(vm, ty_char, strlen(fname) + 1));
     }
 
     Token *close_brace = NULL;
@@ -2865,6 +2869,9 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     hashmap_deinit(&vm->compiler.global_decl_map);
     memset(&vm->compiler.global_decl_map, 0,
            sizeof(vm->compiler.global_decl_map));
+    hashmap_deinit(&vm->compiler.overload_sets);
+    memset(&vm->compiler.overload_sets, 0, sizeof(vm->compiler.overload_sets));
+    vm->compiler.saw_overloads = false;
     // Each program has its own template registry: the comptime program is
     // parsed in the middle of the runtime parse and must not discard the
     // runtime program's templates.

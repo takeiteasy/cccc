@@ -2015,6 +2015,33 @@ static Node *deduced_call(VirtualMachine *vm, Token **rest, Token *tok,
                           head.next);
 }
 
+// The call `name(args)` of an overload set: the member the arguments select.
+static Node *overloaded_call(VirtualMachine *vm, Token **rest, Token *lparen,
+                             OverloadSet *set, Token *site) {
+    Token *p    = lparen->next;
+    Node   head = {};
+    Node  *cur  = &head;
+    while (!equal(p, ")")) {
+        if (cur != &head)
+            p = skip(vm, p, ",");
+        if (is_keyed_arg(p))
+            error_tok(vm, p,
+                      "a call of an overloaded function takes positional "
+                      "arguments");
+        Node *arg = assign(vm, &p, p);
+        add_type(vm, arg);
+        if (arg->kind == ND_VAR && arg->var && arg->var->is_splice_placeholder)
+            error_tok(vm, arg->tok,
+                      "a call of an overloaded function cannot take a splice "
+                      "placeholder");
+        cur = cur->next = arg;
+    }
+    Obj *fn = cc_overload_resolve(vm, site, set, head.next);
+    mark_function_referenced(vm, fn);
+    fn->is_used = true;
+    return funcall_parsed(vm, rest, p, new_var_node(vm, fn, site), head.next);
+}
+
 // __builtin_kernel_launch(kernel, global, local, args...) (cccc_launch in
 // <cccc/kernel.h>). The trailing arguments are checked and converted by
 // funcall() against the kernel's parameters; each is then packed into an
@@ -4987,6 +5014,27 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
              vm->compiler.comptime_splice_active) &&
             cc_comptime_resolve_var(vm, tok))
             sc = find_var(vm, tok);
+
+        // A name that carries an overload set: a call picks a member.
+        if (vm->compiler.saw_overloads) {
+            OverloadSet *set = cc_overload_find(vm, tok);
+            if (set && (!sc || (sc->var && sc->var->is_function &&
+                                cc_overload_has(set, sc->var)))) {
+                if (equal(tok->next, "("))
+                    return overloaded_call(vm, rest, tok->next, set, tok);
+                if (cc_overload_count(set) > 1)
+                    error_tok(vm, tok,
+                              "address of overloaded function '%.*s' is not "
+                              "supported; call it",
+                              tok->len, tok->loc);
+                if (!sc) {
+                    Obj *only = cc_overload_first(set);
+                    mark_function_referenced(vm, only);
+                    only->is_used = true;
+                    return new_var_node(vm, only, tok);
+                }
+            }
+        }
 
         // An empty pack's instance is named like its template, which a bare
         // call must still reach.

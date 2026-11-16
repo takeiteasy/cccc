@@ -118,6 +118,7 @@ See [docs/templates.md](docs/templates.md), [docs/operators.md](docs/operators.m
 | **Derive attributes** | `@serialize`, `@to_json`, `@to_string`, `@equals`, ... generate code for a type ([derive.md](docs/derive.md)) |
 | **Templates** | `@template(T, int N = 8)` structs, unions, enums, typedefs and functions, instantiated with `@inst(Type, 16) Name` and specialised per argument list with `@specialize`, with parameter packs (`@template(Ts...)`) ([templates.md](docs/templates.md)) |
 | **Attributes** | GNU `__attribute__`, C23 `[[...]]` and the `@name` shorthand ([attributes.md](docs/attributes.md)) |
+| **Function overloading** | Clang's `__attribute__((overloadable))` shares one name among functions that differ by parameter types, with Clang's ranking and Itanium names ([attributes-overloadable.md](docs/attributes-overloadable.md)) |
 | **Operators and methods** | `[[cccc::operator(+)]]` and `[[cccc::method(T)]]` bind operators and `s.f(x)` calls to functions on structs, written free or in the struct body ([operators.md](docs/operators.md), [methods.md](docs/methods.md)) |
 | **Syntax extensions** | `@name` attributes, struct-body methods and operators, `<=>`, `^^name` reflection, quasi-quotes ([syntax.md](docs/syntax.md)) |
 | **C++ comparison** | How templates, operators, methods and comptime relate to their C++ counterparts ([cpp.md](docs/cpp.md)) |

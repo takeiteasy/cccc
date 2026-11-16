@@ -105,6 +105,9 @@ static const AttrDef attr_table[] = {
     GNU_ROW("gnu_inline", 0, attr_gnu_inline),
     GNU_ROW("constructor", 0, attr_constructor),
     GNU_ROW("destructor", 0, attr_destructor),
+    // Clang's: `[[clang::x]]` or `__attribute__((x))`.
+    GNU_ROW("overloadable", ATTR_NS_CLANG, attr_overloadable),
+    GNU_ROW("unavailable", ATTR_NS_CLANG, attr_unavailable),
     // Recognized and ignored: there is no linker, per-function ISA, inliner,
     // branch layout, symbol-level DCE, strict-aliasing optimizer or machine
     // mode.

@@ -1804,6 +1804,8 @@ struct Type {
     bool is_trusted    : 1; // [[cccc::trusted]]: exempt from -Wchecked-calls
     bool is_gnu_inline : 1; // __attribute__((gnu_inline)): `extern inline` is
                             // inline-only, never an external definition
+    bool is_overloadable : 1; // __attribute__((overloadable)): overload set
+                              // member, named by its Itanium mangling
     bool nonnull_all   : 1; // bare nonnull: every pointer parameter is non-null
     bool returns_nonnull : 1;
     bool is_sentinel     : 1; // the function requires a NULL sentinel arg
@@ -4278,6 +4280,8 @@ typedef struct Compiler {
     // Preprocessor state
     bool         skip_preprocess; // Skip preprocessing step
     bool         saw_templates;   // `@template`/`@inst` appeared in the input
+    bool         saw_overloads;   // an `overloadable` function was declared
+    HashMap      overload_sets;   // source name -> OverloadSet *
     bool         saw_operator_templates; // a function template carries [[cccc::operator]]
     bool         saw_variadic_aggregate; // a variadic struct was defined
     HashMap      member_pack_names;      // `Ts... name;` in a variadic struct

@@ -1,10 +1,11 @@
 # CCCC and C++
 
-Where CCCC's features behave like their C++ counterparts and where they differ. This page compares semantics, not syntax. CCCC stays C: no classes, no overloading of functions, no implicit constructors or destructors, no exceptions.
+Where CCCC's features behave like their C++ counterparts and where they differ. This page compares semantics, not syntax. CCCC stays C: no classes, no implicit constructors or destructors, no exceptions, and function overloading only through Clang's `overloadable` attribute.
 
 | C++ feature | CCCC counterpart | Same idea | Main difference |
 |---|---|---|---|
 | Class and function templates | [`@template`](templates.md) | Instantiate per argument list, specialise, packs, defaults | Function templates deduce their arguments from a call and operator templates from their operands; struct, union, enum and typedef templates take explicit arguments; no constraints or overloads |
+| Function overloading | [`overloadable`](attributes-overloadable.md) | Functions share a name and differ by parameter types | Clang's attribute: every overload marked but one, Itanium-mangled names, ranking as C++ with C's conversions; no address-of by target type |
 | Operator overloading | [`[[cccc::operator]]`](operators.md) | `a + b` calls a user function | Free functions bound by attribute; exact operand types; fewer operators |
 | Member functions | [`[[cccc::method]]`](methods.md) | `s.f(x)`, `T.f(x)` | Statically dispatched, explicit receiver, no `this`, no inheritance; a `static` member is called through the type |
 | `constexpr`, `consteval`, `if constexpr` | [`@comptime`](macros.md) | Code runs during compilation | Runs arbitrary C and builds syntax trees; not part of the type system |
@@ -187,7 +188,7 @@ C++ ties ownership to the type through constructors, destructors and move semant
 
 ## Things CCCC leaves out
 
-No classes or inheritance, function or operator overloading beyond operand-type selection, references (`T &`), namespaces, default function arguments in the C++ sense (`@default` on a parameter is the nearest, see [derive.md](derive.md)), lambdas (blocks and GNU nested functions are the nearest), `auto` return types, `std` containers, exceptions, RTTI and `virtual`.
+No classes or inheritance, operator overloading beyond operand-type selection, function overloading except through `overloadable`, references (`T &`), namespaces, default function arguments in the C++ sense (`@default` on a parameter is the nearest, see [derive.md](derive.md)), lambdas (blocks and GNU nested functions are the nearest), `auto` return types, `std` containers, exceptions, RTTI and `virtual`.
 
 [^spelling]: The prefix `@inst(int) max`, the postfix `max@(int)` and the keyword `__inst(int) max` name the same instance; see [templates.md](templates.md#spellings).
 

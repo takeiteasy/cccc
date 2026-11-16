@@ -646,6 +646,11 @@ Token *cc_template_capture(VirtualMachine *vm, Token *tok) {
     }
     if (old)
         error_tok(vm, t->name_tok, "redefinition of template '%s'", t->name);
+    if (cc_overload_find(vm, t->name_tok))
+        error_tok(vm, t->name_tok,
+                  "template '%s' shares its name with an overloadable "
+                  "function",
+                  t->name);
     hashmap_put2(tmpl_templates(vm), t->name, t->name_len, t);
     vm->compiler.captured = t;
     return t->end;

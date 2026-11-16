@@ -102,6 +102,7 @@ typedef struct VarAttr {
     bool           is_pure;
     bool           is_func_const;
     bool           is_gnu_inline;
+    bool           is_overloadable;
     bool           is_kernel;
     bool           is_trusted;
     const char    *operator_sym;
@@ -560,6 +561,24 @@ Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
                Token *tok);
 Node *addr_of_operand(VirtualMachine *vm, Node *n, Token *tok);
 void mark_function_referenced(VirtualMachine *vm, Obj *fn);
+
+// Function overloading (src/overload.c).
+typedef struct OverloadSet OverloadSet;
+typedef struct {
+    char  *name; // the name the function's Obj carries
+    int    len;
+    Token *tok;  // a token spelling `name`, for creating the Obj
+} OverloadName;
+char *cc_mangle_overload(VirtualMachine *vm, Token *site, const char *name,
+                         int name_len, Type *fn);
+OverloadName cc_overload_decl_name(VirtualMachine *vm, Type *ty, Token *tok);
+void cc_overload_declared(VirtualMachine *vm, Obj *fn, Type *ty, Token *src);
+OverloadSet *cc_overload_find(VirtualMachine *vm, Token *name_tok);
+bool cc_overload_has(OverloadSet *set, Obj *fn);
+int cc_overload_count(OverloadSet *set);
+Obj *cc_overload_first(OverloadSet *set);
+Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
+                         Node *args);
 void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name);
 const char *overloadable_operator(Token *tok, Token **rest);
