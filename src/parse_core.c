@@ -1101,7 +1101,7 @@ void require_value(VirtualMachine *vm, Node *node) {
 
 Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty) {
     add_type(vm, expr);
-    if (is_float16(expr->ty) || is_float16(ty))
+    if (!vm->compiler.unevaluated && (is_float16(expr->ty) || is_float16(ty)))
         error_float16_unsupported(vm, expr->tok);
     if (expr->ty && expr->ty->kind == TY_VOID && ty && ty->kind != TY_VOID)
         error_tok(vm, expr->tok, "void value not ignored as it ought to be");

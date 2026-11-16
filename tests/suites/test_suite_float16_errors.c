@@ -59,3 +59,16 @@ int test_cast_to_void(void) {
     (void)global_h;
     return 0;
 }
+
+extern _Float16 half_of(_Float16 x);
+
+[[cccc::test(error = "_Float16 values are not supported")]]
+int test_evaluated_call(void) {
+    half_of(1.0);
+    return 0;
+}
+
+[[cccc::test(error = "_Float16 values are not supported")]]
+int test_unevaluated_arithmetic(void) {
+    return (int)sizeof(half_of(1.0) + 1);
+}

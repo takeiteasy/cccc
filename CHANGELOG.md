@@ -9,6 +9,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 - Added: functions overloaded by parameter types through Clang's `__attribute__((overloadable))`, also written `[[clang::overloadable]]` and `@overloadable`. A call picks the best candidate, ranked as in C++ with Clang's C rules (`float` and `double` promote to `long double`, a string literal is `char *`), and reports `no matching function` or `ambiguous` with the candidates listed. Every function of the name but one carries the attribute; the unmarked one keeps its plain name. Marked functions take their Itanium names (`_Z5twiced`), as in Clang, so `-m` and `-c=native` output links against Clang-built overloads and the reverse. The attribute takes the `clang::` namespace in `[[ ]]` form; `[[overloadable]]` is ignored with `-Wattributes` and `[[gnu::overloadable]]` is ignored. `__has_attribute(overloadable)`, `__has_c_attribute(clang::overloadable)` and `__has_extension(attribute_overloadable)` are 1. See [attributes-overloadable.md](docs/attributes-overloadable.md).
 - Added: `__attribute__((unavailable))` and `unavailable("message")` make a call to the function an error unless it sits in a statically dead branch.
+- Fixed: a preprocessing number runs through underscores, so `10_15` is one token that pastes (`__MAC_##m`) and stringizes whole; the macOS SDK's `os/trace_base.h` no longer stops at "expected ')'".
+- Fixed: a call or cast that converts to or from `_Float16` is accepted inside a `sizeof`, `_Alignof` or `typeof` operand, which is never evaluated.
 
 ## [0.35.0] - 2026-11-14
 

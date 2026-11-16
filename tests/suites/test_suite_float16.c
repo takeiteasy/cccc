@@ -78,3 +78,16 @@ int test_struct_copy(void) {
     struct Packed b = a;
     return b.i;
 }
+
+extern _Float16 half_of(_Float16 x);
+
+[[cccc::test(return = 42)]]
+int test_unevaluated_call_and_cast(void) {
+    __typeof__(half_of(1.0)) h;
+    _Float16                *p = &h;
+    if (sizeof(half_of(1.0)) != 2 || sizeof(h) != 2 || !p)
+        return 1;
+    if (sizeof((_Float16)1.0) != 2 || _Alignof(half_of(1)) != 2)
+        return 2;
+    return 42;
+}

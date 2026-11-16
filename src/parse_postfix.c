@@ -1408,11 +1408,13 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
     node->ty             = unqualified(vm, ty->return_ty);
     node->args           = head_next;
     node->has_splice_arg = deferred_splice;
-    if (is_float16(node->ty))
-        error_float16_unsupported(vm, fn->tok);
-    for (Node *a = head_next; a; a = a->next)
-        if (a->ty && is_float16(a->ty))
-            error_float16_unsupported(vm, a->tok);
+    if (!vm->compiler.unevaluated) {
+        if (is_float16(node->ty))
+            error_float16_unsupported(vm, fn->tok);
+        for (Node *a = head_next; a; a = a->next)
+            if (a->ty && is_float16(a->ty))
+                error_float16_unsupported(vm, a->tok);
+    }
 
     // If a function returns a struct, it is caller's responsibility
     // to allocate a space for the return value.
