@@ -242,6 +242,8 @@ extern "C" {
     X(F2U3_F32, 1)  /* regs[rd] = (unsigned long long)(float)fregs[rs] */            \
     X(FR2R_F32, 1)  /* regs[rd] = raw float payload bits from fregs[rs] */           \
     X(R2FR_F32, 1)  /* fregs[rd] = raw float payload bits from regs[rs] */           \
+    X(H2FR, 1)      /* fregs[rd] = (double)_Float16 bits in regs[rs] */              \
+    X(FR2H, 1)      /* regs[rd] = _Float16 bits of fregs[rs], zero-extended */       \
     /* Register-based safety opcodes */                                              \
     X(CHKP3, 1) /* Check pointer validity: regs[rs] */                               \
     X(CHKA3, 3) /* Check alignment: regs[rs], immediate alignment */                 \
@@ -1566,9 +1568,9 @@ typedef enum {
     TY_DECIMAL32  = 23,
     TY_DECIMAL64  = 24,
     TY_DECIMAL128 = 25,
-    // Storage-only _Float16: declarations, sizeof, layout, pointers and
-    // prototypes; any value use is an error.
-    // TODO: full half-precision support (#1556)
+    // _Float16 travels as its 16-bit pattern in an integer register; casts
+    // widen it through a double (H2FR) and round back (FR2H), and add_type
+    // lowers its arithmetic to float operations.
     TY_FLOAT16 = 26,
 } TypeKind;
 

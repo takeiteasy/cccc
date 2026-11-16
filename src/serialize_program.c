@@ -2114,8 +2114,8 @@ static void node_scan_f2i_native(Node *node, F2ISynthNeed *need) {
     if (node->kind == ND_CAST && node->lhs) {
         Type *dst = node->ty;
         Type *src = node->lhs->ty;
-        if (src && dst && is_flonum(src) && !is_flonum(dst) &&
-            dst->kind != TY_VECTOR &&
+        if (src && dst && (is_flonum(src) || is_float16(src)) &&
+            !is_flonum(dst) && !is_float16(dst) && dst->kind != TY_VECTOR &&
             !(dst->kind == TY_BITINT && dst->bit_width > 64)) {
             bool u64_dst =
                 is_integer(dst) && dst->is_unsigned && dst->size == 8;

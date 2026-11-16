@@ -804,9 +804,12 @@ static void dump_scalar_at(FILE *f, VirtualMachine *vm, Type *ty,
         case TY_BITINT:
             fprintf(f, "<_BitInt value: printing not yet supported>");
             return;
-        case TY_FLOAT16:
-            fprintf(f, "<_Float16 value: printing not yet supported>");
+        case TY_FLOAT16: {
+            uint16_t bits;
+            memcpy(&bits, addr, sizeof bits);
+            fprintf(f, "%g", cccc_f16_to_double(bits));
             return;
+        }
         case TY_DECIMAL32:
         case TY_DECIMAL64:
         case TY_DECIMAL128:
@@ -983,7 +986,7 @@ void cc_dump_value_reg(FILE *f, VirtualMachine *vm, Type *ty, long long ival,
             fprintf(f, "<_BitInt value: printing not yet supported>");
             return;
         case TY_FLOAT16:
-            fprintf(f, "<_Float16 value: printing not yet supported>");
+            fprintf(f, "%g", cccc_f16_to_double((uint16_t)ival));
             return;
         case TY_DECIMAL32:
         case TY_DECIMAL64:

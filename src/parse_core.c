@@ -1088,10 +1088,6 @@ Node *new_vla_ptr(VirtualMachine *vm, Obj *var, Token *tok) {
     return node;
 }
 
-void error_float16_unsupported(VirtualMachine *vm, Token *tok) {
-    error_tok(vm, tok, "_Float16 values are not supported");
-}
-
 // A condition or logical operand must have a value; a void call does not.
 void require_value(VirtualMachine *vm, Node *node) {
     add_type(vm, node);
@@ -1101,8 +1097,6 @@ void require_value(VirtualMachine *vm, Node *node) {
 
 Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty) {
     add_type(vm, expr);
-    if (!vm->compiler.unevaluated && (is_float16(expr->ty) || is_float16(ty)))
-        error_float16_unsupported(vm, expr->tok);
     if (expr->ty && expr->ty->kind == TY_VOID && ty && ty->kind != TY_VOID)
         error_tok(vm, expr->tok, "void value not ignored as it ought to be");
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));

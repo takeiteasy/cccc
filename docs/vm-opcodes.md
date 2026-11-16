@@ -292,6 +292,8 @@ The `FMADD3`/`FMSUB3`/`FNMSUB3` family replaces a multiply feeding an add or sub
 | `R2FR` | Bit-pattern transfer `reg → freg` (f64) |
 | `FR2R_F32` | Bit-pattern transfer `freg → reg` (f32) |
 | `R2FR_F32` | Bit-pattern transfer `reg → freg` (f32) |
+| `H2FR` | `fregs[rd] = (double)h`, where `h` is the `_Float16` bit pattern in `regs[rs]` |
+| `FR2H` | `regs[rd]` = bit pattern of `(_Float16)fregs[rs]`, rounded to nearest even and zero-extended |
 
 ### SIMD / Vector Operations
 

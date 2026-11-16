@@ -996,13 +996,6 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
 
     obj_attr_mut(vm, fn)->def_ty = ty;
 
-    if (is_float16(fn->ty->return_ty))
-        error_float16_unsupported(vm, dn.tok);
-    for (Type *p = fn->ty->params; p; p = p->next)
-        if (is_float16(p))
-            error_float16_unsupported(vm,
-                                      p->param_name ? p->param_name : dn.tok);
-
     // #1056: nested-function tracking must only apply when a body actually
     // follows (checked above, via the early "no body" return) -- not to a
     // bare block-scope declaration/prototype. A block-scope function

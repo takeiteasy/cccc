@@ -2262,6 +2262,27 @@ static inline int op_R2FR_F32_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_H2FR_fn(VirtualMachine *vm) {
+    // _Float16 bits in an integer register to a double: fregs[rd] = (double)h
+    long long operands = cc_read_word(vm);
+    int       rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    cccc_freg_set_f64(vm, rd, cccc_f16_to_double((uint16_t)vm->regs[rs]));
+    return 0;
+}
+
+static inline int op_FR2H_fn(VirtualMachine *vm) {
+    // Round a double to _Float16: regs[rd] = bits of (_Float16)fregs[rs]
+    long long operands = cc_read_word(vm);
+    int       rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = cccc_f16_from_double(cccc_freg_get_f64(vm, rs));
+    return 0;
+}
+
 static inline int op_JZ3_fn(VirtualMachine *vm) {
     // Branch if zero: if (regs[rs] == 0) pc = target
     // Format: [JZ3] [rs:8|unused:24] [target:32]

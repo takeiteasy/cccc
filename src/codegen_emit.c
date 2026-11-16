@@ -781,6 +781,8 @@ static void emit_mem_rr(VirtualMachine *vm, int op, int rd, int rs_addr,
 
 static void emit_load_impl(VirtualMachine *vm, Type *ty, int rd, int rs_addr,
                            bool dangling_check, const IndexedRegs *ix) {
+    if (is_float16(ty))
+        ty = ty_ushort;
     if (!ix)
         emit_load_safety_checks(vm, ty, rs_addr, dangling_check);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
@@ -854,6 +856,8 @@ void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
 
 // Fused load from bp-relative local slot — replaces LEA3+LDR
 void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset) {
+    if (is_float16(ty))
+        ty = ty_ushort;
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_ri(vm,
                 ty->is_unsigned || ty->kind == TY_BOOL ? LDR_LOCAL_UB
@@ -906,6 +910,8 @@ void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset) {
 // Fused store to bp-relative local slot — replaces LEA3+STR
 void emit_local_store(VirtualMachine *vm, Type *ty, int rd_val,
                       long long offset) {
+    if (is_float16(ty))
+        ty = ty_ushort;
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_ri(vm, STR_LOCAL_B, rd_val, offset);
     } else if (ty->kind == TY_SHORT) {
@@ -947,6 +953,8 @@ void emit_local_store(VirtualMachine *vm, Type *ty, int rd_val,
 static void emit_store_impl(VirtualMachine *vm, Type *ty, int rd_val,
                             int rs_addr, bool dangling_check,
                             const IndexedRegs *ix) {
+    if (is_float16(ty))
+        ty = ty_ushort;
     if (!ix && dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
         emit_rr(vm, CHKP3, rs_addr, 0);
     // #983: see emit_load_safety_checks' comment on dangling_check gating

@@ -1,5 +1,6 @@
 // CCCC_FLAGS: --testing
-// _Float16 is storage-only: declarations, layout and pointers work.
+// _Float16 declarations, layout, pointers, zero initializers and unevaluated
+// operands. Values are in test_suite_float16_values.c.
 
 #include <stddef.h>
 #include <string.h>

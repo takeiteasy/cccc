@@ -473,14 +473,44 @@ void emit_bitfield_store(VirtualMachine *vm, Member *mem, int r_val,
     free_temp_reg(r_container);
 }
 
+// A _Float16 is its bit pattern in an integer register; add_type lowers every
+// arithmetic use to float casts, so an operand of any of these kinds is a bug.
+static bool float16_operand_leaked(const Node *node) {
+    switch (node->kind) {
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_DIV:
+        case ND_MOD:
+        case ND_NEG:
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+        case ND_NOT:
+        case ND_LOGAND:
+        case ND_LOGOR:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+        case ND_BITNOT:
+        case ND_SHL:
+        case ND_SHR:
+            return (node->lhs && is_float16(node->lhs->ty)) ||
+                   (node->rhs && is_float16(node->rhs->ty));
+        default:
+            return false;
+    }
+}
+
 // Generate code for expression, result in dest_reg (integer) or dest_freg
 // (float)
 void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     if (!node) {
         error("codegen: null expression node");
     }
-    if (is_float16(node->ty))
-        error("_Float16 values are not supported");
+    if (float16_operand_leaked(node))
+        error("internal error: a _Float16 operand reached integer codegen");
 
     // A vector-returning ND_FUNCALL falls through to the main switch below
     // instead of gen_vector_expr (#714): the value comes back via the
@@ -592,7 +622,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         }
 
         case ND_NUM:
-            if (is_flonum(node->ty)) {
+            if (is_float16(node->ty)) {
+                if (dest_reg != REG_ZERO)
+                    emit_li3(vm, dest_reg,
+                             cccc_f16_from_double(node_lit(node)->fval));
+            } else if (is_flonum(node->ty)) {
                 long long offset   = vm->data_ptr - vm->data_seg;
                 offset             = (offset + 7) & ~7; // Align
                 vm->data_ptr       = vm->data_seg + offset;
@@ -2065,6 +2099,24 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 gen_expr(vm, rmw, REG_ZERO);
                 return;
             }
+            if (is_float16(node->lhs->ty) && is_float16(node->ty)) {
+                gen_expr(vm, node->lhs, dest_reg);
+                return;
+            }
+            if (is_float16(node->lhs->ty) && dest_reg == REG_ZERO) {
+                gen_expr(vm, node->lhs, REG_ZERO);
+                return;
+            }
+            // (_Bool)h is C truthiness of the value, so -0.0 is false.
+            if (is_float16(node->lhs->ty) && node->ty->kind == TY_BOOL) {
+                int r = alloc_temp_reg();
+                gen_expr(vm, node->lhs, r);
+                mark_temp_reg_used(r);
+                emit_rr(vm, H2FR, r, r);
+                emit_rr(vm, FNZ3, dest_reg, r);
+                free_temp_reg(r);
+                return;
+            }
             // C truthiness, not truncation: (_Bool)0.5 is 1.
             if (node->ty->kind == TY_BOOL && !is_decimal(node->lhs->ty) &&
                 (is_flonum(node->lhs->ty) || is_complex(node->lhs->ty))) {
@@ -2077,7 +2129,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             if (is_complex(node->lhs->ty)) {
                 int imag_reg = (dest_reg == FREG_A7) ? FREG_A6 : FREG_A7;
                 gen_complex_expr(vm, node->lhs, dest_reg, imag_reg);
-                if (!is_flonum(node->ty))
+                if (is_float16(node->ty))
+                    emit_rr(vm, FR2H, dest_reg, dest_reg);
+                else if (!is_flonum(node->ty))
                     emit_rr(vm,
                             fop_for_type(node->lhs->ty->base,
                                          is_u64_int(node->ty) ? F2U3 : F2I3),
@@ -2369,23 +2423,32 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 }
             }
             gen_expr(vm, node->lhs, dest_reg);
+            // A half widens to a double for the conversion and rounds back
+            // once at the end (H2FR/FR2H).
+            Type *src_ty = node->lhs->ty;
+            Type *dst_ty = node->ty;
+            if (is_float16(src_ty)) {
+                emit_rr(vm, H2FR, dest_reg, dest_reg);
+                src_ty = ty_double;
+            }
+            if (is_float16(dst_ty))
+                dst_ty = ty_double;
             // Add type conversion if needed
-            if (is_flonum(node->ty) && !is_flonum(node->lhs->ty)) {
+            if (is_flonum(dst_ty) && !is_flonum(src_ty)) {
                 // int -> float
                 emit_rr(vm,
-                        fop_for_type(node->ty,
+                        fop_for_type(dst_ty,
                                      is_u64_int(node->lhs->ty) ? U2F3 : I2F3),
                         dest_reg, dest_reg);
-            } else if (!is_flonum(node->ty) && is_flonum(node->lhs->ty)) {
+            } else if (!is_flonum(dst_ty) && is_flonum(src_ty)) {
                 // float -> int
-                emit_rr(vm,
-                        fop_for_type(node->lhs->ty,
-                                     is_u64_int(node->ty) ? F2U3 : F2I3),
-                        dest_reg, dest_reg);
-            } else if (node->ty->kind == TY_FLOAT &&
-                       node->lhs->ty->kind != TY_FLOAT) {
+                emit_rr(
+                    vm,
+                    fop_for_type(src_ty, is_u64_int(node->ty) ? F2U3 : F2I3),
+                    dest_reg, dest_reg);
+            } else if (dst_ty->kind == TY_FLOAT && src_ty->kind != TY_FLOAT) {
                 emit_fround_f32(vm, dest_reg, dest_reg);
-            } else if (!is_flonum(node->ty) && !is_flonum(node->lhs->ty)) {
+            } else if (!is_flonum(dst_ty) && !is_flonum(src_ty)) {
                 // Integer conversion - handle truncation/extension
                 //
                 // #1175: TY_ENUM was never checked here at all before this
@@ -2442,6 +2505,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     emit_bitint_trunc(vm, node->ty, dest_reg);
                 }
             }
+            if (is_float16(node->ty))
+                emit_rr(vm, FR2H, dest_reg, dest_reg);
             return;
 
         case ND_FUNCALL: {
@@ -2887,6 +2952,16 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         } else {
                             double_arg_mask |= (1ULL << nargs);
                         }
+                    } else if (is_float16(arg->ty)) {
+                        if (ffi_arg_is_vararg)
+                            error_tok(vm, arg->tok,
+                                      "_Float16 arguments through variadic FFI "
+                                      "calls are not supported");
+                        if (nargs >= 64)
+                            error_tok(vm, arg->tok,
+                                      "too many floating-point FFI arguments");
+                        // A half rides in the low 16 bits of a float argument.
+                        float_arg_mask |= (1ULL << nargs);
                     } else if (is_vector(arg->ty)) {
                         error_tok(vm, arg->tok,
                                   "vector arguments through FFI calls are not "
@@ -3026,7 +3101,13 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 reset_temp_regs();
 
                 // Result in REG_A0/FREG_A0
-                if (is_flonum(node->ty)) {
+                if (is_float16(node->ty)) {
+                    // Comes back as a float whose low 16 bits are the half.
+                    if (dest_reg != REG_ZERO) {
+                        emit_rr(vm, FR2R_F32, dest_reg, FREG_A0);
+                        emit_rr(vm, ZX2, dest_reg, dest_reg);
+                    }
+                } else if (is_flonum(node->ty)) {
                     if (dest_reg != FREG_A0) {
                         emit_fmov3(vm, dest_reg, FREG_A0);
                     }

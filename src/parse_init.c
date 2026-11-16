@@ -1327,13 +1327,6 @@ static Node *balanced_comma(VirtualMachine *vm, Node **items, int lo, int hi,
     return new_binary(vm, ND_COMMA, l, r, tok);
 }
 
-// A zero initializer for a _Float16 inside an aggregate or static storage is
-// already satisfied by the pre-zeroed memory.
-static bool is_float16_zero_init(Type *ty, Node *expr) {
-    return is_float16(ty) && expr && expr->kind == ND_NUM &&
-           !is_flonum(expr->ty) && expr->val == 0;
-}
-
 static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
                               InitDesg *desg, Token *tok) {
     // Multi-dimensional VLA (#977): a nested row's own type is TY_VLA (e.g.
@@ -1445,7 +1438,7 @@ static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
         return node;
     }
 
-    if (!init->expr || (desg->next && is_float16_zero_init(ty, init->expr)))
+    if (!init->expr)
         return new_node(vm, ND_NULL_EXPR, tok);
 
     Node *lhs = init_desg_expr(vm, desg, tok);
@@ -1893,8 +1886,8 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
         return cur;
 
     if (ty->kind == TY_FLOAT16) {
-        if (!is_float16_zero_init(ty, init->expr))
-            error_float16_unsupported(vm, init->expr->tok);
+        uint16_t bits = cccc_f16_from_double(eval_double(vm, init->expr));
+        memcpy(buf + offset, &bits, sizeof bits);
         return cur;
     }
 

@@ -1302,6 +1302,8 @@ void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg,
 
     if (!is_complex(node->ty)) {
         gen_expr(vm, node, real_reg);
+        if (is_float16(node->ty))
+            emit_rr(vm, H2FR, real_reg, real_reg);
         emit_float_zero(vm, imag_reg);
         return;
     }

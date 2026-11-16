@@ -1,5 +1,6 @@
 // math.h stdlib function registration
 #include "../cccc.h"
+#include "../float16.h"
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
@@ -10,6 +11,66 @@
 // double) and casts back to float before delegating to nextafterf (#498).
 static float cccc_nexttowardf(float x, double y) {
     return nextafterf(x, (float)y);
+}
+
+// The macOS SDK's _Float16 math functions (<math.h>, <tgmath.h>). A half
+// crosses the FFI as a float whose low 16 bits are the value, so each one
+// widens to double, computes, and rounds back.
+static double f16_in(float v) {
+    uint32_t u;
+    memcpy(&u, &v, sizeof u);
+    return cccc_f16_to_double((uint16_t)u);
+}
+
+static float f16_out(double d) {
+    uint32_t u = cccc_f16_from_double(d);
+    float    v;
+    memcpy(&v, &u, sizeof v);
+    return v;
+}
+
+#define CCCC_F16_FN1(NAME, EXPR)                                               \
+    static float cccc___##NAME##f16(float a) {                                 \
+        double x = f16_in(a);                                                  \
+        return f16_out(EXPR);                                                  \
+    }
+#define CCCC_F16_FN2(NAME, EXPR)                                               \
+    static float cccc___##NAME##f16(float a, float b) {                        \
+        double x = f16_in(a), y = f16_in(b);                                   \
+        return f16_out(EXPR);                                                  \
+    }
+CCCC_F16_FN1(fabs, fabs(x))
+CCCC_F16_FN1(sqrt, sqrt(x))
+CCCC_F16_FN1(ceil, ceil(x))
+CCCC_F16_FN1(floor, floor(x))
+CCCC_F16_FN1(rint, rint(x))
+CCCC_F16_FN1(round, round(x))
+CCCC_F16_FN1(trunc, trunc(x))
+CCCC_F16_FN2(hypot, hypot(x, y))
+CCCC_F16_FN2(copysign, copysign(x, y))
+CCCC_F16_FN2(fmax, fmax(x, y))
+CCCC_F16_FN2(fmin, fmin(x, y))
+
+static float cccc___fmaf16(float a, float b, float c) {
+    return f16_out(fma(f16_in(a), f16_in(b), f16_in(c)));
+}
+
+// Steps the 16-bit pattern one place toward y, as nextafter does for any type.
+static float cccc___nextafterf16(float a, float b) {
+    double   x = f16_in(a), y = f16_in(b);
+    uint32_t ua, ub;
+    memcpy(&ua, &a, sizeof ua);
+    memcpy(&ub, &b, sizeof ub);
+    uint16_t h = (uint16_t)ua;
+    if (isnan(x) || isnan(y) || x == y)
+        return isnan(x) ? a : isnan(y) ? b : f16_out(y);
+    if (x == 0)
+        h = (uint16_t)(0x0001 | (y < 0 ? 0x8000 : 0));
+    else if ((x < y) == (x > 0))
+        h++;
+    else
+        h--;
+    return f16_out(cccc_f16_to_double(h));
 }
 
 // C23 functions shared with -c=native output (see c23_math/runtime.c). The
@@ -246,6 +307,21 @@ void register_math_functions(VirtualMachine *vm) {
     cc_register_cfunc_ex(vm, "powl", (void *)pow, 2, 1, 0b11);
     cc_register_cfunc_ex(vm, "sqrt", (void *)sqrt, 1, 1, 0b1);
     cc_register_cfunc_ex(vm, "sqrtf", (void *)sqrtf, 1, 2, 0);
+    cc_register_cfunc_ex(vm, "__fabsf16", (void *)cccc___fabsf16, 1, 2, 0);
+    cc_register_cfunc_ex(vm, "__sqrtf16", (void *)cccc___sqrtf16, 1, 2, 0);
+    cc_register_cfunc_ex(vm, "__ceilf16", (void *)cccc___ceilf16, 1, 2, 0);
+    cc_register_cfunc_ex(vm, "__floorf16", (void *)cccc___floorf16, 1, 2, 0);
+    cc_register_cfunc_ex(vm, "__rintf16", (void *)cccc___rintf16, 1, 2, 0);
+    cc_register_cfunc_ex(vm, "__roundf16", (void *)cccc___roundf16, 1, 2, 0);
+    cc_register_cfunc_ex(vm, "__truncf16", (void *)cccc___truncf16, 1, 2, 0);
+    cc_register_cfunc_ex(vm, "__hypotf16", (void *)cccc___hypotf16, 2, 2, 0);
+    cc_register_cfunc_ex(vm, "__copysignf16", (void *)cccc___copysignf16, 2, 2,
+                         0);
+    cc_register_cfunc_ex(vm, "__fmaxf16", (void *)cccc___fmaxf16, 2, 2, 0);
+    cc_register_cfunc_ex(vm, "__fminf16", (void *)cccc___fminf16, 2, 2, 0);
+    cc_register_cfunc_ex(vm, "__fmaf16", (void *)cccc___fmaf16, 3, 2, 0);
+    cc_register_cfunc_ex(vm, "__nextafterf16", (void *)cccc___nextafterf16, 2,
+                         2, 0);
     cc_register_cfunc_ex(vm, "sqrtl", (void *)sqrt, 1, 1, 0b1);
     cc_register_cfunc_ex(vm, "cbrt", (void *)cbrt, 1, 1, 0b1);
     cc_register_cfunc_ex(vm, "cbrtf", (void *)cbrtf, 1, 2, 0);

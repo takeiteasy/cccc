@@ -2061,6 +2061,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                         node_lit(node)->dec_digits ? node_lit(node)->dec_digits
                                                    : "0",
                         suffix);
+            } else if (node->ty && is_float16(node->ty)) {
+                serialize_float16_literal(f, (double)node_lit(node)->fval);
             } else if (node->ty && is_flonum(node->ty)) {
                 // #1038: this used to funnel every flonum type -- TY_FLOAT,
                 // TY_DOUBLE and TY_LDOUBLE alike -- through a single unsuffixed
@@ -2649,7 +2651,9 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // truncated 1.5f to 1. A real->complex cast is not a
             // real->integer conversion; the per-part real cast inside the
             // ND_COMPLEX construction arm handles the element type.
-            bool f2i_native = src && dst && is_flonum(src) && !is_flonum(dst) &&
+            bool f16_src    = src && is_float16(src);
+            bool f2i_native = src && dst && (is_flonum(src) || f16_src) &&
+                              !is_flonum(dst) && !is_float16(dst) &&
                               dst->kind != TY_VECTOR && dst->kind != TY_BOOL &&
                               dst->kind != TY_COMPLEX &&
                               !(dst->kind == TY_BITINT && dst->bit_width > 64);
@@ -2663,6 +2667,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 fprintf(f, "(");
                 serialize_type(f, ctx, node->ty);
                 fprintf(f, ")%s(", fn);
+                if (f16_src)
+                    fprintf(f, "(double)");
                 serialize_expr(f, vm, ctx, node->lhs, 2);
                 fprintf(f, ")");
                 break;

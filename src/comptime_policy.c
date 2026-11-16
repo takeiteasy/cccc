@@ -939,6 +939,13 @@ static int lookup_exact(const char *name, size_t len) {
     return v ? (int)(uintptr_t)v - 1 : -1;
 }
 
+// The macOS SDK's half-precision spelling: `__sqrtf16` is `sqrt`.
+static bool is_half_math_name(const char *name, size_t len) {
+    return len > 5 && name[0] == '_' && name[1] == '_' &&
+           memcmp(name + len - 3, "f16", 3) == 0 &&
+           hashmap_get2(&math_bases, name + 2, (int)len - 5);
+}
+
 int cccc_comptime_class_of(const char *name) {
     if (!name)
         return -1;
@@ -962,7 +969,8 @@ int cccc_comptime_class_of(const char *name) {
     if (len > 1 && (name[len - 1] == 'f' || name[len - 1] == 'l') &&
         hashmap_get2(&math_bases, name, (int)len - 1))
         return CT_SAFE;
-    if (hashmap_get2(&math_bases, name, (int)len))
+    if (hashmap_get2(&math_bases, name, (int)len) ||
+        is_half_math_name(name, len))
         return CT_SAFE;
 
     // --asm-passthru thunks run arbitrary host assembly.
@@ -978,7 +986,8 @@ int cccc_comptime_class_of(const char *name) {
 
 bool cccc_comptime_is_math_name(const char *name, size_t len) {
     pthread_once(&table_once, build_tables);
-    if (hashmap_get2(&math_bases, name, (int)len))
+    if (hashmap_get2(&math_bases, name, (int)len) ||
+        is_half_math_name(name, len))
         return true;
     return len > 1 && (name[len - 1] == 'f' || name[len - 1] == 'l') &&
            hashmap_get2(&math_bases, name, (int)len - 1);

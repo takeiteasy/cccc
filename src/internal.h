@@ -24,6 +24,7 @@
 
 #include "cccc.h"
 #include "comptime_policy.h"
+#include "float16.h"
 
 #include <fenv.h> // for feraiseexcept(FE_INVALID) in cccc_f64_to_i64/cccc_f32_to_i64 (#775)
 
@@ -882,7 +883,6 @@ bool is_numeric(Type *ty);
 bool is_vector(Type *ty);
 bool is_float16(Type *ty);
 // Hard error for any _Float16 value use (see TY_FLOAT16).
-void error_float16_unsupported(VirtualMachine *vm, Token *tok);
 bool is_decimal(Type *ty);
 int dec_width_code(Type *ty);  // 0/1/2 for _Decimal32/64/128, else -1
 bool is_error_type(Type *ty);

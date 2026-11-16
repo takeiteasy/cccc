@@ -1396,6 +1396,107 @@ Type *flexible_declared_type(Type *ty) {
     return ty;
 }
 
+// A _Float16 value is its 16-bit pattern, so arithmetic and comparisons run in
+// float and the result is rounded back to _Float16: each operation rounds once.
+static Node *float16_to_float(VirtualMachine *vm, Node *n) {
+    return is_float16(n->ty) ? new_cast(vm, n, ty_float) : n;
+}
+
+static bool float16_operand_ok(Type *ty) {
+    return is_float16(ty) || is_numeric(ty) || is_complex(ty);
+}
+
+// Convert the operands of a binary node for evaluation. Returns true when the
+// result type is _Float16, so the caller rounds the float result back.
+static bool float16_binary_operands(VirtualMachine *vm, Node *node) {
+    Type *lt = node->lhs->ty;
+    Type *rt = node->rhs->ty;
+    if (!float16_operand_ok(lt) || !float16_operand_ok(rt))
+        error_tok(vm, node->tok,
+                  "invalid operands to binary expression (_Float16)");
+    bool half = !is_complex(lt) && !is_complex(rt) &&
+                is_float16(get_common_type(vm, lt, rt));
+    if (half) {
+        if (!is_float16(lt))
+            node->lhs = new_cast(vm, node->lhs, ty_float16);
+        if (!is_float16(rt))
+            node->rhs = new_cast(vm, node->rhs, ty_float16);
+    }
+    node->lhs = float16_to_float(vm, node->lhs);
+    node->rhs = float16_to_float(vm, node->rhs);
+    return half;
+}
+
+// The node becomes `(_Float16)(<its float form>)`; parents keep their pointer.
+static void float16_round_result(VirtualMachine *vm, Node *node) {
+    Node *inner = node_clone(vm, node);
+    inner->ty   = ty_float;
+    node->kind  = ND_CAST;
+    node->lhs   = inner;
+    node->rhs   = NULL;
+    node->ty    = copy_type(vm, ty_float16);
+}
+
+// Rewrites a node with a _Float16 operand into float arithmetic. True when the
+// node is fully typed and add_type is done with it.
+static bool lower_float16_operands(VirtualMachine *vm, Node *node) {
+    Node *c = node_ctl(node)->cond;
+    if (c && is_float16(c->ty) && node->kind != ND_SWITCH)
+        node_ctl_mut(vm, node)->cond = new_cast(vm, c, ty_bool);
+
+    bool l = node->lhs && is_float16(node->lhs->ty);
+    bool r = node->rhs && is_float16(node->rhs->ty);
+    if (!l && !r)
+        return false;
+
+    switch (node->kind) {
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_DIV:
+            if (float16_binary_operands(vm, node)) {
+                node->ty = ty_float;
+                float16_round_result(vm, node);
+            } else {
+                usual_arith_conv(vm, &node->lhs, &node->rhs);
+                node->ty = node->lhs->ty;
+            }
+            return true;
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+            float16_binary_operands(vm, node);
+            usual_arith_conv(vm, &node->lhs, &node->rhs);
+            node->ty = ty_int;
+            return true;
+        case ND_NEG:
+            node->lhs = float16_to_float(vm, node->lhs);
+            node->ty  = ty_float;
+            float16_round_result(vm, node);
+            return true;
+        case ND_NOT:
+        case ND_LOGAND:
+        case ND_LOGOR:
+            if (l)
+                node->lhs = new_cast(vm, node->lhs, ty_bool);
+            if (r)
+                node->rhs = new_cast(vm, node->rhs, ty_bool);
+            node->ty = ty_int;
+            return true;
+        case ND_ASSIGN:
+        case ND_COMMA:
+        case ND_RETURN:
+        case ND_CAST:
+        case ND_EXPR_STMT:
+        case ND_ADDR:
+            return false;
+        default:
+            error_tok(vm, node->tok, "invalid operand of type _Float16");
+    }
+    return false;
+}
+
 void add_type(VirtualMachine *vm, Node *node) {
     if (!node || (node->ty && node->kind != ND_COMPLEX))
         return;
@@ -1422,14 +1523,8 @@ void add_type(VirtualMachine *vm, Node *node) {
         return;
     }
 
-    // _Float16 is storage-only: an operand is only legal where its address
-    // or type is taken, never its value.
-    if (node->kind != ND_ADDR && !vm->compiler.unevaluated) {
-        Node *const ops[] = {node->lhs, node->rhs, node_ctl(node)->cond};
-        for (int i = 0; i < 3; i++)
-            if (ops[i] && is_float16(ops[i]->ty))
-                error_float16_unsupported(vm, node->tok);
-    }
+    if (lower_float16_operands(vm, node))
+        return;
 
     switch (node->kind) {
         case ND_NUM:

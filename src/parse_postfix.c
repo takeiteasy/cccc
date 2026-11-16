@@ -1408,12 +1408,16 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
     node->ty             = unqualified(vm, ty->return_ty);
     node->args           = head_next;
     node->has_splice_arg = deferred_splice;
-    if (!vm->compiler.unevaluated) {
-        if (is_float16(node->ty))
-            error_float16_unsupported(vm, fn->tok);
-        for (Node *a = head_next; a; a = a->next)
-            if (a->ty && is_float16(a->ty))
-                error_float16_unsupported(vm, a->tok);
+    if (ty->is_variadic || ty->is_unprototyped) {
+        int fixed = 0;
+        for (Type *p = ty->params; p; p = p->next)
+            fixed++;
+        int i = 0;
+        for (Node *a = head_next; a; a = a->next, i++)
+            if (i >= fixed && a->ty && is_float16(a->ty))
+                error_tok(vm, a->tok,
+                          "a _Float16 argument cannot be passed through '...'; "
+                          "convert it to double");
     }
 
     // If a function returns a struct, it is caller's responsibility
@@ -5350,7 +5354,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             printf("  primary: TK_NUM tok->ty kind=%d, is_flonum=%d\n",
                    tok_lit(tok)->ty ? tok_lit(tok)->ty->kind : -1, is_flonum(tok_lit(tok)->ty));
 
-        if (is_flonum(tok_lit(tok)->ty)) {
+        if (is_flonum(tok_lit(tok)->ty) || is_float16(tok_lit(tok)->ty)) {
             node       = new_node(vm, ND_NUM, tok);
             node_lit_mut(vm, node)->fval = tok_lit(tok)->fval;
             if (vm->debug_vm)

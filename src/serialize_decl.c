@@ -1560,9 +1560,10 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
         return;
     }
 
-    // Storage-only _Float16 accepts only a zero initializer.
     if (ty->kind == TY_FLOAT16) {
-        fprintf(f, "0");
+        uint16_t bits;
+        memcpy(&bits, var->init_data + offset, sizeof bits);
+        serialize_float16_literal(f, cccc_f16_to_double(bits));
         return;
     }
 

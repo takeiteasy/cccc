@@ -2141,6 +2141,17 @@ bool serialize_flonum_special(FILE *f, long double v, const char *suf) {
     return false;
 }
 
+// A _Float16 constant is spelled as a cast of its exact hex-float value, which
+// both gcc and clang accept without the `f16` suffix.
+void serialize_float16_literal(FILE *f, double v) {
+    if (isnan(v))
+        fprintf(f, "(_Float16)__builtin_nanf(\"\")");
+    else if (isinf(v))
+        fprintf(f, "(_Float16)%s__builtin_inff()", v < 0 ? "-" : "");
+    else
+        fprintf(f, "(_Float16)%a", v);
+}
+
 // Double counterpart of format_float_literal: %.17g round-trips a double, and
 // the forced ".0" keeps an integral value (including -0) a floating literal.
 void format_double_literal(char *buf, size_t cap, double v) {

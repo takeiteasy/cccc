@@ -244,10 +244,12 @@ static bool op_spec(int op, OpSpec *s) {
             return true;
         case I2F3:
         case I2F3_F32:
+        case H2FR:
             *s = SPEC(FD, IU, NO, NO, 0);
             return true;
         case F2I3:
         case F2I3_F32:
+        case FR2H:
         case FNZ3:
         case FNZ3_F32:
             *s = SPEC(ID, FU, NO, NO, 0);

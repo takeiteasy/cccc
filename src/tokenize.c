@@ -1631,7 +1631,11 @@ static void convert_pp_number(VirtualMachine *vm, Token *tok) {
     }
 
     Type *ty;
-    if (*end == 'f' || *end == 'F') {
+    if ((*end == 'f' || *end == 'F') && end[1] == '1' && end[2] == '6') {
+        ty   = ty_float16;
+        val  = cccc_f16_to_double(cccc_f16_from_double(strtod(cleaned, NULL)));
+        end += 3;
+    } else if (*end == 'f' || *end == 'F') {
         ty = ty_float;
         end++;
     } else if (*end == 'l' || *end == 'L') {

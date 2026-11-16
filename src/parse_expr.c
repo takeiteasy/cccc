@@ -109,6 +109,9 @@ double eval_double(VirtualMachine *vm, Node *node) {
             // correct unsigned widening (unsigned long long, not a bare
             // "eval()" whose int64_t return implicitly sign-converts to
             // double and loses the operand's unsignedness for values >= 2^63).
+            if (is_float16(node->ty))
+                return cccc_f16_to_double(
+                    cccc_f16_from_double(eval_double(vm, node->lhs)));
             return eval_double(vm, node->lhs);
         case ND_VAR:
         case ND_MEMBER: {
@@ -1903,9 +1906,6 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         node->ty   = ty_error;
         return node;
     }
-    if (!vm->compiler.unevaluated &&
-        (is_float16(lhs->ty) || is_float16(rhs->ty)))
-        error_float16_unsupported(vm, tok);
 
     Node *ov = try_overloaded_op(vm, "+", lhs, rhs, tok);
     if (ov)
@@ -1991,9 +1991,6 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         node->ty   = ty_error;
         return node;
     }
-    if (!vm->compiler.unevaluated &&
-        (is_float16(lhs->ty) || is_float16(rhs->ty)))
-        error_float16_unsupported(vm, tok);
 
     Node *ov = try_overloaded_op(vm, "-", lhs, rhs, tok);
     if (ov)
