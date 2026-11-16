@@ -4236,12 +4236,20 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // 3. Pass descriptor in A0 (as __static_link for captured vars)
             // 4. Pass user arguments in A1-A7
 
-            // First, evaluate block expression to get descriptor address
-            // TODO: a call inside the arguments resets the temp registers and
-            // clobbers r_desc; spill it to a frame temp (#2116)
+            // First, evaluate block expression to get descriptor address. A
+            // call in an argument clobbers every register, so the descriptor
+            // waits on the stack and comes back before the call.
+            bool args_have_call = false;
+            for (Node *a = node->args; a; a = a->next)
+                args_have_call |= contains_funcall(a);
             int r_desc = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_desc);
-            mark_temp_reg_used(r_desc);
+            if (args_have_call) {
+                emit_psh3(vm, r_desc);
+                free_temp_reg(r_desc);
+            } else {
+                mark_temp_reg_used(r_desc);
+            }
 
             // Count arguments
             // int nargs = 0;
@@ -4270,6 +4278,21 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int  arg_i        = 0;
             for (Node *a = node->args; a; a = a->next, arg_i++) {
                 add_type(vm, a);
+                // An argument holding a call clobbers the registers already
+                // placed (A0 is still free, so A1.. and the float args), so
+                // they wait on the stack while it runs.
+                int saved_int   = 0;
+                int saved_float = 0;
+                if (contains_funcall(a)) {
+                    saved_int = int_arg_idx - 1;
+                    for (int j = int_arg_idx - 1; j >= 1; j--)
+                        emit_psh3(vm, REG_A0 + j);
+                    saved_float = float_arg_idx;
+                    for (int j = float_arg_idx - 1; j >= 0; j--) {
+                        emit_rr(vm, FR2R, REG_T0, FREG_A0 + j);
+                        emit_psh3(vm, REG_T0);
+                    }
+                }
                 if (is_vector(a->ty)) {
                     // Block invocation has no by-memory ABI for aggregates at
                     // all (no RETBUF/pointer-arg machinery here) -- reject
@@ -4314,6 +4337,17 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     gen_expr(vm, a, REG_A0 + int_arg_idx);
                     int_arg_idx++;
                 }
+                for (int j = 0; j < saved_float; j++) {
+                    emit_pop3(vm, REG_T0);
+                    emit_rr(vm, R2FR, FREG_A0 + j, REG_T0);
+                }
+                for (int j = 1; j <= saved_int; j++)
+                    emit_pop3(vm, REG_A0 + j);
+            }
+
+            if (args_have_call) {
+                r_desc = alloc_temp_reg();
+                emit_pop3(vm, r_desc);
             }
 
             // Load function pointer from descriptor[0]

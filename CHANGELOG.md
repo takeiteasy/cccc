@@ -22,6 +22,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Fixed: `_Float16` arithmetic is accepted inside a `sizeof`, `_Alignof`, `typeof` or `_Generic` controlling operand, and `_Float16 + int` has type `_Float16` (`float` and `double` operands win), so the SDK headers that size or select on `_Float16` expressions parse. The `_Generic` controlling expression is unevaluated, as in C.
 - Fixed: a call through an Apple Block takes and returns `_Complex` values (`dc (^blk)(dc, dc)`); a complex result was "unsupported complex expression" and a complex argument was passed wrong.
 - Added: `_Float16` values. The `f16` literal suffix, `FLT16_*` and `__FLT16_*`, conversions to and from every other type, arithmetic that rounds to half after each operation, comparisons, truth tests, `++`/`--` and compound assignment, parameters and results, and non-zero initializers all work, in the VM and under `-c=native`. A `_Float16` passes to and from registered host functions as a float carrying its 16 bits, so the macOS SDK's `<tgmath.h>` builds under `--sysroot` and its `_Float16` overloads run (`sqrt`, `fabs`, `fma`, `nextafter` and the rest of the `__*f16` functions). A `_Float16` cannot go through `...`; convert it to `double`.
+- Fixed: a call in the arguments of a block call (`blk(3, f(1), 2.0)`, `make()(f(1))`) no longer clobbers the block or the arguments placed before it; it stopped with "invalid indirect call target".
 
 ## [0.35.0] - 2026-11-14
 

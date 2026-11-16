@@ -140,6 +140,15 @@ int test_block_expression_arguments(void) {
 }
 
 [[cccc::test(return = 42)]]
+int test_block_call_in_arguments(void) {
+    dc (^blk)(int, dc, double) = ^dc(int i, dc a, double d) {
+      return a * i + d;
+    };
+    dc r = blk(3, add(CMPLX(1, 1), CMPLX(0, 1)), 2.0);
+    return creal(r) == 5 && cimag(r) == 6 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
 int test_block_float_widths(void) {
     fc (^fb)(fc) = ^fc(fc z) {
       return z + z;

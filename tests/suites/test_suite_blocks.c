@@ -599,4 +599,64 @@ int test_blocks_call_converts_args(void) {
     return id(42.9);
 }
 
+// A call in an argument must not clobber the block or the arguments placed
+// before it.
+static int add1(int a) {
+    return a + 1;
+}
+static double dbl(double a) {
+    return a * 2;
+}
+typedef int (^sum_block)(int, int, double);
+static sum_block make_sum(void) {
+    return Block_copy(^int(int a, int b, double d) {
+      return a * 100 + b * 10 + (int)d;
+    });
+}
+
+[[cccc::test(return = 42)]]
+int test_blocks_call_in_arguments(void) {
+    int (^blk)(int, int, double) = ^int(int i, int a, double d) {
+      return i * 100 + a * 10 + (int)d;
+    };
+    if (blk(3, add1(1), 2.0) != 322)
+        return 1;
+    if (blk(3, 1, dbl(1.0)) != 312)
+        return 2;
+    if (blk(add1(2), add1(add1(0)), dbl(dbl(1.0))) != 324)
+        return 3;
+    if (blk(add1(0), 5, 1.5) != 151)
+        return 4;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_blocks_call_in_arguments_with_floats(void) {
+    double (^blk)(double, int, double, int) =
+        ^double(double a, int b, double c, int d) {
+          return a * 1000 + b * 100 + c * 10 + d;
+        };
+    double r = blk(1.0, 2, dbl(2.0), add1(3));
+    return r == 1000 + 200 + 40 + 4 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_blocks_call_in_block_expression(void) {
+    sum_block b = make_sum();
+    int       r = make_sum()(1, add1(1), dbl(1.0));
+    Block_release(b);
+    return r == 100 + 20 + 2 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_blocks_nested_block_calls(void) {
+    int (^inner)(int) = ^int(int a) {
+      return a + 10;
+    };
+    int (^outer)(int, int) = ^int(int a, int b) {
+      return a * 100 + b;
+    };
+    return outer(inner(1), inner(inner(2))) == 1122 ? 42 : 1;
+}
+
 #pragma cccc suite end
