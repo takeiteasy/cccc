@@ -20,6 +20,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Fixed: a call or cast that converts to or from `_Float16` is accepted inside a `sizeof`, `_Alignof` or `typeof` operand, which is never evaluated.
 - Added: complex values pass to and return from functions, through function pointers and `va_arg`; they pass by address. `<complex.h>` declares `cabs`, `carg`, `cimag`, `conj`, `cproj`, `creal`, `cpow`, `csqrt`, `cexp`, `clog` and the trigonometric and hyperbolic functions and their inverses, each with `f` and `l` forms, so `&cabs` and `(cabs)(z)` name the function. The bundled `<tgmath.h>` dispatches complex arguments (`sqrt(z)`, `exp(z)`, `pow(z, w)`) and covers `acosh`, `asinh`, `atanh`, `cosh`, `sinh` and `tanh`. A conditional expression with complex operands is supported. A complex argument to a variadic host function such as `printf` is an error.
 - Fixed: `_Float16` arithmetic is accepted inside a `sizeof`, `_Alignof`, `typeof` or `_Generic` controlling operand, and `_Float16 + int` has type `_Float16` (`float` and `double` operands win), so the SDK headers that size or select on `_Float16` expressions parse. The `_Generic` controlling expression is unevaluated, as in C.
+- Fixed: a call through an Apple Block takes and returns `_Complex` values (`dc (^blk)(dc, dc)`); a complex result was "unsupported complex expression" and a complex argument was passed wrong.
 
 ## [0.35.0] - 2026-11-14
 

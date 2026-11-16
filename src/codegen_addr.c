@@ -1374,7 +1374,8 @@ void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg,
             vm->text_seg[jmp_end] = vm->text_ptr + 1;
             return;
         }
-        case ND_FUNCALL: {
+        case ND_FUNCALL:
+        case ND_BLOCK_CALL: {
             // The call leaves the address of the callee's return buffer.
             int r_addr = alloc_temp_reg();
             gen_expr(vm, node, r_addr);
@@ -1515,6 +1516,5 @@ void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg,
             break;
     }
 
-    // TODO: ND_BLOCK_CALL with a complex parameter or result (#2115)
     error_tok(vm, node->tok, "unsupported complex expression");
 }

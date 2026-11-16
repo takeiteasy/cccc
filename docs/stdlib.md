@@ -248,7 +248,7 @@ if (__builtin_mul_overflow(a, b, &r))
 
 | Header | Status | Notes |
 |---|---|---|
-| `<complex.h>` | ✓ | Construction/projection macros, arithmetic, and the C99 functions `cabs`, `carg`, `cimag`, `conj`, `cproj`, `creal`, `cpow`, `csqrt`, `cexp`, `clog` and the trigonometric and hyperbolic families with their inverses, each in `f`/`l` form. A complex argument or result passes by address, so complex values work through calls, function pointers and `va_arg`; Apple Blocks do not take or return them. [^n24] |
+| `<complex.h>` | ✓ | Construction/projection macros, arithmetic, and the C99 functions `cabs`, `carg`, `cimag`, `conj`, `cproj`, `creal`, `cpow`, `csqrt`, `cexp`, `clog` and the trigonometric and hyperbolic families with their inverses, each in `f`/`l` form. A complex argument or result passes by address, so complex values work through calls, function pointers, Apple Blocks and `va_arg`. [^n24] |
 | `<inttypes.h>` | ✓ | |
 | `<stdbool.h>` | ✓ | |
 | `<stdint.h>` | ✓ | Fixed-width types plus their `_MIN`/`_MAX`/`_C` limit macros, including `SIZE_MAX`, `PTRDIFF_MIN`/`PTRDIFF_MAX`, `SIG_ATOMIC_MIN`/`SIG_ATOMIC_MAX`, and `WCHAR_MIN`/`WCHAR_MAX`/`WINT_MIN`/`WINT_MAX` (the `WCHAR_*` pair follows `wchar_t`'s own per-platform signedness split, `#include <stddef.h>` -- unsigned on Linux aarch64, signed elsewhere) |

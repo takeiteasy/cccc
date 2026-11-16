@@ -499,7 +499,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
     // A complex-returning call comes back as a return-buffer address in an
     // integer register; gen_complex_expr loads it.
-    if (is_complex(node->ty) && node->kind != ND_FUNCALL) {
+    if (is_complex(node->ty) && node->kind != ND_FUNCALL &&
+        node->kind != ND_BLOCK_CALL) {
         int imag_reg = (dest_reg == FREG_A5) ? FREG_A4 : FREG_A5;
         gen_complex_expr(vm, node, dest_reg == REG_ZERO ? FREG_A0 : dest_reg,
                          imag_reg);
@@ -4155,6 +4156,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // 4. Pass user arguments in A1-A7
 
             // First, evaluate block expression to get descriptor address
+            // TODO: a call inside the arguments resets the temp registers and
+            // clobbers r_desc; spill it to a frame temp (#2116)
             int r_desc = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_desc);
             mark_temp_reg_used(r_desc);
@@ -4217,6 +4220,12 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     emit_fmov3(vm, FREG_A0 + float_arg_idx, fs);
                     free_temp_reg(fs);
                     float_arg_idx++;
+                } else if (is_complex(a->ty)) {
+                    if (int_arg_idx >= 8) {
+                        error_tok(vm, a->tok, "too many block arguments");
+                    }
+                    gen_complex_arg_ptr(vm, a, REG_A0 + int_arg_idx);
+                    int_arg_idx++;
                 } else {
                     if (int_arg_idx >= 8) {
                         error_tok(vm, a->tok, "too many block arguments");

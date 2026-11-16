@@ -93,6 +93,68 @@ int test_function_pointer(void) {
 }
 
 [[cccc::test(return = 42)]]
+int test_block_call(void) {
+    dc (^blk)(dc, dc) = ^dc(dc a, dc b) {
+      return a * b;
+    };
+    dc r = blk(CMPLX(1, 2), CMPLX(3, 4));
+    if (creal(r) != -5 || cimag(r) != 10)
+        return 1;
+    blk(CMPLX(1, 2), CMPLX(3, 4)); // discarded result
+    return 42;
+}
+
+static dc block_return(dc (^blk)(dc), dc z) {
+    return blk(z);
+}
+
+[[cccc::test(return = 42)]]
+int test_block_call_returned(void) {
+    dc r = block_return(
+        ^dc(dc z) {
+          return z + 1;
+        },
+        CMPLX(1, 2));
+    return creal(r) == 2 && cimag(r) == 2 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_block_mixed_arguments(void) {
+    dc offset = CMPLX(10, 20);
+    dc (^blk)(int, dc, double, fc, long double) =
+        ^dc(int i, dc a, double d, fc c, long double l) {
+          return a * i + d + c + l + offset;
+        };
+    dc r = blk(2, CMPLX(1, 2), 0.5, CMPLXF(1, 1), 1.5L);
+    return creal(r) == 15 && cimag(r) == 25 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_block_expression_arguments(void) {
+    dc (^blk)(int, dc, double) = ^dc(int i, dc a, double d) {
+      return a * i + d;
+    };
+    dc one = CMPLX(1, 1);
+    dc r   = blk(3, one + CMPLX(0, 1), 2.0);
+    return creal(r) == 5 && cimag(r) == 6 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_block_float_widths(void) {
+    fc (^fb)(fc) = ^fc(fc z) {
+      return z + z;
+    };
+    lc (^lb)(lc) = ^lc(lc z) {
+      return z * z;
+    };
+    fc f = fb(CMPLXF(1, 2));
+    lc l = lb(CMPLXL(1, 2));
+    return crealf(f) == 2 && cimagf(f) == 4 && creall(l) == -3 && cimagl(l) == 4
+               ? 42
+               : 1;
+}
+
+[[cccc::test(return = 42)]]
 int test_mixed_and_stack_arguments(void) {
     dc r = mix(2, CMPLX(1, 2), 0.5, CMPLX(3, 4), CMPLXF(1, 1));
     if (creal(r) != 4.5 || cimag(r) != 7)
