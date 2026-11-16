@@ -31,13 +31,17 @@ static unsigned char *cx_slot(void) {
 static double _Complex cx_get_d(long long p) {
     double v[2];
     memcpy(v, (const void *)(intptr_t)p, sizeof v);
-    return CMPLX(v[0], v[1]);
+    double _Complex z;
+    memcpy(&z, v, sizeof z);
+    return z;
 }
 
 static float _Complex cx_get_f(long long p) {
     float v[2];
     memcpy(v, (const void *)(intptr_t)p, sizeof v);
-    return CMPLXF(v[0], v[1]);
+    float _Complex z;
+    memcpy(&z, v, sizeof z);
+    return z;
 }
 
 static double _Complex cx_get_l(long long p) {
@@ -45,7 +49,10 @@ static double _Complex cx_get_l(long long p) {
     double               re, im;
     memcpy(&re, src, sizeof re);
     memcpy(&im, src + CCCC_LD_SIZE, sizeof im);
-    return CMPLX(re, im);
+    double v[2] = {re, im};
+    double _Complex z;
+    memcpy(&z, v, sizeof z);
+    return z;
 }
 
 static long long cx_put_d(double _Complex z) {

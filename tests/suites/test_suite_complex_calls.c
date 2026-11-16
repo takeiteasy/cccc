@@ -20,10 +20,10 @@ static dc add(dc a, dc b) {
 static dc mul(dc a, dc b) {
     return a * b;
 }
-static fc fadd(fc a, fc b) {
+static fc add_float(fc a, fc b) {
     return a + b;
 }
-static lc ladd(lc a, lc b) {
+static lc add_long(lc a, lc b) {
     return a + b;
 }
 static dc mix(int i, dc a, double d, dc b, fc c) {
@@ -76,10 +76,10 @@ int test_call_and_return(void) {
 
 [[cccc::test(return = 42)]]
 int test_float_widths(void) {
-    fc fr = fadd(CMPLXF(1, 2), CMPLXF(0.5f, 0.5f));
+    fc fr = add_float(CMPLXF(1, 2), CMPLXF(0.5f, 0.5f));
     if (crealf(fr) != 1.5f || cimagf(fr) != 2.5f)
         return 1;
-    lc lr = ladd(CMPLXL(1, 2), CMPLXL(3, 4));
+    lc lr = add_long(CMPLXL(1, 2), CMPLXL(3, 4));
     if (creall(lr) != 4 || cimagl(lr) != 6)
         return 2;
     return 42;
