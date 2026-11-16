@@ -1903,7 +1903,8 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         node->ty   = ty_error;
         return node;
     }
-    if (!vm->compiler.unevaluated && (is_float16(lhs->ty) || is_float16(rhs->ty)))
+    if (!vm->compiler.unevaluated &&
+        (is_float16(lhs->ty) || is_float16(rhs->ty)))
         error_float16_unsupported(vm, tok);
 
     Node *ov = try_overloaded_op(vm, "+", lhs, rhs, tok);
@@ -1990,7 +1991,8 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         node->ty   = ty_error;
         return node;
     }
-    if (!vm->compiler.unevaluated && (is_float16(lhs->ty) || is_float16(rhs->ty)))
+    if (!vm->compiler.unevaluated &&
+        (is_float16(lhs->ty) || is_float16(rhs->ty)))
         error_float16_unsupported(vm, tok);
 
     Node *ov = try_overloaded_op(vm, "-", lhs, rhs, tok);
