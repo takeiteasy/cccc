@@ -194,9 +194,12 @@ static ExpansionFrame *comptime_chain(VirtualMachine *vm, Token *tok) {
     return vm ? vm->compiler.expansion_stack : NULL;
 }
 
-// The token's own spelling, mapped back to the source for a rewritten `@name`.
+// The token's own spelling, mapped back to the source for a rewritten `@name`,
+// a pasted token or a number made up in an `#if`.
 static Token *spelling_site(Token *tok) {
-    return tok && tok_rare(tok)->src_site ? tok_rare(tok)->src_site : tok;
+    while (tok && tok_rare(tok)->src_site)
+        tok = tok_rare(tok)->src_site;
+    return tok;
 }
 
 // The invocation a macro body token was expanded from. A token the user wrote

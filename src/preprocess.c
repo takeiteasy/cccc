@@ -1563,10 +1563,16 @@ static char *quote_string(VirtualMachine *vm, const char *str) {
     return buf;
 }
 
+// A token made up from text rather than read from the source reports at `tmpl`.
+static Token *synth_token(VirtualMachine *vm, char *text, Token *tmpl) {
+    Token *tok =
+        tokenize(vm, new_file(vm, tmpl->file->name, tmpl->file->file_no, text));
+    tok_rare_mut(vm, tok)->src_site = tmpl;
+    return tok;
+}
+
 static Token *new_str_token(VirtualMachine *vm, const char *str, Token *tmpl) {
-    char *buf = quote_string(vm, str);
-    return tokenize(vm,
-                    new_file(vm, tmpl->file->name, tmpl->file->file_no, buf));
+    return synth_token(vm, quote_string(vm, str), tmpl);
 }
 
 // Copy all tokens until the next newline, terminate them with
@@ -1585,14 +1591,22 @@ static Token *copy_line(VirtualMachine *vm, Token **rest, Token *tok) {
         cur = cur->next = copy_token(vm, tok);
 
     cur->next = new_eof(vm, tok);
-    *rest     = tok;
+    if (cur != &head)
+        tok_rare_mut(vm, cur->next)->src_site = cur;
+    *rest = tok;
     return head.next;
 }
 
 static Token *new_num_token(VirtualMachine *vm, int val, Token *tmpl) {
-    char *buf = arena_format(vm, "%d\n", val);
-    return tokenize(vm,
-                    new_file(vm, tmpl->file->name, tmpl->file->file_no, buf));
+    return synth_token(vm, arena_format(vm, "%d\n", val), tmpl);
+}
+
+// Overwrites `t` with the number `val`, keeping its place in the list. The
+// number reports at a copy of `t`, which `t` no longer is.
+static void replace_with_num(VirtualMachine *vm, Token *t, int val) {
+    Token *next = t->next;
+    token_assign(vm, t, new_num_token(vm, val, copy_token(vm, t)));
+    t->next = next;
 }
 
 // Generate comma-separated token sequence from binary data
@@ -1911,6 +1925,8 @@ static bool is_has_builtin_supported(char *name) {
         "__builtin_signbit",
         "__builtin_expect",
         "__builtin_constant_p",
+        "__builtin_os_log_format",
+        "__builtin_os_log_format_buffer_size",
         "__builtin_alloca",
         "__builtin_alloca_with_align",
         "__builtin_unreachable",
@@ -2300,21 +2316,10 @@ static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     // wrong results (e.g. `#if true` evaluating to 0). Handle them
     // explicitly first, before the generic TK_IDENT fallback.
     for (Token *t = expr; t->kind != TK_EOF; t = t->next) {
-        if (equal(t, "true")) {
-            // C23 §6.10.1: true → pp-number 1
-            Token *next = t->next;
-            *t          = *new_num_token(vm, 1, t);
-            t->next     = next;
-        } else if (equal(t, "false")) {
-            // C23 §6.10.1: false → pp-number 0
-            Token *next = t->next;
-            *t          = *new_num_token(vm, 0, t);
-            t->next     = next;
-        } else if (t->kind == TK_IDENT) {
-            Token *next = t->next;
-            *t          = *new_num_token(vm, 0, t);
-            t->next     = next;
-        }
+        if (equal(t, "true"))
+            replace_with_num(vm, t, 1); // C23 §6.10.1: true → pp-number 1
+        else if (equal(t, "false") || t->kind == TK_IDENT)
+            replace_with_num(vm, t, 0); // C23 §6.10.1: false → pp-number 0
     }
 
     // Convert pp-numbers to regular numbers
@@ -2680,16 +2685,23 @@ static Token *stringize(VirtualMachine *vm, Token *hash, Token *arg) {
 }
 
 // Concatenate two tokens to create a new token.
-static Token *paste(VirtualMachine *vm, Token *lhs, Token *rhs) {
+static Token *paste(VirtualMachine *vm, Token *lhs, Token *rhs, Token *use) {
     // Paste the two tokens.
     char *buf =
         arena_format(vm, "%.*s%.*s", lhs->len, lhs->loc, rhs->len, rhs->loc);
+
+    // The pasted token reports at the left operand, which is not stamped with
+    // its macro use yet.
+    Token *site = copy_token(vm, lhs);
+    if (!site->origin)
+        site->origin = use;
 
     // Tokenize the resulting string.
     Token *tok =
         tokenize(vm, new_file(vm, lhs->file->name, lhs->file->file_no, buf));
     if (tok->next->kind != TK_EOF)
-        error_tok(vm, lhs, "pasting forms '%s', an invalid token", buf);
+        error_tok(vm, site, "pasting forms '%s', an invalid token", buf);
+    tok_rare_mut(vm, tok)->src_site = site;
     return tok;
 }
 
@@ -2709,7 +2721,8 @@ static Token *arg_token(Token *t) {
 }
 
 // Replace func-like macro parameters with given arguments.
-static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
+static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args,
+                    Token *use) {
     Token  head = {};
     Token *cur  = &head;
 
@@ -2760,7 +2773,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
             MacroArg *arg = find_arg(args, tok->next);
             if (arg) {
                 if (arg->tok->kind != TK_EOF) {
-                    *cur = *paste(vm, cur, arg->tok);
+                    *cur = *paste(vm, cur, arg->tok, use);
                     for (Token *t = arg->tok->next; t->kind != TK_EOF;
                          t        = t->next)
                         cur = cur->next = arg_token(copy_token(vm, t));
@@ -2769,7 +2782,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
                 continue;
             }
 
-            *cur = *paste(vm, cur, tok->next);
+            *cur = *paste(vm, cur, tok->next, use);
             tok  = tok->next->next;
             continue;
         }
@@ -2927,7 +2940,7 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
         hideset_intersection(vm, macro_token->hideset, rparen->hideset);
     hs          = hideset_union(vm, hs, new_hideset(vm, m->name));
 
-    Token *body = subst(vm, m->body, args);
+    Token *body = subst(vm, m->body, args, macro_token);
     for (Token *t = body; t->kind != TK_EOF; t = t->next)
         t->hideset = hideset_union(vm, t->hideset, hs);
     for (Token *t = body; t->kind != TK_EOF; t = t->next)

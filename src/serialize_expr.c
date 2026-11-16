@@ -3123,9 +3123,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 break;
             }
             fprintf(f, "({\n");
-            for (Node *s = node->body; s; s = s->next) {
-                serialize_stmt(f, vm, ctx, s, 1);
-            }
+            for (Node *s = node->body; s; s = s->next)
+                serialize_stmt_list_item(f, vm, ctx, s, 1);
             fprintf(f, "})");
             break;
         }

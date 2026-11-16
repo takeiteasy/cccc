@@ -4494,8 +4494,27 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *expr = assign(vm, &tok, tok);
         *rest      = skip(vm, tok, ")");
         add_type(vm, expr);
-        int is_const = is_const_expr(vm, expr);
+        // Casts of a string literal stay constant, as in gcc and clang.
+        Node *lit = expr;
+        while (lit->kind == ND_CAST)
+            lit = lit->lhs;
+        int is_const = is_const_expr(vm, expr) ||
+                       (lit->kind == ND_VAR && lit->var &&
+                        lit->var->is_string_literal);
         return new_num(vm, is_const ? 1 : 0, start);
+    }
+
+    // Apple's os_log encoder. The host compiler implements it, so the call is
+    // emitted as written.
+    if (equal(tok, "__builtin_os_log_format") ||
+        equal(tok, "__builtin_os_log_format_buffer_size")) {
+        if (!vm->compiler.serializes_output)
+            error_tok(vm, tok,
+                      "'%.*s' is supported only when cccc emits C "
+                      "(-c=native, -m, -c=generated)",
+                      tok->len, tok->loc);
+        *rest = tok->next;
+        return new_var_node(vm, new_implicit_function(vm, tok), tok);
     }
 
     // __builtin_alloca(size) -> dynamic stack allocation
@@ -5373,6 +5392,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    if (tok->kind == TK_EOF)
+        error_tok(vm, tok, "expected an expression, found end of input");
     error_tok(vm, tok, "expected an expression, found '%.*s'", tok->len,
               tok->loc);
     return NULL;

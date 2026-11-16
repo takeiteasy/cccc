@@ -57,7 +57,8 @@ These are lowered to equivalent arithmetic comparisons at parse time.
 
 | Builtin | Description |
 |---------|-------------|
-| `__builtin_constant_p(expr)` | `1` if `expr` is a compile-time constant, else `0` |
+| `__builtin_constant_p(expr)` | `1` if `expr` is a compile-time constant, else `0`; a string literal counts as constant |
+| `__builtin_os_log_format_buffer_size(fmt, ...)`, `__builtin_os_log_format(buf, fmt, ...)` | Apple `os_log` encoder, left to the host compiler: `-c=native`, `-m` and `-c=generated` only, an error in the VM |
 | `__builtin_types_compatible_p(t1, t2)` | `1` if types `t1` and `t2` are compatible. Top-level `const`/`volatile`/`restrict` are ignored (`int` / `const int` → `1`); qualifiers below the top level are honored (`char *` / `const char *` → `0`), as is `_Atomic` (`_Atomic int *` / `int *` → `0`). [^n1] |
 | `__builtin_classify_type(expr)` | Small integer classifying `expr`'s type (gcc's `typeclass.h` codes where a matching CCCC type exists — `1`=integer, `2`=char, `3`=enum, `4`=bool, `5`=pointer, `8`=real, `9`=complex, `10`=function, `12`=struct, `13`=union, `14`=array; `99`=vector, CCCC-specific, no gcc equivalent). [^n2] |
 | `__builtin_choose_expr(c, e1, e2)` | Compile-time select: `e1` if constant `c` is non-zero, else `e2`. Result carries the chosen arm's type; the unchosen arm is parsed but not evaluated |

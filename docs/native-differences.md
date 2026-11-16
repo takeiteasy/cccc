@@ -42,6 +42,7 @@ The emitted C behaves as the VM does, except:
 | `__builtin_return_address(n)` | VM bytecode offset | Real host address |
 | `__builtin_dynamic_object_size` | Exact from the allocation header | Host builtin: exact only when the optimizer sees the allocation (`-O2`) |
 | `__builtin_unreachable`, `__builtin_trap`, `__builtin_debugtrap` | Trap | `__builtin_trap()` |
+| `__builtin_os_log_format`, `__builtin_os_log_format_buffer_size` | Compile error | Host builtin |
 | Call through an invalid function pointer | `invalid indirect call target`, exit 255 | `SIGSEGV`/`SIGBUS` |
 | Integer divide by zero (no safety flags) | `DIVISION BY ZERO`, exit 255 | aarch64 yields 0; x86_64 raises `SIGFPE` |
 | `__builtin_alloca` with a VLA in a loop | Fresh address per call | Host-defined; clang `-O0` may reuse a slot |
