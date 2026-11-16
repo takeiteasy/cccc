@@ -85,5 +85,5 @@ A parameter type that has no name to mangle (an anonymous struct) is an error; g
 | A function template with the set's name | Rejected | [#2087](https://todo.sr.ht/~takeiteasy/cccc/2087) |
 | Block-scope declarations | Rejected | [#2090](https://todo.sr.ht/~takeiteasy/cccc/2090) |
 | Ranking | A few rare calls rank differently from Clang | [#2091](https://todo.sr.ht/~takeiteasy/cccc/2091) |
-| macOS SDK `<tgmath.h>` | Its overload sets resolve, but `--sysroot` still stops at the complex math functions `<complex.h>` lacks | [#2092](https://todo.sr.ht/~takeiteasy/cccc/2092) |
+| macOS SDK `<tgmath.h>` | Its overload sets resolve, but `--sysroot` still stops at the `_Float16` overloads, which need `_Float16` values | [#2113](https://todo.sr.ht/~takeiteasy/cccc/2113) |
 | `enable_if`, `diagnose_if`, `pass_object_size` | Not recognized | |

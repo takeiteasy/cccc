@@ -497,7 +497,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
     }
 
-    if (is_complex(node->ty)) {
+    // A complex-returning call comes back as a return-buffer address in an
+    // integer register; gen_complex_expr loads it.
+    if (is_complex(node->ty) && node->kind != ND_FUNCALL) {
         int imag_reg = (dest_reg == FREG_A5) ? FREG_A4 : FREG_A5;
         gen_complex_expr(vm, node, dest_reg == REG_ZERO ? FREG_A0 : dest_reg,
                          imag_reg);
@@ -2448,14 +2450,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             bool is_tail                    = vm->compiler.emitting_tail_call;
             vm->compiler.emitting_tail_call = false;
 
-            if (is_complex(node->ty))
-                error_tok(vm, node->tok,
-                          "complex function return ABI is not supported");
-            for (Node *arg = node->args; arg; arg = arg->next)
-                if (is_complex(arg->ty))
-                    error_tok(vm, arg->tok,
-                              "complex function argument ABI is not supported");
-
             // --test-run: a cccc_launch thunk call becomes a call to the VM
             // launcher with the thunk's address and this frame as its env.
             if (node->lhs->kind == ND_VAR && node->lhs->var->is_kernel_thunk &&
@@ -2896,6 +2890,10 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         error_tok(vm, arg->tok,
                                   "vector arguments through FFI calls are not "
                                   "supported");
+                    } else if (is_complex(arg->ty) && ffi_arg_is_vararg) {
+                        error_tok(vm, arg->tok,
+                                  "complex arguments through variadic FFI "
+                                  "calls are not supported");
                     } else if (is_decimal(arg->ty) && !ffi_arg_is_vararg) {
                         error_tok(
                             vm, arg->tok,
@@ -2928,6 +2926,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         int fs = gen_flonum_arg_to_scratch(vm, arg);
                         emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_T0, fs);
                         free_temp_reg(fs);
+                    } else if (is_complex(arg->ty)) {
+                        gen_complex_arg_ptr(vm, arg, REG_T0);
                     } else if (is_decimal(arg->ty)) {
                         // #829: only reachable here for a variadic-tail decimal
                         // arg -- a fixed one already errored out above.
@@ -2973,6 +2973,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_A0 + i,
                                 fs);
                         free_temp_reg(fs);
+                    } else if (is_complex(arg->ty)) {
+                        gen_complex_arg_ptr(vm, arg, REG_A0 + i);
                     } else if (is_decimal(arg->ty)) {
                         // #829: only reachable here for a variadic-tail decimal
                         // arg -- a fixed one already errored out above.
@@ -3137,6 +3139,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                                 freg); // Move bits to REG_T0
                         free_temp_reg(freg);
                         emit_psh3(vm, REG_T0);
+                    } else if (is_complex(arg->ty)) {
+                        gen_complex_arg_ptr(vm, arg, REG_T0);
+                        emit_psh3(vm, REG_T0);
                     } else if (is_vector(arg->ty)) {
                         // Vector arg: copy value to scratch slot, push its
                         // address like a struct-by-value arg (#714). A variadic
@@ -3269,6 +3274,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     // with no extra copy needed.
                     if (int_arg_idx < 8) {
                         gen_decimal_arg_ptr(vm, arg, REG_A0 + int_arg_idx);
+                        int_arg_idx++;
+                    }
+                } else if (is_complex(arg->ty)) {
+                    if (int_arg_idx < 8) {
+                        gen_complex_arg_ptr(vm, arg, REG_A0 + int_arg_idx);
                         int_arg_idx++;
                     }
                 } else if (is_vector(arg->ty)) {

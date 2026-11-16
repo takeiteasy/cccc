@@ -2639,6 +2639,7 @@ int cc_load_libc(VirtualMachine *vm) {
 // or want all stdlib functions available regardless of includes
 void cc_load_stdlib(VirtualMachine *vm) {
     // Register all standard library functions regardless of includes
+    register_complex_functions(vm);
     register_ctype_functions(vm);
     register_decimal_math_functions(vm);
     register_fenv_functions(vm);

@@ -269,7 +269,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
             (param->addr_taken || param->addr_escapes) &&
             cc_effective_align(param->align, param->ty->align) > 8;
         if ((param->ty->kind != TY_STRUCT && param->ty->kind != TY_UNION &&
-             !wants_aligned_copy) ||
+             !is_complex(param->ty) && !wants_aligned_copy) ||
             param->ty->size <= 0)
             continue;
         int copy_align_log =

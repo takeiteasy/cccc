@@ -242,7 +242,8 @@ int align_log_of(int align) {
 // value itself (see gen_addr's by-pointer param arm).
 bool param_slot_holds_pointer(Type *ty) {
     return ty->kind == TY_STRUCT || ty->kind == TY_UNION ||
-           ty->kind == TY_VECTOR || is_wide_bitint(ty) || is_decimal(ty);
+           ty->kind == TY_VECTOR || ty->kind == TY_COMPLEX ||
+           is_wide_bitint(ty) || is_decimal(ty);
 }
 
 // Alignment field for a user local's address (#1137); 0 when 8-byte slots

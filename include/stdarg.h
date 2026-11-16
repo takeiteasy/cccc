@@ -241,7 +241,8 @@ typedef struct __cccc_va_list va_list;
                                 ((ap).stack_ptr) - 8))),                       \
             __builtin_choose_expr(                                             \
                 __builtin_classify_type(*(type *)0) == 99 ||                   \
-                    __builtin_classify_type(*(type *)0) == 98,                 \
+                    __builtin_classify_type(*(type *)0) == 98 ||               \
+                    __builtin_classify_type(*(type *)0) == 9,                  \
                 (((ap).reg_count > 0)                                          \
                      ? (--((ap).reg_count),                                    \
                         (*(type *)(*(void **)(((ap).reg_ptr) -= 8,             \

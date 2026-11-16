@@ -788,10 +788,7 @@ bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
                 return false;
             if (belongs_to_outer_function(vm, current_fn, var))
                 return false;
-            if (var->is_param &&
-                (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
-                 var->ty->kind == TY_VECTOR || is_wide_bitint(var->ty) ||
-                 is_decimal(var->ty))) // #402: passed by pointer too
+            if (var->is_param && param_slot_holds_pointer(var->ty))
                 return false;
             return true;
         }
@@ -1096,11 +1093,7 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                         // slot contains a pointer to the value. We need to load
                         // that pointer, not the slot address.
                         if (node->var->is_param &&
-                            (node->ty->kind == TY_STRUCT ||
-                             node->ty->kind == TY_UNION ||
-                             node->ty->kind == TY_VECTOR ||
-                             is_wide_bitint(node->ty) ||
-                             is_decimal(node->ty))) {
+                            param_slot_holds_pointer(node->ty)) {
                             // Compiler-internal: slot address only feeds the
                             // immediate load below (#676), not the struct's own
                             // data address.
@@ -1272,14 +1265,34 @@ static void emit_complex_load(VirtualMachine *vm, Type *ty, int real_reg,
     free_temp_reg(r_imag_addr);
 }
 
-static void emit_complex_store(VirtualMachine *vm, Type *ty, int real_reg,
-                               int imag_reg, int addr_reg) {
+void emit_complex_store(VirtualMachine *vm, Type *ty, int real_reg,
+                        int imag_reg, int addr_reg) {
     int op = complex_store_op(ty);
     emit_rr(vm, op, real_reg, addr_reg);
     int r_imag_addr = alloc_temp_reg();
     emit_addi3(vm, r_imag_addr, addr_reg, complex_part_offset(ty));
     emit_rr(vm, op, imag_reg, r_imag_addr);
     free_temp_reg(r_imag_addr);
+}
+
+// A complex argument travels by address: the value is copied into a fresh
+// caller-frame slot and the slot's address goes in addr_reg, like a struct
+// argument (the callee copies it again in its prologue).
+// TODO: two copies per call, two FP registers would avoid them (#2114)
+void gen_complex_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg) {
+    int br = alloc_temp_reg();
+    int bi = alloc_temp_reg();
+    gen_complex_expr(vm, arg, br, bi);
+    mark_temp_reg_used(br);
+    mark_temp_reg_used(bi);
+    int       align_log = align_log_of(cc_effective_align(0, arg->ty->align));
+    long long off       = alloc_aligned_temp(vm, arg->ty->size, align_log);
+    emit_lea3_aligned(vm, addr_reg, off, align_log, true);
+    if (vm->flags & CCCC_POINTER_CHECKS)
+        emit_rr(vm, CHKP3, addr_reg, 0);
+    emit_complex_store(vm, arg->ty, br, bi, addr_reg);
+    free_temp_reg(bi);
+    free_temp_reg(br);
 }
 
 void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg,
@@ -1346,6 +1359,32 @@ void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg,
             gen_expr(vm, node->lhs, REG_ZERO);
             gen_complex_expr(vm, node->rhs, real_reg, imag_reg);
             return;
+        case ND_COND: {
+            int       r_cond  = alloc_temp_reg();
+            PatchList to_else = {0};
+            gen_branch(vm, node_ctl(node)->cond, false, r_cond, &to_else);
+            free_temp_reg(r_cond);
+
+            gen_complex_expr(vm, node_ctl(node)->then, real_reg, imag_reg);
+            emit(vm, JMP);
+            Pc jmp_end = emit_word_ptr(vm);
+
+            patch_list_resolve(vm, &to_else, vm->text_ptr + 1);
+            gen_complex_expr(vm, node_ctl(node)->els, real_reg, imag_reg);
+            vm->text_seg[jmp_end] = vm->text_ptr + 1;
+            return;
+        }
+        case ND_FUNCALL: {
+            // The call leaves the address of the callee's return buffer.
+            int r_addr = alloc_temp_reg();
+            gen_expr(vm, node, r_addr);
+            mark_temp_reg_used(r_addr);
+            if (vm->flags & CCCC_POINTER_CHECKS)
+                emit_rr(vm, CHKP3, r_addr, 0);
+            emit_complex_load(vm, node->ty, real_reg, imag_reg, r_addr);
+            free_temp_reg(r_addr);
+            return;
+        }
         case ND_NEG:
             gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
             emit_frr(vm, fop_for_type(node->ty->base, FNEG3), real_reg,
@@ -1476,5 +1515,6 @@ void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg,
             break;
     }
 
+    // TODO: ND_BLOCK_CALL with a complex parameter or result (#2115)
     error_tok(vm, node->tok, "unsupported complex expression");
 }

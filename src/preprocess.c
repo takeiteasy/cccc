@@ -3714,6 +3714,7 @@ static void register_stdlib_for_header(VirtualMachine *vm,
         const char *name;
         void (*fn)(VirtualMachine *);
     } fns[] = {
+        {"register_complex_functions", register_complex_functions},
         {"register_ctype_functions", register_ctype_functions},
         {"register_decimal_math_functions", register_decimal_math_functions},
         {"register_fenv_functions", register_fenv_functions},

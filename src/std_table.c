@@ -26,7 +26,8 @@
     X(std_cccc_kernel_h, "cccc/kernel.h", "include/cccc/kernel.h", 0)          \
     X(std_cccc_opencl_h, "cccc/opencl.h", "include/cccc/opencl.h", 0)          \
     X(std_cccc_text_h, "cccc/text.h", "include/cccc/text.h", 0)                \
-    X(std_complex_h, "complex.h", "include/complex.h", 0)                      \
+    X(std_complex_h, "complex.h", "include/complex.h",                         \
+      "register_complex_functions")                                            \
     X(std_cpio_h, "cpio.h", "include/cpio.h", 0)                               \
     X(std_ctype_h, "ctype.h", "include/ctype.h", "register_ctype_functions")   \
     X(std_decimal_math_h, "decimal_math.h", "include/decimal_math.h",          \

@@ -305,7 +305,7 @@ bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
     // return_repr_key() negative-key argument as wide _BitInt above -- a
     // decimal return also materialises into a frame-local scratch slot
     // (alloc_decimal_temp), so CALLT is excluded explicitly here too.
-    if (expr->ty && is_decimal(expr->ty))
+    if (expr->ty && (is_decimal(expr->ty) || is_complex(expr->ty)))
         return false;
     int nargs = 0;
     for (Node *a = expr->args; a; a = a->next) {
@@ -322,7 +322,7 @@ bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
         // #402: a decimal arg's address is likewise a compiler-synthesized
         // scratch slot in *this* frame (gen_decimal_arg_ptr) -- same #714
         // hazard, same rejection.
-        if (is_decimal(a->ty))
+        if (is_decimal(a->ty) || is_complex(a->ty))
             return false;
     }
     if (nargs > 8)

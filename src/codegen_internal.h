@@ -347,6 +347,9 @@ void gen_decimal_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg);
 void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);
 void gen_stmt(VirtualMachine *vm, Node *node);
 void gen_vector_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg);
+void gen_complex_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg);
+void emit_complex_store(VirtualMachine *vm, Type *ty, int real_reg,
+                        int imag_reg, int addr_reg);
 void gen_wide_bitint_unary(VirtualMachine *vm, Node *node, int dest_reg,
                            const char *helper);
 void gen_zero_size_arg(VirtualMachine *vm, Node *arg, int dest_reg);

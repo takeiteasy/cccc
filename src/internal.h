@@ -1733,6 +1733,7 @@ void register_obstack_functions(VirtualMachine *vm);
 // exit() after the guest's atexit handlers and destructors have run.
 void cccc_guest_exit(int status);
 void register_math_functions(VirtualMachine *vm);
+void register_complex_functions(VirtualMachine *vm);
 void register_posix_functions(VirtualMachine *vm);
 // Per-domain POSIX registrars (#946 split of posix.c), called directly by
 // register_posix_functions() and also mapped 1:1 from src/std_table.c for

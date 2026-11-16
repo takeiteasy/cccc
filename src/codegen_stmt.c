@@ -350,6 +350,27 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
 
                     free_temp_reg(r_src);
                     free_temp_reg(r_dest);
+                } else if (is_complex(node->lhs->ty)) {
+                    // A complex value lives in two float registers; store
+                    // both halves into a fresh RETBUF buffer and return its
+                    // address, as for a vector.
+                    int br = alloc_temp_reg();
+                    int bi = alloc_temp_reg();
+                    gen_complex_expr(vm, node->lhs, br, bi);
+                    mark_temp_reg_used(br);
+                    mark_temp_reg_used(bi);
+
+                    emit(vm, RETBUF);
+                    int r_dest = alloc_temp_reg();
+                    emit_mov3(vm, r_dest, REG_A0);
+                    if (vm->flags & CCCC_POINTER_CHECKS)
+                        emit_rr(vm, CHKP3, r_dest, 0);
+                    emit_complex_store(vm, node->lhs->ty, br, bi, r_dest);
+                    emit_mov3(vm, REG_A0, r_dest);
+
+                    free_temp_reg(bi);
+                    free_temp_reg(br);
+                    free_temp_reg(r_dest);
                 } else if (is_vector(node->lhs->ty)) {
                     // Vector return (#714): unlike struct/union, the value
                     // lives in a vregs[] register (gen_vector_expr), not memory
