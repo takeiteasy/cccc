@@ -232,6 +232,14 @@ static void test_values(const char *proj) {
     CHECK(strstr(r.out, "-DA=1 -DF(x,y)=2 -Wall -Werror=format"),
           "arrays give one option per item: %s", r.out);
 
+    write_file(proj, "fnlike.c",
+               "int G(int x) { return x; }\n"
+               "int main(void) { return F(2, 21) + G(0); }\n");
+    write_file(proj, ".cccc.toml",
+               "D = [\"F(x,y)=x*y\", \"G(x)=9\"]\nU = \"G(x)\"\n");
+    r = RUN(proj, "fnlike.c");
+    CHECK(r.rc == 42, "function-like D and U: rc=%d %s", r.rc, r.out);
+
     write_file(proj, ".cccc.toml", "U = \"X\"\nD = \"X\"\n");
     r = RUN(proj, "--show-config", "answer.c");
     CHECK(strstr(r.out, "-UX -DX"), "a list key takes one string: %s", r.out);

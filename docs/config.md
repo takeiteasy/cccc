@@ -30,7 +30,7 @@ Options apply in the order user, project, command line. A single-value option ta
 | `key = "value"` | `--key=value`, or `-Kvalue` for a one-letter key |
 | `max-errors = 5` | an integer is passed as its decimal text |
 | `openmp = true` | a flag; `false` leaves it off |
-| `D = ["A=1", "B(x,y)=2"]` | a list key takes an array, one option per item |
+| `D = ["A=1", "B(x,y)=2"]` | a list key takes an array, one option per item; `D` and `U` take function-like macros |
 | `D = "A=1"` | a list key also takes a single string |
 | `link-arg = ["-Wl,-rpath,x"]` | values are passed as written; commas and parentheses need no escaping |
 | `I = "include"` | a relative path is taken from the config file's directory, so it works from any subdirectory |
