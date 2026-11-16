@@ -8068,16 +8068,18 @@ char *cc_object_macro_text(VirtualMachine *vm, const char *name) {
     return join_tokens(vm, m->body, NULL, NULL);
 }
 
+// `name` may carry a parameter list (`-U'F(x)'`); only the name counts.
 void undef_macro(VirtualMachine *vm, char *name) {
+    int len = (int)strcspn(name, "(");
     if (vm->compiler.warnings & CCCC_WARN_UNUSED_MACROS) {
-        Macro *m = hashmap_get2(&vm->compiler.macros, name, strlen(name));
+        Macro *m = hashmap_get2(&vm->compiler.macros, name, len);
         if (m && !m->handler && m->use_count == 0 && m->define_tok &&
             m->define_tok->file && !m->define_tok->file->is_system_header &&
             !hashmap_get(&vm->compiler.guard_macros, m->name))
             warn_tok(vm, m->define_tok, CCCC_WARN_UNUSED_MACROS,
                      "macro '%s' defined but not used", m->name);
     }
-    hashmap_delete(&vm->compiler.macros, name);
+    hashmap_delete2(&vm->compiler.macros, name, len);
 }
 
 static Macro *add_builtin(VirtualMachine *vm, char *name,
