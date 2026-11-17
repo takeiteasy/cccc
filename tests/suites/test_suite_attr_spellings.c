@@ -203,4 +203,19 @@ void test_gnu_namespace_handlers(void) {
     AssertTrue(d.a + d.b == 3);
 }
 
+// An attribute that takes no arguments also accepts an empty argument list,
+// as GCC and Clang do. The macOS SDK's <xpc/base.h> builds every zero-argument
+// XPC attribute that way, through a macro whose __VA_ARGS__ is empty.
+void *malloc_empty_args(int n) __attribute__((__malloc__()));
+int wur_empty_args(void) __attribute__((__warn_unused_result__()));
+void *malloc_empty_bare(int n) __attribute__((malloc()));
+
+#define XPC_LIKE(_X, ...) __attribute__((__##_X##__(__VA_ARGS__)))
+XPC_LIKE(malloc) void *malloc_via_macro(int n);
+
+[[cccc::test]]
+void test_empty_attribute_arg_list(void) {
+    AssertTrue(sizeof(void *) == sizeof(void *));
+}
+
 #pragma cccc suite end

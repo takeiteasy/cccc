@@ -3762,7 +3762,14 @@ static Token *apply_attr(VirtualMachine *vm, Token *tok, const AttrSite *site,
         (!(def->flags & ATTR_NS_CLANG) || site->clang_ok)) {
         AttrSite resolved = *site;
         resolved.def      = def;
-        return def->apply(vm, tok, &resolved, ty, attr);
+        tok               = def->apply(vm, tok, &resolved, ty, attr);
+        // GCC and Clang accept an empty argument list on an attribute that
+        // takes no arguments (`__malloc__()`); a handler with nothing to read
+        // leaves the parens for the caller. The macOS SDK's <xpc/base.h>
+        // spells every zero-argument XPC attribute that way.
+        if (equal(tok, "(") && tok->next && equal(tok->next, ")"))
+            tok = tok->next->next;
+        return tok;
     }
 
     // Registered by the preprocessor's emit-block scan; the tokens stay.
