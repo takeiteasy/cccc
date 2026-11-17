@@ -316,9 +316,18 @@ int main(void) {
     }
 
 #ifdef __APPLE__
-    // Xcode's `as` is a shell script, which Homebrew gcc runs.
+    // Xcode's `as` is a shell script, which Homebrew gcc runs. A Homebrew gcc
+    // whose baked-in sysroot names an SDK the toolchain no longer ships
+    // cannot link even outside the sandbox.
     const char *gcc = "/opt/homebrew/bin/gcc-16";
-    if (access(gcc, X_OK) == 0) {
+    char        gcc_probe[PATH_MAX];
+    snprintf(gcc_probe, sizeof gcc_probe, "%s/gcc_probe.out", root);
+    if (access(gcc, X_OK) == 0 &&
+        run("%s -o %s %s/ok.c >/dev/null 2>&1", gcc, gcc_probe, indir) != 0)
+        printf("SKIP: sandbox checks with %s (it cannot build outside the "
+               "sandbox)\n",
+               gcc);
+    else if (access(gcc, X_OK) == 0) {
         unlink(out);
         if (run("CCCC_NATIVE_CC=%s %s --sandbox -c=native -o %s %s/ok.c "
                 ">/dev/null 2>&1",

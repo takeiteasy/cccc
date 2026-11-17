@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: the sandbox host test skips a Homebrew `gcc` that cannot link outside the sandbox, instead of reporting it as a sandbox failure.
 - Fixed: the build finds libffi through the SDK's own ffi directory on macOS, and ignores a `pkg-config` include path that holds no `ffi.h`. A `libffi.pc` naming an SDK a toolchain update has removed no longer stops the build at `fatal error: 'ffi.h' file not found`. See [install.md](docs/install.md).
 - Fixed: a call through a function pointer to a host function can take and return `_Float16` (`_Float16 (*f)(_Float16) = __sqrtf16;`); the arguments and result were read from the wrong registers.
 - Fixed: a string literal or floating constant in an `#if` is an error (`token "abc" is not valid in preprocessor expressions`, `floating constant in preprocessor expression`) instead of a crash or a silent 0.
