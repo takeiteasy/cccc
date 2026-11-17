@@ -905,6 +905,19 @@ static BuildTarget *make_testcheck(Builder *ctx) {
 // through `testcheck --leaks`.
 enum { LOOSE_VM, LOOSE_NATIVE, LOOSE_LEAKS };
 
+// Caps a leak-checked file, so a stall costs seconds instead of testcheck's
+// 600s default. A valgrind leak pass is legitimately 10-50x slower than a
+// plain run, so only the macOS tool gets a short cap.
+static int leak_timeout(Builder *ctx) {
+    return strcmp(BuildHost(ctx), "darwin") == 0 ? 180 : 600;
+}
+
+// testcheck spends the timeout twice over, once on the functional run and
+// again on the leak pass.
+static int leak_step_timeout(Builder *ctx) {
+    return 2 * leak_timeout(ctx) + 30;
+}
+
 static BuildTarget *area_tests_with(Builder *ctx, BuildTarget *cccc,
                                     BuildTarget *check, int area, int mode) {
     char agg_name[64];
@@ -922,15 +935,19 @@ static BuildTarget *area_tests_with(Builder *ctx, BuildTarget *cccc,
                 continue;
             const char *base = strrchr(files[i], '/');
             base             = base ? base + 1 : files[i];
-            char cmd[1024], name[192];
+            char cmd[1024], name[192], modeflag[64] = "";
+            if (mode == LOOSE_NATIVE)
+                snprintf(modeflag, sizeof(modeflag), " --native");
+            else if (mode == LOOSE_LEAKS)
+                snprintf(modeflag, sizeof(modeflag), " --leaks --timeout %d",
+                         leak_timeout(ctx));
             snprintf(cmd, sizeof(cmd), "\"%s\"%s \"%s\" %s",
-                     TargetOutput(check),
-                     mode == LOOSE_NATIVE  ? " --native"
-                     : mode == LOOSE_LEAKS ? " --leaks"
-                                           : "",
-                     TargetOutput(cccc), files[i]);
+                     TargetOutput(check), modeflag, TargetOutput(cccc),
+                     files[i]);
             snprintf(name, sizeof(name), "%s-%s", agg_name, base);
             BuildTarget *step = RunCustom(ctx, name, cmd);
+            if (mode == LOOSE_LEAKS)
+                StepTimeout(step, leak_step_timeout(ctx));
             DependsOn(step, cccc);
             DependsOn(step, check);
             DependsOn(agg, step);
@@ -1015,10 +1032,13 @@ static BuildTarget *leak_suite_tests(Builder *ctx, BuildTarget *cccc,
         const char *base = strrchr(files[i], '/');
         base             = base ? base + 1 : files[i];
         char cmd[1024], name[160];
-        snprintf(cmd, sizeof(cmd), "\"%s\" --leaks --suite \"%s\" %s",
-                 TargetOutput(check), TargetOutput(cccc), files[i]);
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\" --leaks --suite --timeout %d \"%s\" %s",
+                 TargetOutput(check), leak_timeout(ctx), TargetOutput(cccc),
+                 files[i]);
         snprintf(name, sizeof(name), "leaks-suites-%s", base);
         BuildTarget *step = RunCustom(ctx, name, cmd);
+        StepTimeout(step, leak_step_timeout(ctx));
         DependsOn(step, cccc);
         DependsOn(step, check);
         DependsOn(agg, step);

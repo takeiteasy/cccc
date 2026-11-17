@@ -140,9 +140,14 @@ passing test is rerun under `leaks -atExit` (macOS) or valgrind (elsewhere),
 and a leak in cccc's own process fails it. The children a `--testing` run
 forks are not followed.
 
-On macOS a forked child that `exit()`s stops itself under `leaks -atExit` and
-never resumes, so a leak-pass timeout is reported as `SKIP` (the Linux valgrind
-pass covers those tests). The report is read with NUL bytes blanked, and a
+On macOS `leaks -atExit` makes a process stop itself at exit, and the
+instrumentation is inherited by every forked child, so a child of cccc's own
+process stops for a tool that will only ever attach to the parent. cccc waits
+for a child through `cc_wait_resume` (`src/wait_stop.h`), which continues it;
+a guest program that forks is on its own, and a test whose *guest* forks
+carries `CCCC_LEAKS_SKIP`. Each file is capped with `--timeout`, short on
+macOS and the 600s default under valgrind, which is legitimately slower. The
+report is read with NUL bytes blanked, and a
 valgrind error that is not a leak (an uninitialised read) is labelled
 `valgrind error (not a leak)`. Tests expecting a compile error are left out of
 the pass because `error()` exits without teardown. cccc frees its own
@@ -155,7 +160,7 @@ use `--testing`, a safety flag, or carry `CCCC_LEAKS_KEEP_VM_HEAP`.
 |---|---|
 | `CCCC_EXPECT_LEAK[: reason]` | a leak is not a failure (a deliberate one, or a known compiler leak) |
 | `CCCC_LEAKS_KEEP_VM_HEAP` | do not inject `-V` (the test needs the VM heap) |
-| `CCCC_LEAKS_SKIP: reason` | left out of the pass; the reason cites the open ticket for a known compiler bug |
+| `CCCC_LEAKS_SKIP: reason` | left out of the pass; the reason cites the open ticket for a known compiler bug, or names what cccc cannot follow (a guest fork) |
 
 A suite takes `CCCC_LEAKS_SKIP` in its header like the other two lines.
 

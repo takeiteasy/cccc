@@ -21,10 +21,16 @@ LinkWith(app, core);        // app gets -lcore
 | `DeclareOutput(t, path)` | A file it writes |
 | `StepTimeout(t, secs)` | Wall-clock limit; 0 (the default) means no limit |
 
-A step given a `StepTimeout` runs in its own process group. When the limit
-passes the whole group is killed and the step fails, so one wedged command
-cannot stall the build until the outer timeout — useful for a step that runs a
-test binary, where a hang is the failure being looked for.
+Every step runs in its own process group, so the command and anything it
+spawned are handled as one. When a `StepTimeout` limit passes the whole group
+is killed and the step fails, so one wedged command cannot stall the build
+until the outer timeout — useful for a step that runs a test binary, where a
+hang is the failure being looked for.
+
+Interrupting the build (`Ctrl-C`, `SIGTERM`, `SIGHUP`) kills the running step's
+group before the driver exits, so no command outlives the build. A signal the
+build already ignores stays ignored, so `nohup` still works; `Ctrl-Z` suspends
+the driver but not a running step.
 
 ```c
 BuildTarget *suite = RunCustom(ctx, "run-suite", "./app --selftest");

@@ -26,6 +26,7 @@
 // status.
 
 #include "./internal.h"
+#include "wait_stop.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -357,38 +358,71 @@ static void build_passthru_err(const char *d, size_t n, void *u) {
 }
 
 #ifdef _POSIX_VERSION
-// A StepTimeout'd command runs in a child of its own process group: the shell
-// runs in-process, so a child is the only way to abandon a wedged command
-// without unwinding the builder's own state, and the group is what lets
-// anything the command spawned be killed with it.
-static int run_custom_timed(const BuildTarget *t, shell_io *sio,
-                            shell_ctx *sctx) {
-    fflush(stdout);
-    fflush(stderr);
-    pid_t pid = fork();
-    if (pid < 0) {
-        fprintf(stderr, "build: RunCustom '%s': fork failed: %s\n", t->name,
-                strerror(errno));
-        return 1;
+// Signals forwarded to the running step's process group, so an interrupt tears
+// the command down with the build instead of leaving it running.
+static const int step_signals[] = {SIGINT, SIGTERM, SIGHUP};
+#define NSTEP_SIGNALS ((int)(sizeof step_signals / sizeof *step_signals))
+
+static volatile sig_atomic_t step_pgid = 0;
+static struct sigaction      step_saved[NSTEP_SIGNALS];
+static volatile sig_atomic_t step_hooked[NSTEP_SIGNALS];
+
+static void step_signal_forward(int sig) {
+    pid_t pgid = (pid_t)step_pgid;
+    if (pgid > 0)
+        kill(-pgid, sig);
+    for (int i = 0; i < NSTEP_SIGNALS; i++) {
+        if (step_signals[i] != sig || !step_hooked[i])
+            continue;
+        sigaction(sig, &step_saved[i], NULL);
+        step_hooked[i] = 0;
     }
-    if (pid == 0) {
-        setpgid(0, 0);
-        int crc = shell_with_ctx(t->command, sio, sctx);
-        _exit(crc < 0 || crc > 255 ? 1 : crc);
+    raise(sig);
+}
+
+// A signal already ignored is left alone: a `nohup`'d build must not start
+// dying on SIGHUP just because it has a step running.
+static void step_signals_install(pid_t pgid) {
+    step_pgid = (sig_atomic_t)pgid;
+    for (int i = 0; i < NSTEP_SIGNALS; i++) {
+        struct sigaction sa, old;
+        memset(&sa, 0, sizeof sa);
+        sa.sa_handler = step_signal_forward;
+        sa.sa_flags   = SA_RESTART;
+        sigemptyset(&sa.sa_mask);
+        step_hooked[i] = 0;
+        if (sigaction(step_signals[i], NULL, &old) == 0 &&
+            old.sa_handler == SIG_IGN)
+            continue;
+        if (sigaction(step_signals[i], &sa, &step_saved[i]) == 0)
+            step_hooked[i] = 1;
     }
-    setpgid(pid, pid); // also in the parent: whichever runs first wins
+}
+
+static void step_signals_restore(void) {
+    for (int i = 0; i < NSTEP_SIGNALS; i++) {
+        if (!step_hooked[i])
+            continue;
+        sigaction(step_signals[i], &step_saved[i], NULL);
+        step_hooked[i] = 0;
+    }
+    step_pgid = 0;
+}
+
+// Polls until the step finishes, killing its group once the StepTimeout
+// deadline passes.
+static int wait_step_deadline(const BuildTarget *t, pid_t pid) {
     time_t deadline = time(NULL) + t->timeout_secs;
     for (;;) {
-        int   status;
-        pid_t r = waitpid(pid, &status, WNOHANG);
+        int   status = 0;
+        pid_t r      = cc_wait_resume(pid, &status, WNOHANG);
         if (r == pid)
             return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
-        if (r < 0 && errno != EINTR)
+        if (r < 0)
             return 1;
         if (time(NULL) >= deadline) {
             kill(-pid, SIGKILL);
-            while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
-                ;
+            cc_wait_resume(pid, &status, 0);
             fprintf(stderr,
                     "build: custom step '%s' timed out after %d second(s)\n",
                     t->name, t->timeout_secs);
@@ -397,6 +431,55 @@ static int run_custom_timed(const BuildTarget *t, shell_io *sio,
         struct timespec ts = {.tv_sec = 0, .tv_nsec = 50 * 1000 * 1000};
         nanosleep(&ts, NULL);
     }
+}
+
+// Every custom step runs in a child of its own process group. The shell reaps
+// the command itself, so an extra child is the only way to abandon a wedged
+// one, and the group is what lets everything the command spawned be killed
+// with it. Because that group is cut off from the terminal's own signal
+// delivery, the waiting parent forwards an interrupt to it.
+static int run_custom_step(const BuildTarget *t, shell_io *sio,
+                           shell_ctx *sctx) {
+    fflush(stdout);
+    fflush(stderr);
+
+    sigset_t block, saved;
+    sigemptyset(&block);
+    for (int i = 0; i < NSTEP_SIGNALS; i++)
+        sigaddset(&block, step_signals[i]);
+    sigprocmask(SIG_BLOCK, &block, &saved);
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        sigprocmask(SIG_SETMASK, &saved, NULL);
+        fprintf(stderr, "build: RunCustom '%s': fork failed: %s\n", t->name,
+                strerror(errno));
+        return 1;
+    }
+    if (pid == 0) {
+        setpgid(0, 0);
+        sigprocmask(SIG_SETMASK, &saved, NULL);
+        int crc = shell_with_ctx(t->command, sio, sctx);
+        fflush(NULL);
+        _exit(crc < 0 || crc > 255 ? 1 : crc);
+    }
+    setpgid(pid, pid); // also in the parent: whichever runs first wins
+    // Installed before the mask is lifted, so a signal arriving in the window
+    // after the fork cannot be forwarded to a group of 0.
+    step_signals_install(pid);
+    sigprocmask(SIG_SETMASK, &saved, NULL);
+
+    int rc;
+    if (t->timeout_secs > 0) {
+        rc = wait_step_deadline(t, pid);
+    } else {
+        int status = 0;
+        rc         = cc_wait_resume(pid, &status, 0) == pid && WIFEXITED(status)
+                         ? WEXITSTATUS(status)
+                         : 1;
+    }
+    step_signals_restore();
+    return rc;
 }
 #endif
 
@@ -455,7 +538,7 @@ static int run_capture(char *const argv[], char **out) {
     char  *buf = malloc(cap + 1);
     if (!buf) {
         close(pipefd[0]);
-        waitpid(pid, NULL, 0);
+        cc_wait_resume(pid, NULL, 0);
         return -1;
     }
     ssize_t n;
@@ -467,7 +550,7 @@ static int run_capture(char *const argv[], char **out) {
             if (!nb) {
                 free(buf);
                 close(pipefd[0]);
-                waitpid(pid, NULL, 0);
+                cc_wait_resume(pid, NULL, 0);
                 return -1;
             }
             buf = nb;
@@ -479,8 +562,8 @@ static int run_capture(char *const argv[], char **out) {
     buf[len] = '\0';
     *out     = buf;
 
-    int status;
-    waitpid(pid, &status, 0);
+    int status = 0;
+    cc_wait_resume(pid, &status, 0);
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 #endif
@@ -2841,8 +2924,8 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
             // pass.
             while (in_flight > 0 &&
                    (in_flight >= jobs || i == t->sources.len)) {
-                int   status;
-                pid_t done = waitpid(-1, &status, 0);
+                int   status = 0;
+                pid_t done   = cc_wait_resume(-1, &status, 0);
                 if (done < 0)
                     break;
                 for (int j = 0; j < jobs; j++) {
@@ -3147,9 +3230,7 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
             // OOM.
             shell_io sio = {.out_cb = build_passthru_out,
                             .err_cb = build_passthru_err};
-            int      rc  = t->timeout_secs > 0
-                               ? run_custom_timed(t, &sio, sctx)
-                               : shell_with_ctx(t->command, &sio, sctx);
+            int      rc  = run_custom_step(t, &sio, sctx);
             shell_ctx_destroy(sctx);
             if (rc != 0) {
                 fprintf(stderr, "build: custom step '%s' failed (exit %d)\n",
@@ -3635,8 +3716,8 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
             }
 
             // Reap one child.
-            int   status;
-            pid_t done = waitpid(-1, &status, 0);
+            int   status = 0;
+            pid_t done   = cc_wait_resume(-1, &status, 0);
             if (done < 0)
                 break;
             for (int j = 0; j < ctx->jobs; j++) {
@@ -3659,7 +3740,7 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
                         stop_dispatch = 1;
                         // Drain remaining in-flight children before returning.
                         while (in_flight > 0) {
-                            pid_t d2 = waitpid(-1, &status, 0);
+                            pid_t d2 = cc_wait_resume(-1, &status, 0);
                             if (d2 < 0)
                                 break;
                             for (int k = 0; k < ctx->jobs; k++) {

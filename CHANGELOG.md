@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: interrupting a `--build` run with `Ctrl-C`, `SIGTERM` or `SIGHUP` tears down the running custom step's command instead of leaving it alive. Every step runs in its own process group and the driver forwards the signal there; a signal the build already ignores stays ignored, so `nohup` still works. See [build-steps.md](docs/build-steps.md).
+- Fixed: the macOS leak pass checks the 36 files it used to skip. A child forked by cccc stops itself at exit under `leaks -atExit` and never resumed, so each of those files burnt the full 600s timeout and was reported as `SKIP`; a stopped child is now continued, and every leak-checked file is capped with a timeout. See [test-infrastructure.md](docs/test-infrastructure.md).
 - Fixed: a test with an `expect_stdout`/`expect_stderr` pattern captures its output through a temp file rather than a pipe, in the VM and under `--testing=native`, so the runner no longer hangs when the test writes more than a pipe buffer, or when a process that inherited the redirected descriptor (a sanitizer's symbolizer) outlives it.
 - Added: `StepTimeout(t, secs)` caps a `RunCustom` step's wall-clock time. The step runs in its own process group and the group is killed when the limit passes, so a wedged command fails the step instead of stalling the build. `test_tsan` caps each suite. See [build-steps.md](docs/build-steps.md).
 - Fixed: an attribute that takes no arguments is accepted with an empty argument list (`__attribute__((__malloc__()))`), as GCC and Clang accept it. The macOS SDK's `<xpc/base.h>` spells every zero-argument XPC attribute that way, so `<xpc/*.h>` now parses under `--use-system-headers`.

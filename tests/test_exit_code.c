@@ -1,4 +1,3 @@
-// CCCC_LEAKS_SKIP: forks that hang under leaks -atExit
 // CCCC_FLAGS: --testing
 // Tests exit_code= assertion in [[cccc::test]].
 

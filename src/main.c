@@ -21,6 +21,7 @@
 #include "./internal.h"
 #include "./config.h"
 #include "./watch.h"
+#include "wait_stop.h"
 #include "./os_sandbox.h"
 #include <getopt.h>
 #if defined(_WIN32)
@@ -3693,7 +3694,7 @@ int main(int argc, const char *argv[]) {
             _exit(rc);
         }
         int status = 0;
-        waitpid(pid, &status, 0);
+        cc_wait_resume(pid, &status, 0);
         bool test_run_ok;
         if (WIFSIGNALED(status)) {
             fprintf(stderr,

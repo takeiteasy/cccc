@@ -18,6 +18,7 @@
 */
 
 #include "internal.h"
+#include "wait_stop.h"
 
 #include <fnmatch.h>
 #include <inttypes.h>
@@ -1714,9 +1715,19 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
 
             int   wstatus = 0;
             pid_t waited;
-            do {
-                waited = waitpid(pid, &wstatus, 0);
-            } while (waited < 0 && errno == EINTR && !s_alarm_fired);
+            // Spelt out rather than cc_wait_resume() because the timeout is
+            // reported from an interrupted wait: the alarm handler kills the
+            // child, so EINTR with s_alarm_fired set must stop the retry.
+            for (;;) {
+                waited = waitpid(pid, &wstatus, WUNTRACED);
+                if (waited > 0 && WIFSTOPPED(wstatus)) {
+                    kill(waited, SIGCONT); // see wait_stop.h
+                    continue;
+                }
+                if (waited < 0 && errno == EINTR && !s_alarm_fired)
+                    continue;
+                break;
+            }
 
             SET_TIMEOUT(0);
             s_fork_child_pid    = 0;
@@ -1730,7 +1741,7 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
 
             bool fork_timed_out = (waited < 0 && s_alarm_fired);
             if (fork_timed_out) {
-                waitpid(pid, NULL, 0);
+                cc_wait_resume(pid, NULL, 0);
                 emit_test_result(fmt, disp, cur_suite, "timeout", NULL,
                                  &json_first, test_num);
                 total_timeouts++;

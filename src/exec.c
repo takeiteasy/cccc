@@ -18,6 +18,7 @@
 */
 
 #include "./internal.h"
+#include "wait_stop.h"
 #if !defined(_WIN32)
 #include <fcntl.h>
 #include <sys/wait.h>
@@ -144,7 +145,7 @@ int run_argv_env(char *const argv[], char *const envp[]) {
     }
 
     int status = 0;
-    if (waitpid(pid, &status, 0) < 0) {
+    if (cc_wait_resume(pid, &status, 0) < 0) {
         fprintf(stderr, "error: failed to wait for %s: %s\n", argv[0],
                 strerror(errno));
         return 1;
@@ -184,7 +185,7 @@ int run_argv_quiet(char *const argv[]) {
         _exit(127);
     }
     int status = 0;
-    if (waitpid(pid, &status, 0) < 0)
+    if (cc_wait_resume(pid, &status, 0) < 0)
         return 1;
     if (WIFEXITED(status))
         return WEXITSTATUS(status);

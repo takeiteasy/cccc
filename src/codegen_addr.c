@@ -20,6 +20,7 @@
 #include "./codegen_internal.h"
 #include "./parse_internal.h"
 #include "./serialize_internal.h"
+#include "wait_stop.h"
 #if !defined(_WIN32)
 #include <sys/wait.h>
 #endif
@@ -325,8 +326,8 @@ static void *compile_passthru_so(const char *src, size_t len) {
 #endif
         _exit(127);
     }
-    int status;
-    waitpid(pid, &status, 0);
+    int status = 0;
+    cc_wait_resume(pid, &status, 0);
     unlink(src_path);
     free(cc);
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {

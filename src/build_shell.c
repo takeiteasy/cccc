@@ -28,6 +28,7 @@
 #include <stdarg.h>
 #include <sys/wait.h>
 #include "paul_shell.h"
+#include "wait_stop.h"
 
 /* --- Globals --- */
 static shell_ctx *g_default_ctx = NULL;
@@ -1263,10 +1264,9 @@ static int command_execute(shell_ctx *ctx, shell_command_t *cmd) {
             ctx->deferred_pids[ctx->deferred_pid_count++] = pid;
             return 0;
         }
-        int status;
-        do {
-            waitpid(pid, &status, WUNTRACED);
-        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+        int status = 0;
+        if (cc_wait_resume(pid, &status, 0) < 0)
+            return SHELL_ERR_GENERIC;
         if (WIFEXITED(status))
             return WEXITSTATUS(status);
         if (WIFSIGNALED(status))
@@ -1418,11 +1418,10 @@ static int wait_deferred_pipeline(shell_ctx *ctx, const int *stage_rc,
             }
             continue;
         }
-        pid_t pid = ctx->deferred_pids[pid_idx++];
-        int   status;
-        do {
-            waitpid(pid, &status, WUNTRACED);
-        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+        pid_t pid    = ctx->deferred_pids[pid_idx++];
+        int   status = 0;
+        if (cc_wait_resume(pid, &status, 0) < 0)
+            status = 0;
         if (WIFEXITED(status))
             last_status_rc = WEXITSTATUS(status);
         else if (WIFSIGNALED(status))
@@ -1898,12 +1897,23 @@ static int posix_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
                                 {.fd = errpipe[0], .events = POLLIN | POLLHUP}};
     int           active_fds = 2;
 
+    /* A child stopped at exit by `leaks -atExit` (see wait_stop.h) keeps its
+     * write ends of these pipes open, so the drain never sees EOF; the bounded
+     * wait gives cc_wait_resume() a chance to continue it. */
+    pid_t reaped        = 0;
+    int   reaped_status = 0;
+
     while (active_fds > 0) {
-        int poll_result = poll(fds, 2, -1);
+        int poll_result = poll(fds, 2, 100 /* ms */);
         if (poll_result == -1) {
             if (errno == EINTR)
                 continue;
             break;
+        }
+        if (poll_result == 0) {
+            if (reaped <= 0)
+                reaped = cc_wait_resume(pid, &reaped_status, WNOHANG);
+            continue;
         }
 
         for (int i = 0; i < 2; i++) {
@@ -1961,8 +1971,9 @@ static int posix_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
 
     close(outpipe[0]);
     close(errpipe[0]);
-    int status;
-    waitpid(pid, &status, 0);
+    int status = reaped_status;
+    if (reaped != pid && cc_wait_resume(pid, &status, 0) < 0)
+        return SHELL_ERR_GENERIC;
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
