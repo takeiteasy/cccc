@@ -41,10 +41,49 @@
 
 // ---- libffi probing -------------------------------------------------------
 
+// A libffi.pc can name an SDK that a toolchain update has removed (Homebrew
+// keys its .pc files on the macOS major version). A -I that does not hold
+// ffi.h means the file is stale, so pkg-config's answer is discarded rather
+// than trusted into a broken build.
+static bool libffi_pkg_config_usable(Builder *ctx) {
+    const char *out = CaptureCommand(ctx, "pkg-config --cflags-only-I libffi");
+    if (!out)
+        return false;
+    bool  usable = true;
+    char *copy   = strdup(out);
+    for (char *tok = strtok(copy, " \t\n\r"); tok;
+         tok       = strtok(NULL, " \t\n\r")) {
+        if (strncmp(tok, "-I", 2) != 0)
+            continue;
+        char hdr[1024];
+        snprintf(hdr, sizeof(hdr), "%s/ffi.h", tok + 2);
+        if (!FileExists(ctx, hdr))
+            usable = false;
+    }
+    free(copy);
+    return usable;
+}
+
 static void probe_libffi(Builder *ctx, BuildTarget *t) {
-    if (HaveTool(ctx, "pkg-config") && PkgConfig(t, "libffi") == 0)
+    // On macOS the SDK's own ffi directory comes first, so the headers and
+    // the compiler's sysroot agree.
+    if (strcmp(BuildHost(ctx), "darwin") == 0) {
+        const char *sdk = CaptureCommand(ctx, "xcrun --show-sdk-path");
+        if (sdk && sdk[0]) {
+            char dir[1024], hdr[1024];
+            snprintf(dir, sizeof(dir), "%s/usr/include/ffi", sdk);
+            snprintf(hdr, sizeof(hdr), "%s/ffi.h", dir);
+            if (FileExists(ctx, hdr)) {
+                AddInclude(t, dir);
+                AddLib(t, "ffi");
+                return;
+            }
+        }
+    }
+    if (HaveTool(ctx, "pkg-config") && libffi_pkg_config_usable(ctx) &&
+        PkgConfig(t, "libffi") == 0)
         return;
-    // pkg-config not available or failed; fall back to well-known paths
+    // pkg-config not available, stale or failed; fall back to well-known paths
     if (strcmp(BuildHost(ctx), "darwin") == 0) {
         AddInclude(t, "/opt/homebrew/opt/libffi/include");
         AddInclude(t, "/usr/local/opt/libffi/include");
@@ -1342,7 +1381,7 @@ static void ouroboros_compile_flags(Builder *ctx, BuildTarget *t) {
         AddInclude(t, path);
         snprintf(path, sizeof(path), "%s/System/Library/Frameworks", sdk);
         AddFrameworkPath(t, path);
-    } else if (HaveTool(ctx, "pkg-config")) {
+    } else if (HaveTool(ctx, "pkg-config") && libffi_pkg_config_usable(ctx)) {
         ouroboros_pkg_flags(ctx, t, "pkg-config --cflags-only-I libffi", true);
     }
     if (strcmp(BuildHost(ctx), "linux") == 0) {

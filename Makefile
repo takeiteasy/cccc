@@ -47,10 +47,28 @@ else
 	LDFLAGS += -lm
 endif
 
-# libffi is required for native FFI calls.
-LIBFFI_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags libffi 2>/dev/null)
-LIBFFI_LDFLAGS ?= $(shell $(PKG_CONFIG) --libs libffi 2>/dev/null)
-ifeq ($(LIBFFI_LDFLAGS),)
+# libffi is required for native FFI calls. On macOS the SDK's own ffi
+# directory comes first, so the headers and the compiler's sysroot agree;
+# pkg-config is consulted next, then the Homebrew keg paths.
+ifeq ($(UNAME_S),Darwin)
+	SDK_PATH := $(shell xcrun --show-sdk-path 2>/dev/null)
+	ifneq ($(wildcard $(SDK_PATH)/usr/include/ffi/ffi.h),)
+		LIBFFI_CFLAGS ?= -I$(SDK_PATH)/usr/include/ffi
+		LIBFFI_LDFLAGS ?= -lffi
+	endif
+endif
+
+# A libffi.pc may name an SDK that a toolchain update has removed (Homebrew
+# keys its .pc files on the macOS major version), so an -I that does not hold
+# ffi.h is discarded instead of silently producing a broken build.
+PKG_FFI_CFLAGS := $(shell $(PKG_CONFIG) --cflags libffi 2>/dev/null)
+PKG_FFI_STALE := $(strip $(foreach d,$(patsubst -I%,%,$(filter -I%,$(PKG_FFI_CFLAGS))),$(if $(wildcard $(d)/ffi.h),,$(d))))
+ifeq ($(PKG_FFI_STALE),)
+	LIBFFI_CFLAGS ?= $(PKG_FFI_CFLAGS)
+	LIBFFI_LDFLAGS ?= $(shell $(PKG_CONFIG) --libs libffi 2>/dev/null)
+endif
+
+ifeq ($(strip $(LIBFFI_LDFLAGS)),)
 	ifeq ($(UNAME_S),Darwin)
 		LIBFFI_CFLAGS := -I/opt/homebrew/opt/libffi/include -I/usr/local/opt/libffi/include
 		LIBFFI_LDFLAGS := -L/opt/homebrew/opt/libffi/lib -L/usr/local/opt/libffi/lib -lffi

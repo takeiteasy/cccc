@@ -10,6 +10,10 @@ scripts for your *own* projects, see [build.md](build.md).
   - macOS: ships with the system / Xcode CLT.
   - Linux: `apt install libffi-dev` (or your distro's equivalent).
 
+After a macOS upgrade, a build that stops at `fatal error: 'ffi.h' file not
+found` usually means a third-party `pkg-config` is still answering for the
+previous OS.[^staleffi]
+
 Everything else is optional and probed at build time:
 
 | Optional dependency | Enables | Notes |
@@ -89,3 +93,13 @@ tools/fetch_intel_bid.sh && CCCC_HAS_DECIMAL=1 make
 
 The published API docs are at <https://takeiteasy.github.io/cccc/>; the `docs`
 output is gitignored and regenerated locally on demand.
+
+[^staleffi]: Homebrew keys its bundled `.pc` files on the macOS major version
+    and bakes the directory into `pkgconf` at install time, so after an upgrade
+    `pkg-config --cflags libffi` can still name an SDK a Command Line Tools
+    update has since deleted. Check with `pkg-config --variable pc_path
+    pkg-config` and reinstall `pkgconf`. The build prefers the SDK's own ffi
+    directory on macOS and ignores a `pkg-config` include path that holds no
+    `ffi.h`, so this only bites a toolchain that also has the old path baked in
+    — a Homebrew `gcc`, whose `--with-sysroot` is fixed at install time, needs
+    the same reinstall.
