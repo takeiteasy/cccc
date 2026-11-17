@@ -227,6 +227,18 @@ void __builtin_build_declare_output(BuildTarget *t, const char *path);
 void __builtin_build_add_input(BuildTarget *t, const char *path);
 
 /*!
+ * @brief Cap how long a @c RunCustom target's command may run.
+ * @details The command runs in its own process group; when @c secs elapse the
+ *            whole group is killed and the step fails, so one wedged command
+ *            cannot stall the build until the outer timeout. @c secs of 0
+ *            removes the cap, which is the default. No-op with a diagnostic
+ *            on non-@c RunCustom targets.
+ * @param t Target to cap (must be a @c RunCustom target).
+ * @param secs Wall-clock limit in seconds, or 0 for no limit.
+ */
+void __builtin_build_step_timeout(BuildTarget *t, int secs);
+
+/*!
  * @brief Add a C source file to the target.
  * @param t Target to add the source to.
  * @param path Source file path, relative to the build root.
@@ -869,6 +881,12 @@ int __builtin_build_run_default(Builder *ctx);
  * @param t Target to record against.
  * @param p Input path the target reads. */
 #define AddInput(t, p) __builtin_build_add_input(t, p)
+
+/*! @def StepTimeout
+ * @brief Wall-clock limit for a @c RunCustom target's command.
+ * @param t Target to cap.
+ * @param secs Seconds, or 0 for no limit. */
+#define StepTimeout(t, secs) __builtin_build_step_timeout(t, secs)
 
 /*! @def ExcludeSource
  * @brief Exclude sources matching @c pat from compilation.

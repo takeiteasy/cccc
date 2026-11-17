@@ -36,8 +36,10 @@
 #include <unistd.h>
 #include <fnmatch.h>
 #include <glob.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <dirent.h>
+#include <time.h>
 #endif
 
 #include "paul_shell.h"
@@ -91,6 +93,8 @@ struct BuildTarget {
                  // for their single SetOutput() path.
     char       *output;  // explicit output path (relative to out_dir) or NULL
     char       *command; // CCCC_TGT_CUSTOM: shell command to run
+    int         timeout_secs; // CCCC_TGT_CUSTOM: StepTimeout() wall-clock cap
+                              // in seconds; 0 = no limit
     StringArray inputs;  // CCCC_TGT_CUSTOM: AddInput() paths (#851) — declared
                          // prerequisites used for the "up to date" skip check;
                          // NOT invalidation-only like DeclareOutput's `outputs`
@@ -351,6 +355,50 @@ static void build_passthru_err(const char *d, size_t n, void *u) {
     (void)u;
     fwrite(d, 1, n, stderr);
 }
+
+#ifdef _POSIX_VERSION
+// A StepTimeout'd command runs in a child of its own process group: the shell
+// runs in-process, so a child is the only way to abandon a wedged command
+// without unwinding the builder's own state, and the group is what lets
+// anything the command spawned be killed with it.
+static int run_custom_timed(const BuildTarget *t, shell_io *sio,
+                            shell_ctx *sctx) {
+    fflush(stdout);
+    fflush(stderr);
+    pid_t pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "build: RunCustom '%s': fork failed: %s\n", t->name,
+                strerror(errno));
+        return 1;
+    }
+    if (pid == 0) {
+        setpgid(0, 0);
+        int crc = shell_with_ctx(t->command, sio, sctx);
+        _exit(crc < 0 || crc > 255 ? 1 : crc);
+    }
+    setpgid(pid, pid); // also in the parent: whichever runs first wins
+    time_t deadline = time(NULL) + t->timeout_secs;
+    for (;;) {
+        int   status;
+        pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid)
+            return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+        if (r < 0 && errno != EINTR)
+            return 1;
+        if (time(NULL) >= deadline) {
+            kill(-pid, SIGKILL);
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+                ;
+            fprintf(stderr,
+                    "build: custom step '%s' timed out after %d second(s)\n",
+                    t->name, t->timeout_secs);
+            return 1;
+        }
+        struct timespec ts = {.tv_sec = 0, .tv_nsec = 50 * 1000 * 1000};
+        nanosleep(&ts, NULL);
+    }
+}
+#endif
 
 // ============================================================================
 // Tool gating (#543)
@@ -614,6 +662,19 @@ static long long impl_declare_output(long long t, long long path) {
 // depends on that -MMD never reports, such as an assembler `.incbin`. Every
 // object of the target recompiles when one changes, so keep such files on a
 // target of their own.
+static long long impl_step_timeout(long long t, long long secs) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    if (tgt->kind != CCCC_TGT_CUSTOM) {
+        fprintf(stderr,
+                "build: StepTimeout is only valid on a RunCustom target "
+                "('%s' is not one)\n",
+                tgt->name);
+        return 0;
+    }
+    tgt->timeout_secs = (int)secs;
+    return 0;
+}
+
 static long long impl_add_input(long long t, long long path) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
     strarray_push(&tgt->inputs, xstrdup((const char *)path));
@@ -1433,6 +1494,8 @@ void cc_load_build_runtime(VirtualMachine *vm) {
                       (void *)impl_declare_output, 2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_input", (void *)impl_add_input,
                       2, 0);
+    cc_register_cfunc(vm, "__builtin_build_step_timeout",
+                      (void *)impl_step_timeout, 2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_source", (void *)impl_add_source,
                       2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_sources_glob",
@@ -3084,7 +3147,9 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
             // OOM.
             shell_io sio = {.out_cb = build_passthru_out,
                             .err_cb = build_passthru_err};
-            int      rc  = shell_with_ctx(t->command, &sio, sctx);
+            int      rc  = t->timeout_secs > 0
+                               ? run_custom_timed(t, &sio, sctx)
+                               : shell_with_ctx(t->command, &sio, sctx);
             shell_ctx_destroy(sctx);
             if (rc != 0) {
                 fprintf(stderr, "build: custom step '%s' failed (exit %d)\n",

@@ -407,6 +407,12 @@ static BuildTarget *make_cccc_exe_named(Builder *ctx, BuildTarget *bt,
 // trip the duplicate-name check added in #842 Step 1).
 #define UBSAN_FLAG "-fsanitize=undefined"
 
+// Wall-clock cap per suite step under test_tsan, matching testcheck's own
+// default. Suites run in seconds even under ThreadSanitizer, so this is
+// deliberately generous: it turns a wedged suite into a fast failure rather
+// than bounding a normal run.
+#define TSAN_SUITE_TIMEOUT 600
+
 static BuildTarget *make_sanitizer_variant(Builder *ctx, BuildTarget *bt,
                                            const char *name,
                                            const char *sanitize_flag) {
@@ -536,8 +542,11 @@ static void suite_command(char *cmd, size_t cap, const char *cccc_path,
     snprintf(cmd + n, cap - n, " %s", file);
 }
 
-static BuildTarget *suite_tests(Builder *ctx, BuildTarget *cccc,
-                                const char *prefix, int native) {
+// `timeout` caps each suite step (0 = no cap), so one wedged suite fails in
+// minutes instead of stalling the whole target.
+static BuildTarget *suite_tests_timed(Builder *ctx, BuildTarget *cccc,
+                                      const char *prefix, int native,
+                                      int timeout) {
     char agg_name[64];
     snprintf(agg_name, sizeof(agg_name), "%s", prefix);
     BuildTarget *agg   = RunCustom(ctx, agg_name, "true");
@@ -556,24 +565,36 @@ static BuildTarget *suite_tests(Builder *ctx, BuildTarget *cccc,
                       native);
         snprintf(name, sizeof(name), "%s-%s", prefix, base);
         BuildTarget *step = RunCustom(ctx, name, cmd);
+        if (timeout > 0)
+            StepTimeout(step, timeout);
         DependsOn(step, cccc);
         DependsOn(agg, step);
     }
     return agg;
 }
 
+static BuildTarget *suite_tests(Builder *ctx, BuildTarget *cccc,
+                                const char *prefix, int native) {
+    return suite_tests_timed(ctx, cccc, prefix, native, 0);
+}
+
 // Both passes.
-static BuildTarget *make_test_step(Builder *ctx, BuildTarget *cccc,
-                                   const char *prefix) {
+static BuildTarget *make_test_step_timed(Builder *ctx, BuildTarget *cccc,
+                                         const char *prefix, int timeout) {
     char name[64];
     snprintf(name, sizeof(name), "%s-vm", prefix);
-    BuildTarget *vm = suite_tests(ctx, cccc, name, 0);
+    BuildTarget *vm = suite_tests_timed(ctx, cccc, name, 0, timeout);
     snprintf(name, sizeof(name), "%s-native", prefix);
-    BuildTarget *nat = suite_tests(ctx, cccc, name, 1);
+    BuildTarget *nat = suite_tests_timed(ctx, cccc, name, 1, timeout);
     BuildTarget *all = RunCustom(ctx, prefix, "true");
     DependsOn(all, vm);
     DependsOn(all, nat);
     return all;
+}
+
+static BuildTarget *make_test_step(Builder *ctx, BuildTarget *cccc,
+                                   const char *prefix) {
+    return make_test_step_timed(ctx, cccc, prefix, 0);
 }
 
 // ---- opt_test_O1 / O2 / O3 (#883) ------------------------------------------
@@ -771,9 +792,9 @@ BuildTarget *test_asan(Builder *ctx) {
 [[cccc::build_target]]
 BuildTarget *test_tsan(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
-    return make_test_step(
+    return make_test_step_timed(
         ctx, make_sanitizer_variant(ctx, bt, "cccc-tsan", "-fsanitize=thread"),
-        "test-tsan");
+        "test-tsan", TSAN_SUITE_TIMEOUT);
 }
 
 [[cccc::build_target]]

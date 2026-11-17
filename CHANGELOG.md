@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a test with an `expect_stdout`/`expect_stderr` pattern captures its output through a temp file rather than a pipe, in the VM and under `--testing=native`, so the runner no longer hangs when the test writes more than a pipe buffer, or when a process that inherited the redirected descriptor (a sanitizer's symbolizer) outlives it.
+- Added: `StepTimeout(t, secs)` caps a `RunCustom` step's wall-clock time. The step runs in its own process group and the group is killed when the limit passes, so a wedged command fails the step instead of stalling the build. `test_tsan` caps each suite. See [build-steps.md](docs/build-steps.md).
 - Fixed: an attribute that takes no arguments is accepted with an empty argument list (`__attribute__((__malloc__()))`), as GCC and Clang accept it. The macOS SDK's `<xpc/base.h>` spells every zero-argument XPC attribute that way, so `<xpc/*.h>` now parses under `--use-system-headers`.
 - Fixed: the sandbox host test skips a Homebrew `gcc` that cannot link outside the sandbox, instead of reporting it as a sandbox failure.
 - Fixed: the build finds libffi through the SDK's own ffi directory on macOS, and ignores a `pkg-config` include path that holds no `ffi.h`. A `libffi.pc` naming an SDK a toolchain update has removed no longer stops the build at `fatal error: 'ffi.h' file not found`. See [install.md](docs/install.md).

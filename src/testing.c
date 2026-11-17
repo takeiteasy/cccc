@@ -883,22 +883,44 @@ typedef struct TestListNode {
     struct TestListNode *next;
 } TestListNode;
 
-// drain_pipe: read all data from fd until EOF, return malloc'd NUL-terminated
-// string. The caller must free the returned buffer. Returns "" (not NULL) on
-// empty or error so pattern checks always have a valid string to match against.
+// capture_open: an unlinked temp file to stand in for stdout or stderr while a
+// test runs. A pipe cannot serve here: nothing drains it until the test body
+// returns, so a test writing more than one pipe buffer blocks in write(), and
+// it never reaches EOF while a process that inherited the fd is still alive --
+// a sanitizer's symbolizer outlives the test that spawned it. Returns -1 when
+// no temp file can be made, which turns capture off for that test.
 #ifdef _POSIX_VERSION
-static char *drain_pipe(int fd) {
+static int capture_open(void) {
+    const char *dir = getenv("TMPDIR");
+    char        path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/cccc-capture-XXXXXX",
+             dir && dir[0] ? dir : "/tmp");
+    int fd = mkstemp(path);
+    if (fd < 0)
+        return -1;
+    unlink(path);
+    return fd;
+}
+
+// capture_read: read a capture file back from the start and close it. The
+// caller must free the returned buffer. Returns "" (not NULL) on empty or
+// error so pattern checks always have a valid string to match against.
+static char *capture_read(int fd) {
     char   tmp[4096];
     size_t total = 0;
     char  *buf   = malloc(1);
     buf[0]       = '\0';
-    ssize_t n;
-    while ((n = read(fd, tmp, sizeof(tmp))) > 0) {
-        buf = realloc(buf, total + (size_t)n + 1);
-        memcpy(buf + total, tmp, (size_t)n);
-        total += (size_t)n;
+    if (fd >= 0 && lseek(fd, 0, SEEK_SET) == 0) {
+        ssize_t n;
+        while ((n = read(fd, tmp, sizeof(tmp))) > 0) {
+            buf = realloc(buf, total + (size_t)n + 1);
+            memcpy(buf + total, tmp, (size_t)n);
+            total += (size_t)n;
+        }
     }
     buf[total] = '\0';
+    if (fd >= 0)
+        close(fd);
     return buf;
 }
 
@@ -1580,14 +1602,13 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                     (r->expect_stderr || r->reject_stderr) &&
                     r->expect_exit_code < 0;
                 int saved_compile_err = -1;
-                int compile_pipe[2]   = {-1, -1};
+                int compile_cap       = -1;
                 if (needs_compile_capture) {
-                    if (pipe(compile_pipe) == 0) {
+                    compile_cap = capture_open();
+                    if (compile_cap >= 0) {
                         saved_compile_err = dup(STDERR_FILENO);
                         fflush(stderr);
-                        dup2(compile_pipe[1], STDERR_FILENO);
-                        close(compile_pipe[1]);
-                        compile_pipe[1] = -1;
+                        dup2(compile_cap, STDERR_FILENO);
                     } else {
                         needs_compile_capture = false;
                     }
@@ -1601,9 +1622,7 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                         dup2(saved_compile_err, STDERR_FILENO);
                         close(saved_compile_err);
                     }
-                    captured_compile_stderr = drain_pipe(compile_pipe[0]);
-                    if (compile_pipe[0] >= 0)
-                        close(compile_pipe[0]);
+                    captured_compile_stderr = capture_read(compile_cap);
                 }
 #endif
 
@@ -1835,23 +1854,25 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         bool needs_capture = r->expect_stdout || r->reject_stdout ||
                              r->expect_stderr || r->reject_stderr;
         int  saved_stdout = -1, saved_stderr = -1;
-        int  pipe_out[2], pipe_err[2];
-        pipe_out[0] = pipe_out[1] = pipe_err[0] = pipe_err[1] = -1;
+        int   cap_out = -1, cap_err = -1;
         char *captured_stdout = NULL, *captured_stderr = NULL;
         if (needs_capture) {
-            if (pipe(pipe_out) == 0 && pipe(pipe_err) == 0) {
+            cap_out = capture_open();
+            cap_err = capture_open();
+            if (cap_out >= 0 && cap_err >= 0) {
                 saved_stdout = dup(STDOUT_FILENO);
                 saved_stderr = dup(STDERR_FILENO);
                 fflush(stdout);
                 fflush(stderr);
-                dup2(pipe_out[1], STDOUT_FILENO);
-                close(pipe_out[1]);
-                pipe_out[1] = -1;
-                dup2(pipe_err[1], STDERR_FILENO);
-                close(pipe_err[1]);
-                pipe_err[1] = -1;
+                dup2(cap_out, STDOUT_FILENO);
+                dup2(cap_err, STDERR_FILENO);
             } else {
-                needs_capture = false;
+                if (cap_out >= 0)
+                    close(cap_out);
+                if (cap_err >= 0)
+                    close(cap_err);
+                cap_out = cap_err = -1;
+                needs_capture     = false;
             }
         }
 #endif
@@ -1915,12 +1936,8 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 dup2(saved_stderr, STDERR_FILENO);
                 close(saved_stderr);
             }
-            captured_stdout = drain_pipe(pipe_out[0]);
-            captured_stderr = drain_pipe(pipe_err[0]);
-            if (pipe_out[0] >= 0)
-                close(pipe_out[0]);
-            if (pipe_err[0] >= 0)
-                close(pipe_err[0]);
+            captured_stdout = capture_read(cap_out);
+            captured_stderr = capture_read(cap_err);
         }
         // Prepend compile-phase stderr (#621) so pattern checks see both
         // phases.

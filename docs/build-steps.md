@@ -19,6 +19,17 @@ LinkWith(app, core);        // app gets -lcore
 | `DependsOn(t, dep)` | Ordering only: `dep` builds first, no `-l` flag |
 | `AddInput(t, path)` | A file the step reads |
 | `DeclareOutput(t, path)` | A file it writes |
+| `StepTimeout(t, secs)` | Wall-clock limit; 0 (the default) means no limit |
+
+A step given a `StepTimeout` runs in its own process group. When the limit
+passes the whole group is killed and the step fails, so one wedged command
+cannot stall the build until the outer timeout — useful for a step that runs a
+test binary, where a hang is the failure being looked for.
+
+```c
+BuildTarget *suite = RunCustom(ctx, "run-suite", "./app --selftest");
+StepTimeout(suite, 600);
+```
 
 With at least one input and one output, the step is skipped (`(up to date)`) when every output is at least as new as every input. It does not depend on `--build-cache`. With no `AddInput` it runs every build; `DeclareOutput` alone only lets `TargetOutput()` resolve a path ([build-sources.md](build-sources.md)).
 

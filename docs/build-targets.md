@@ -141,6 +141,7 @@ void AddSource(BuildTarget *t, const char *path);
 // Output path resolution
 const char *TargetOutput(BuildTarget *t);          // resolved on-disk output path
 void        DeclareOutput(BuildTarget *t, const char *path); // record a RunCustom step's output
+void        StepTimeout(BuildTarget *t, int secs);           // wall-clock cap on a RunCustom step
 
 // Source-set ergonomics
 void AddSourcesGlob(BuildTarget *t, const char *pattern); // POSIX glob(3)
