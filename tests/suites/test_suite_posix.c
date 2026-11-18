@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing --posix-emulation
+// CCCC_LEAKS_SKIP: glibc's mq_notify helper thread and valgrind's ioctl blind spot, not cccc
 // Consolidated suite: POSIX: unistd, dirent, glob, regex, socket, mman, etc.
 // Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi,
 // test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll,

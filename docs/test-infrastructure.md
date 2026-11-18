@@ -165,7 +165,7 @@ use `--testing`, a safety flag, or carry `CCCC_LEAKS_KEEP_VM_HEAP`.
 |---|---|
 | `CCCC_EXPECT_LEAK[: reason]` | a leak is not a failure (a deliberate one, a known compiler leak, or one inside the host libc) |
 | `CCCC_LEAKS_KEEP_VM_HEAP` | do not inject `-V` (the test needs the VM heap) |
-| `CCCC_LEAKS_SKIP: reason` | left out of the pass; the reason cites the open ticket for a known compiler bug, or names what cccc cannot follow (a guest fork) |
+| `CCCC_LEAKS_SKIP: reason` | left out of the pass; the reason cites the open ticket for a known compiler bug, or names what cccc cannot follow (a guest fork) or what the leak tool reports in the host libc |
 
 A suite takes `CCCC_LEAKS_SKIP` in its header like the other two lines.
 
