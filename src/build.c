@@ -563,7 +563,8 @@ static int run_capture(char *const argv[], char **out) {
     *out     = buf;
 
     int status = 0;
-    cc_wait_resume(pid, &status, 0);
+    if (cc_wait_resume(pid, &status, 0) < 0)
+        return -1;
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 #endif
@@ -2926,8 +2927,19 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
                    (in_flight >= jobs || i == t->sources.len)) {
                 int   status = 0;
                 pid_t done   = cc_wait_resume(-1, &status, 0);
-                if (done < 0)
+                if (done < 0) {
+                    fprintf(stderr,
+                            "build: lost track of %d compile(s): wait: %s\n",
+                            in_flight, strerror(errno));
+                    for (int j = 0; j < jobs; j++) {
+                        free(pool[j].ofile);
+                        free(pool[j].dfile);
+                        memset(&pool[j], 0, sizeof pool[j]);
+                    }
+                    in_flight  = 0;
+                    any_failed = 1;
                     break;
+                }
                 for (int j = 0; j < jobs; j++) {
                     if (pool[j].pid != done)
                         continue;
@@ -3525,6 +3537,31 @@ static void propagate_skipped(BuildTarget **order, int n) {
     }
 }
 
+#ifdef _POSIX_VERSION
+typedef struct {
+    pid_t        pid;
+    BuildTarget *t;
+} TJob;
+
+// A wait failed with children still running: fail their targets rather than
+// leave them INFLIGHT and report success.
+static void abandon_inflight(TJob *jobs, int njobs, const char **failed_names,
+                             int *failures) {
+    for (int j = 0; j < njobs; j++) {
+        if (jobs[j].pid == 0)
+            continue;
+        fprintf(stderr, "build: lost track of target '%s': wait: %s\n",
+                jobs[j].t->name, strerror(errno));
+        jobs[j].t->state = TARGET_FAILED;
+        if (failed_names)
+            failed_names[*failures] = jobs[j].t->name;
+        (*failures)++;
+        jobs[j].pid = 0;
+        jobs[j].t   = NULL;
+    }
+}
+#endif
+
 // Look up a registered target by name; returns NULL if not found.
 static BuildTarget *find_target_by_name(Builder *ctx, const char *name) {
     for (int i = 0; i < ctx->targets_count; i++)
@@ -3612,10 +3649,6 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
         // simultaneously-ready targets.  The -j budget is shared: each forked
         // child runs source compilation serially (jobs=1) so the total number
         // of concurrent compiler invocations never exceeds `jobs` (#557).
-        typedef struct {
-            pid_t        pid;
-            BuildTarget *t;
-        } TJob;
         TJob *inflight_jobs = calloc(ctx->jobs, sizeof(TJob));
         int   in_flight = 0, stop_dispatch = 0;
 
@@ -3718,8 +3751,12 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
             // Reap one child.
             int   status = 0;
             pid_t done   = cc_wait_resume(-1, &status, 0);
-            if (done < 0)
+            if (done < 0) {
+                abandon_inflight(inflight_jobs, ctx->jobs, failed_names,
+                                 &failures);
+                in_flight = 0;
                 break;
+            }
             for (int j = 0; j < ctx->jobs; j++) {
                 if (inflight_jobs[j].pid != done)
                     continue;
@@ -3741,8 +3778,12 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
                         // Drain remaining in-flight children before returning.
                         while (in_flight > 0) {
                             pid_t d2 = cc_wait_resume(-1, &status, 0);
-                            if (d2 < 0)
+                            if (d2 < 0) {
+                                abandon_inflight(inflight_jobs, ctx->jobs,
+                                                 failed_names, &failures);
+                                in_flight = 0;
                                 break;
+                            }
                             for (int k = 0; k < ctx->jobs; k++) {
                                 if (inflight_jobs[k].pid != d2)
                                     continue;

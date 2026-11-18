@@ -327,10 +327,10 @@ static void *compile_passthru_so(const char *src, size_t len) {
         _exit(127);
     }
     int status = 0;
-    cc_wait_resume(pid, &status, 0);
+    bool waited = cc_wait_resume(pid, &status, 0) >= 0;
     unlink(src_path);
     free(cc);
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    if (!waited || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         unlink(so_template);
         passthru_fail("--asm-passthru: native compilation failed");
     }

@@ -69,6 +69,8 @@ void shell_ctx_destroy(shell_ctx *ctx) {
         b = next;
     }
 
+    free(ctx->bg_pids);
+
     /* Free cmd blacklist */
     if (ctx->cmd_blacklist) {
         for (int i = 0; ctx->cmd_blacklist[i]; ++i)
@@ -1088,14 +1090,23 @@ static bool is_blacklisted_path(shell_ctx *ctx, const char *path) {
     return false;
 }
 
-/* Reaps terminated background children so they do not linger as zombies;
- * WNOHANG leaves live children alone and keeps foreground waitpid() working. */
-static void sigchld_reaper(int sig) {
-    (void)sig;
-    int saved_errno = errno;
-    while (waitpid(-1, NULL, WNOHANG) > 0)
-        ;
-    errno = saved_errno;
+static void track_background_job(shell_ctx *ctx, pid_t pid) {
+    if (ctx->bg_pid_count == ctx->bg_pid_cap) {
+        int    cap = ctx->bg_pid_cap ? ctx->bg_pid_cap * 2 : 8;
+        pid_t *p   = realloc(ctx->bg_pids, (size_t)cap * sizeof *p);
+        if (!p)
+            return;
+        ctx->bg_pids    = p;
+        ctx->bg_pid_cap = cap;
+    }
+    ctx->bg_pids[ctx->bg_pid_count++] = pid;
+}
+
+/* A `&` job's status is ignored, as with a bare POSIX `wait`. */
+static void reap_background_jobs(shell_ctx *ctx) {
+    for (int i = 0; i < ctx->bg_pid_count; i++)
+        cc_wait_resume(ctx->bg_pids[i], NULL, 0);
+    ctx->bg_pid_count = 0;
 }
 
 /* CCCC patch: returns the child's real exit code (non-negative) or a
@@ -1231,8 +1242,6 @@ static int command_execute(shell_ctx *ctx, shell_command_t *cmd) {
     if (pid == 0) {
         /* Child */
         if (cmd->bg) {
-            printf("\n[BACKGROUND] started backgroundjob: %s\n", exec_name);
-            setpgid(0, 0);
             int fd = xopen("/dev/null", O_RDONLY, 0);
             dup2(fd, STDIN_FILENO);
             close(fd);
@@ -1274,13 +1283,7 @@ static int command_execute(shell_ctx *ctx, shell_command_t *cmd) {
         return SHELL_ERR_GENERIC;
     }
 
-    /* Background: register reaper and return immediately */
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = sigchld_reaper;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-    sigaction(SIGCHLD, &sa, NULL);
+    track_background_job(ctx, pid);
     return 0;
 }
 
@@ -1421,8 +1424,8 @@ static int wait_deferred_pipeline(shell_ctx *ctx, const int *stage_rc,
         pid_t pid    = ctx->deferred_pids[pid_idx++];
         int   status = 0;
         if (cc_wait_resume(pid, &status, 0) < 0)
-            status = 0;
-        if (WIFEXITED(status))
+            last_status_rc = SHELL_ERR_GENERIC;
+        else if (WIFEXITED(status))
             last_status_rc = WEXITSTATUS(status);
         else if (WIFSIGNALED(status))
             last_status_rc = 128 + WTERMSIG(status);
@@ -1445,18 +1448,11 @@ static int wait_deferred_pipeline(shell_ctx *ctx, const int *stage_rc,
  * for closing -- ctx->input_fd/output_fd get clobbered to whatever a
  * stage's own redirect last touched, so closing "ctx->input_fd" after a
  * redirect-carrying stage closed the wrong fd (or -1) and leaked the real
- * pipe read end. SIGCHLD is blocked for the whole fork-and-wait span so
- * sigchld_reaper() (installed once any `&` background job has run) can't
- * reap a stage out from under this function's own waitpid() calls. */
+ * pipe read end. */
 static int eval_pipeline(shell_ctx *ctx, shell_ast_t *ast) {
     int      saved_input_fd   = ctx->input_fd;
     int      saved_output_fd  = ctx->output_fd;
     bool     saved_defer_wait = ctx->defer_wait;
-
-    sigset_t block_set, saved_set;
-    sigemptyset(&block_set);
-    sigaddset(&block_set, SIGCHLD);
-    sigprocmask(SIG_BLOCK, &block_set, &saved_set);
 
     ctx->defer_wait         = true;
     ctx->deferred_pid_count = 0;
@@ -1551,7 +1547,6 @@ cleanup:
     if (!waited && stage_count > 0)
         wait_deferred_pipeline(ctx, stage_rc, stage_deferred, stage_count);
     ctx->defer_wait = saved_defer_wait;
-    sigprocmask(SIG_SETMASK, &saved_set, NULL);
     ctx->input_fd  = saved_input_fd;
     ctx->output_fd = saved_output_fd;
     return rc;
@@ -1864,6 +1859,7 @@ static int posix_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
 
         /* EXECUTE with Context; CCCC patch: propagate real exit code */
         int result = ast_exec(ctx, ast);
+        reap_background_jobs(ctx);
 
         shell_token_array_free(&tokens);
         free_ast(ast);
@@ -2008,6 +2004,7 @@ static int posix_shell_inline(const char *cmd, shell_ctx *ctx) {
 
     /* CCCC patch: ast_exec now returns the real exit code */
     int result = ast_exec(ctx, ast);
+    reap_background_jobs(ctx);
     shell_token_array_free(&tokens);
     free_ast(ast);
     free(cmd_copy);

@@ -3694,9 +3694,14 @@ int main(int argc, const char *argv[]) {
             _exit(rc);
         }
         int status = 0;
-        cc_wait_resume(pid, &status, 0);
+        bool waited = cc_wait_resume(pid, &status, 0) >= 0;
         bool test_run_ok;
-        if (WIFSIGNALED(status)) {
+        if (!waited) {
+            fprintf(stderr,
+                    "error: --test-run: lost the VM smoke test process -- "
+                    "refusing to compile\n");
+            test_run_ok = false;
+        } else if (WIFSIGNALED(status)) {
             fprintf(stderr,
                     "error: --test-run: program terminated by signal %d "
                     "(%s) under the VM smoke test -- refusing to compile\n",

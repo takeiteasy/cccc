@@ -20,6 +20,9 @@
        so command_execute() reports a builtin's real result; builtins also
        honour a stage's redirect/pipe fds (run via a forked subshell inside a
        pipeline, via a temporary dup2 of the shell's own std fds otherwise).
+     - A `cmd &` job stays in the shell's process group (so a group kill
+       reaches it) and is waited for before the shell returns; its status is
+       ignored.
      - eval_pipeline() sets FD_CLOEXEC on every pipe it creates, so a forked
        stage does not inherit unrelated pipe ends across exec() -- an
        early-exiting downstream reader (`producer | head`) now lets the
@@ -163,6 +166,12 @@ typedef struct shell_ctx {
     bool  defer_wait;
     pid_t deferred_pids[SHELL_MAX_DEFERRED_PIDS];
     int   deferred_pid_count;
+
+    /* `cmd &` jobs stay in the caller's process group and are reaped before
+     * the shell returns. */
+    pid_t *bg_pids;
+    int    bg_pid_count;
+    int    bg_pid_cap;
 
     void *userdata; /* For custom use in builtins */
 } shell_ctx;

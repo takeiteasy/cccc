@@ -28,7 +28,8 @@ until the outer timeout — useful for a step that runs a test binary, where a
 hang is the failure being looked for.
 
 Interrupting the build (`Ctrl-C`, `SIGTERM`, `SIGHUP`) kills the running step's
-group before the driver exits, so no command outlives the build. A signal the
+group before the driver exits, so no command outlives the build. A job started
+with `&` is in that group, so a timeout or an interrupt kills it too. A signal the
 build already ignores stays ignored, so `nohup` still works; `Ctrl-Z` suspends
 the driver but not a running step.
 
@@ -47,7 +48,7 @@ Commands run through a built-in POSIX-like shell (`src/build_shell.c`).
 |---|---|
 | Pipes `\|` | All stages start together; `producer \| head` stops the producer cleanly |
 | Redirects `<`, `>`, `>>` | Any number per command; for two of the same direction the last wins |
-| `;`, `&`, `&&`, `\|\|` | Real short-circuiting |
+| `;`, `&`, `&&`, `\|\|` | Real short-circuiting; a `cmd &` job belongs to the step, which waits for it before finishing (its exit status is ignored) |
 | Builtins `cd`, `pwd`, `exit` | Honour redirects and pipes; as a pipeline stage they run in a subshell, so `cd sub \| cmd` does not change the directory |
 | Quoting | `'...'` literal; `"..."` allows `\"`, `\\`, `\$`, `\<newline>` and expansion |
 | `$VAR`, `${VAR}` | Environment value as a single word: never re-split, never globbed |

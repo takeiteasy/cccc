@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a `RunCustom` step's `cmd &` job stays in the step's process group, so a `StepTimeout` or an interrupt kills it, and the step waits for it before finishing; it used to outlive both. A pipeline stage whose wait fails reports the step as failed rather than successful. See [build-steps.md](docs/build-steps.md).
+- Fixed: a `--build` run whose wait for a child fails (`-j` compile and target pools, `PkgConfig`) fails the build and names the lost targets, instead of abandoning them in flight and reporting success.
 - Fixed: interrupting a `--build` run with `Ctrl-C`, `SIGTERM` or `SIGHUP` tears down the running custom step's command instead of leaving it alive. Every step runs in its own process group and the driver forwards the signal there; a signal the build already ignores stays ignored, so `nohup` still works. See [build-steps.md](docs/build-steps.md).
 - Fixed: the macOS leak pass checks the 36 files it used to skip. A child forked by cccc stops itself at exit under `leaks -atExit` and never resumed, so each of those files burnt the full 600s timeout and was reported as `SKIP`; a stopped child is now continued, and every leak-checked file is capped with a timeout. See [test-infrastructure.md](docs/test-infrastructure.md).
 - Fixed: a test with an `expect_stdout`/`expect_stderr` pattern captures its output through a temp file rather than a pipe, in the VM and under `--testing=native`, so the runner no longer hangs when the test writes more than a pipe buffer, or when a process that inherited the redirected descriptor (a sanitizer's symbolizer) outlives it.
