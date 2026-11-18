@@ -1309,13 +1309,12 @@ static int eval_commandtail(shell_ctx *ctx, shell_ast_t *ast) {
 
 /* CCCC patch: returns exit code of last command (shell `;` semantics). */
 static int eval_sequence(shell_ctx *ctx, shell_ast_t *ast) {
+    int saved_bg = ctx->bg;
     if (ast->type == SHELL_AST_BACKGROUND)
         ctx->bg = 1;
     ast_exec(ctx, ast->left); /* left runs; `;` ignores its exit code */
-    int rc = ast_exec(ctx, ast->right);
-    if (ast->type == SHELL_AST_BACKGROUND)
-        ctx->bg = 0;
-    return rc;
+    ctx->bg = saved_bg;
+    return ast_exec(ctx, ast->right);
 }
 
 /* `&&`: short-circuits — right runs only if left succeeded (exit 0). */
@@ -1392,10 +1391,9 @@ static int eval_redirection(shell_ctx *ctx, shell_ast_t *ast) {
  * ctx->deferred_pids -- it is NOT inferable from `stage_rc[i] >= 0` alone.
  * A stage can return >= 0 without deferring anything: chiefly a command
  * (external or builtin) that inherited ctx->bg == 1 from an enclosing `&`
- * (the `&`/`;` quirk in eval_sequence() leaves ctx->bg set to 1 across
- * *both* sides of the `&`, so `bg-cmd & a | b | c` runs the whole pipeline
- * in command_execute()'s background branch, which forks, doesn't wait, and
- * returns 0 immediately without touching ctx->deferred_pids at all).
+ * (`a | b | c &` runs the whole pipeline in command_execute()'s background
+ * branch, which forks, doesn't wait, and returns 0 immediately without
+ * touching ctx->deferred_pids at all).
  * (Builtins used to be another such case -- they ran synchronously before
  * the fork -- but #1325 makes a builtin in a pipeline fork a subshell and
  * push a pid like any other stage.) Any stage with

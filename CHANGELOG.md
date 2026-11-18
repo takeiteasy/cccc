@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: in a `RunCustom` command `a & b`, only `a` runs in the background; `b` runs in the foreground and its exit status is the step's. Both used to be backgrounded, so `sleep 1 & false` succeeded.
 - Fixed: a `RunCustom` step's `cmd &` job stays in the step's process group, so a `StepTimeout` or an interrupt kills it, and the step waits for it before finishing; it used to outlive both. A pipeline stage whose wait fails reports the step as failed rather than successful. See [build-steps.md](docs/build-steps.md).
 - Fixed: a `--build` run whose wait for a child fails (`-j` compile and target pools, `PkgConfig`) fails the build and names the lost targets, instead of abandoning them in flight and reporting success.
 - Fixed: interrupting a `--build` run with `Ctrl-C`, `SIGTERM` or `SIGHUP` tears down the running custom step's command instead of leaving it alive. Every step runs in its own process group and the driver forwards the signal there; a signal the build already ignores stays ignored, so `nohup` still works. See [build-steps.md](docs/build-steps.md).
