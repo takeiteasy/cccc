@@ -1175,7 +1175,7 @@ static void initializer2(VirtualMachine *vm, Token **rest, Token *tok,
         return;
     }
 
-    init->expr = assign(vm, rest, tok);
+    init->expr = cc_overload_convert(vm, assign(vm, rest, tok), init->ty);
 }
 
 static Type *copy_struct_type(VirtualMachine *vm, Type *ty) {

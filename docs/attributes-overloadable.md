@@ -62,6 +62,30 @@ f(1.0f);     // f(double)
 
 A call with no viable candidate is `no matching function for call to 'f'`, and one with several best candidates is `call to 'f' is ambiguous`; both list the candidates. A string literal ranks as `char *`.
 
+## Taking the address
+
+A function name that stands for several overloads has no type of its own; the type it is converted to picks the one function whose type is that function pointer's.
+
+```c
+int __attribute__((overloadable)) hop(int x)    { return 1; }
+int __attribute__((overloadable)) hop(double x) { return 2; }
+
+int (*p)(int)    = hop;
+int (*q)(double) = &hop;
+int (*r)(double) = (int (*)(double))hop;
+```
+
+| Where | Example |
+|---|---|
+| Initializer, at file or block scope, in a struct or array | `int (*t[])(double) = {hop};` |
+| Assignment | `p = hop;` |
+| Cast to a function pointer | `(int (*)(double))hop` |
+| Argument of a function that is not variadic | `take(hop)` |
+| Argument of an overloaded function | `via(hop)`, ranked as an exact match when one overload fits that parameter |
+| `return` | `return hop;` |
+
+Exactly one overload must have the pointed-to type. No conversion applies, so `int (*)(long)` matches neither `hop(int)` nor `hop(double)`, and an error lists the candidates. Naming a set anywhere else is an error: `1 ? hop : hop`, `p == hop`, `sizeof hop`, `_Generic(hop, ...)`, `typeof(hop)`, `(void *)hop` and a variadic argument. An `unavailable` overload cannot have its address taken.
+
 ## Names in the output
 
 Each marked function is named by its Itanium C++ mangling, the one Clang uses, so `twice(double)` is `_Z5twiced`. `-m` and `-c=native` print and link that name, and a Clang-built object that defines the same overloads links against it. The unmarked function keeps its plain name. `__func__` and diagnostics give the name as written.
@@ -78,7 +102,6 @@ A parameter type that has no name to mangle (an anonymous struct) is an error; g
 |---|---|---|
 | `char` and `signed char` | One type in CCCC, so they cannot be overloads of each other | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
 | `__int128` and `_BitInt(128)` | One type in CCCC; a 128-bit parameter is an error | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
-| Naming a set without calling it | `int (*p)(int) = f;` is an error | [#2083](https://todo.sr.ht/~takeiteasy/cccc/2083) |
 | `@default` parameters | Rejected on an overloadable function | [#2084](https://todo.sr.ht/~takeiteasy/cccc/2084) |
 | Keyed arguments | A call of a set takes positional arguments | [#2085](https://todo.sr.ht/~takeiteasy/cccc/2085) |
 | `@method`, `@static_method`, `[[cccc::operator]]` | Rejected on an overloadable function | [#2086](https://todo.sr.ht/~takeiteasy/cccc/2086) |

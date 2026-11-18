@@ -2199,6 +2199,7 @@ static Type *typeof_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
         vm->compiler.unevaluated++;
         Node *node = expr(vm, &tok, tok);
         add_type(vm, node);
+        cc_overload_reject(vm, node);
         vm->compiler.unevaluated--;
         ty = node->ty;
     }

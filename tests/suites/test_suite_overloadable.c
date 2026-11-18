@@ -287,3 +287,90 @@ void test_feature_tests(void) {
     AssertFail();
 #endif
 }
+
+// The address of a set: the target type picks the member.
+static int OVL hop(int x) {
+    return 1;
+}
+static int OVL hop(double x) {
+    return 2;
+}
+static int OVL hop(int x, int y) {
+    return 3;
+}
+
+static int (*hop_global)(int)        = hop;
+static int (*hop_global_amp)(double) = &hop;
+static int (*hop_table[])(int, int)  = {hop};
+static struct {
+    int (*fn)(double);
+} hop_holder = {hop};
+
+static int call_with(int (*fn)(double)) {
+    return fn(0);
+}
+
+static int (*return_hop(void))(int) {
+    return hop;
+}
+
+[[cccc::test]]
+void test_address_in_initializers(void) {
+    int (*a)(int)          = hop;
+    int (*b)(double)       = &hop;
+    int (*c)(int, int)     = (hop);
+    int (*const d)(double) = hop;
+    AssertEq(a(0), 1);
+    AssertEq(b(0), 2);
+    AssertEq(c(0, 0), 3);
+    AssertEq(d(0), 2);
+    AssertEq(hop_global(0), 1);
+    AssertEq(hop_global_amp(0), 2);
+    AssertEq(hop_table[0](0, 0), 3);
+    AssertEq(hop_holder.fn(0), 2);
+}
+
+[[cccc::test]]
+void test_address_in_assignment_cast_argument_return(void) {
+    int (*p)(int);
+    p = hop;
+    AssertEq(p(0), 1);
+    p = return_hop();
+    AssertEq(p(0), 1);
+    int (*q)(double) = (int (*)(double))hop;
+    AssertEq(q(0), 2);
+    AssertEq(call_with(hop), 2);
+    int (*r)(const int) = hop;
+    AssertEq(r(0), 1);
+}
+
+// A parameter that is itself a function pointer: the set's address picks the
+// call, as the other function-pointer overload cannot take it.
+static int OVL via(int (*fn)(int)) {
+    return fn(0) + 10;
+}
+static int OVL via(float x) {
+    return 20;
+}
+
+[[cccc::test]]
+void test_address_as_overloaded_argument(void) {
+    AssertEq(via(hop), 11);
+    AssertEq(via(1.0f), 20);
+}
+
+// The unmarked function of a name is a member too.
+static int mixed(int x) {
+    return 1;
+}
+static int OVL mixed(double x) {
+    return 2;
+}
+
+[[cccc::test]]
+void test_address_with_unmarked_member(void) {
+    int (*a)(int)    = mixed;
+    int (*b)(double) = mixed;
+    AssertEq(a(0), 1);
+    AssertEq(b(0), 2);
+}

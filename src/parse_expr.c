@@ -805,9 +805,14 @@ Node *assign(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "=") || is_compound_assign(tok))
         reject_rvalue(vm, node, "expression is not assignable");
 
-    if (equal(tok, "="))
-        return new_binary(vm, ND_ASSIGN, node, assign(vm, rest, tok->next),
-                          tok);
+    if (equal(tok, "=")) {
+        Node *rhs = assign(vm, rest, tok->next);
+        if (rhs->kind == ND_OVERLOAD) {
+            add_type(vm, node);
+            rhs = cc_overload_take_address(vm, rhs, node->ty);
+        }
+        return new_binary(vm, ND_ASSIGN, node, rhs, tok);
+    }
 
     if (equal(tok, "+="))
         return to_assign(vm,
@@ -2196,6 +2201,9 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
             return opencl_vector_literal(vm, rest, tok, ty, start);
 
         Node *expr   = cast(vm, &tok, tok);
+        if (expr->kind == ND_OVERLOAD && !vm->compiler.in_type_lookahead &&
+            ty && ty->kind == TY_PTR && ty->base->kind == TY_FUNC)
+            expr = cc_overload_take_address(vm, expr, ty);
 
         // Warn when a cast discards the _Atomic qualifier from a pointer type.
         if ((vm->flags & CCCC_THREAD_SAFETY) &&

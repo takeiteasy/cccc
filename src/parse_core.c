@@ -1104,6 +1104,7 @@ void require_value(VirtualMachine *vm, Node *node) {
 
 Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty) {
     add_type(vm, expr);
+    cc_overload_reject(vm, expr);
     if (expr->ty && expr->ty->kind == TY_VOID && ty && ty->kind != TY_VOID)
         error_tok(vm, expr->tok, "void value not ignored as it ought to be");
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));

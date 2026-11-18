@@ -578,6 +578,9 @@ OverloadSet *cc_overload_find(VirtualMachine *vm, Token *name_tok);
 bool cc_overload_has(OverloadSet *set, Obj *fn);
 int cc_overload_count(OverloadSet *set);
 Obj *cc_overload_first(OverloadSet *set);
+Node *cc_overload_take_address(VirtualMachine *vm, Node *ph, Type *target);
+Node *cc_overload_convert(VirtualMachine *vm, Node *expr, Type *target);
+void cc_overload_reject(VirtualMachine *vm, Node *expr);
 Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
                          Node *args);
 void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);

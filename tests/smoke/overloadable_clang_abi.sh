@@ -28,6 +28,9 @@ cat >main.c <<'H'
 #include "overloads.h"
 int main(void) {
     int i = 0;
+    int (*by_double)(double) = pick;
+    if (by_double(1.0) != 2)
+        return 2;
     return pick(0) * 10000 + pick(1.0) * 1000 + pick("a", "b") * 100 +
            pick(&i, &i) * 10 + pick(1LL) == 12345 ? 42 : 1;
 }

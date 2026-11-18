@@ -1572,6 +1572,9 @@ typedef enum {
     // widen it through a double (H2FR) and round back (FR2H), and add_type
     // lowers its arithmetic to float operations.
     TY_FLOAT16 = 26,
+    // The type of a bare overload-set name, `f` of several `overloadable`
+    // functions, until a target type picks one. Never reaches codegen.
+    TY_OVERLOAD = 27,
 } TypeKind;
 
 /*!
@@ -2065,6 +2068,11 @@ typedef enum {
             // codegen replaces with the length of the enclosing function's
             // parameter list -- resolved there, not at parse time, so it is
             // right under quote templates and reflection-built bodies.
+    ND_OVERLOAD =
+        67, // a bare overload-set name (NodeMisc.overload_set), typed
+            // TY_OVERLOAD. An initializer, assignment, cast, call argument or
+            // return converts it to the member its target type names; any
+            // other use is an error, so it never reaches codegen.
 } NodeKind;
 
 // Linked list of locals with __attribute__((cleanup(fn))) in one block scope.
@@ -2387,6 +2395,7 @@ typedef struct NodeLit {
 // Everything else that is set on a few node kinds.
 typedef struct NodeMisc {
     Obj          *ret_buffer;    // call: struct-return slot
+    struct OverloadSet *overload_set;  // ND_OVERLOAD: the set the name spells
     SwizzleStore *swizzle_store; // OpenCL multi-lane swizzle that can be
                                  // assigned to
     OmpDirective *omp;           // ND_BLOCK built for a #pragma omp directive

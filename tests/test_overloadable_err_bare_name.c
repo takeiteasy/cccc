@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: address of overloaded function 'f'
+// CCCC_EXPECT_STDERR: reference to overloaded function 'f' could not be resolved
 
 int __attribute__((overloadable)) f(int x) {
     return 1;
@@ -9,6 +9,6 @@ int __attribute__((overloadable)) f(double x) {
 }
 
 int main(void) {
-    int (*p)(int) = f;
+    int (*p)(int) = 1 ? f : f;
     return p(0);
 }

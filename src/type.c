@@ -109,6 +109,9 @@ Type       *ty_error     = &ty_error_obj;
 static Type ty_auto_obj = {TY_AUTO, 0, 0};
 Type       *ty_auto     = &ty_auto_obj;
 
+static Type ty_overload_obj = {TY_OVERLOAD, 0, 1};
+Type       *ty_overload     = &ty_overload_obj;
+
 static Type *new_type(VirtualMachine *vm, TypeKind kind, int size, int align) {
     Type *ty = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     memset(ty, 0, sizeof(Type));
@@ -1522,6 +1525,14 @@ void add_type(VirtualMachine *vm, Node *node) {
         node->ty = ty_error;
         return;
     }
+
+    cc_overload_reject(vm, node->lhs);
+    cc_overload_reject(vm, node->rhs);
+    cc_overload_reject(vm, node_ctl(node)->cond);
+    cc_overload_reject(vm, node_ctl(node)->then);
+    cc_overload_reject(vm, node_ctl(node)->els);
+    for (Node *n2 = node->args; n2; n2 = n2->next)
+        cc_overload_reject(vm, n2);
 
     if (lower_float16_operands(vm, node))
         return;

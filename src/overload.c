@@ -590,10 +590,29 @@ static bool drops_qualifiers(Type *from_pointee, Type *to_pointee) {
            (from_pointee->is_volatile && !to_pointee->is_volatile);
 }
 
+// How many members of `set` have the function type `target` points to; the
+// last one found is stored in `*found`. No conversion applies, as in Clang.
+static int count_matches(OverloadSet *set, Type *target, Obj **found) {
+    if (!target || target->kind != TY_PTR || target->base->kind != TY_FUNC)
+        return 0;
+    int n = 0;
+    for (int i = 0; i < set->n; i++)
+        if (is_compatible(set->m[i].fn->ty, target->base)) {
+            if (found)
+                *found = set->m[i].fn;
+            n++;
+        }
+    return n;
+}
+
 static Rank conversion_rank(VirtualMachine *vm, Node *arg, Type *from,
                             Type *to) {
     if (from->kind == TY_ERROR || to->kind == TY_ERROR)
         return R_EXACT;
+    if (from->kind == TY_OVERLOAD)
+        return count_matches(node_misc(arg)->overload_set, to, NULL) == 1
+                   ? R_EXACT
+                   : R_NONE;
     from = decayed(vm, from);
     // A string literal is `char[N]` in C; cccc types its elements const.
     if (arg && arg->kind == ND_VAR && arg->var && arg->var->is_string_literal &&
@@ -756,6 +775,9 @@ static void describe(Buf *out, Type *t) {
                 buf_puts(out, "<anonymous>");
             break;
         }
+        case TY_OVERLOAD:
+            buf_puts(out, "<overloaded function type>");
+            break;
         default:
             buf_puts(out, "...");
     }
@@ -831,4 +853,52 @@ Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
         error_tok(vm, site, "call to '%s' is ambiguous%s", set->name,
                   candidate_list(vm, set));
     return chosen;
+}
+
+// ---------------------------------------------------------------------------
+// The address of a set
+// ---------------------------------------------------------------------------
+
+// The member of the set named by placeholder `ph` that function pointer type
+// `target` selects, as a function name.
+Node *cc_overload_take_address(VirtualMachine *vm, Node *ph, Type *target) {
+    OverloadSet *set   = node_misc(ph)->overload_set;
+    Obj         *fn    = NULL;
+    int          count = count_matches(set, target, &fn);
+    if (count == 0)
+        error_tok(vm, ph->tok,
+                  "no overloaded function '%s' matches the target type%s",
+                  set->name, candidate_list(vm, set));
+    if (count > 1)
+        error_tok(vm, ph->tok,
+                  "address of overloaded function '%s' is ambiguous%s",
+                  set->name, candidate_list(vm, set));
+
+    mark_function_referenced(vm, fn);
+    fn->is_used = true;
+    if (type_attrs(fn->ty)->attr_error_msg && vm->compiler.dead_code_depth == 0)
+        error_tok(vm, ph->tok, "%s", type_attrs(fn->ty)->attr_error_msg);
+    if (fn->is_deprecated)
+        warn_deprecated_use(vm, ph->tok, obj_display_name(fn),
+                            obj_attr(fn)->deprecated_msg);
+    return new_var_node(vm, fn, ph->tok);
+}
+
+// `expr` converted to `target`: a bare overload-set name becomes the member
+// `target` selects, anything else is returned as it is.
+Node *cc_overload_convert(VirtualMachine *vm, Node *expr, Type *target) {
+    if (expr && expr->kind == ND_OVERLOAD)
+        return cc_overload_take_address(vm, expr, target);
+    return expr;
+}
+
+// A bare overload-set name used where no target type selects a member.
+void cc_overload_reject(VirtualMachine *vm, Node *expr) {
+    if (!expr || expr->kind != ND_OVERLOAD || vm->compiler.in_type_lookahead)
+        return;
+    OverloadSet *set = node_misc(expr)->overload_set;
+    error_tok(vm, expr->tok,
+              "reference to overloaded function '%s' could not be resolved; "
+              "did you mean to call it?%s",
+              set->name, candidate_list(vm, set));
 }

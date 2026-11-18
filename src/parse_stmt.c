@@ -700,6 +700,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 warn_tok(vm, node->tok, CCCC_WARN_RETURN_TYPE,
                          "void function should not return a value");
             } else if (ty->kind != TY_STRUCT && ty->kind != TY_UNION) {
+                exp = cc_overload_convert(vm, exp, ty);
                 warn_implicit_conversion(vm, exp, ty, node->tok);
                 cc_check_checked_scope_conv(vm, exp, ty, node->tok);
                 exp = new_cast(vm, exp, ty);

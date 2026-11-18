@@ -115,6 +115,8 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "&")) {
         Node *lhs = cast(vm, rest, tok->next);
         add_type(vm, lhs);
+        if (lhs->kind == ND_OVERLOAD)
+            return lhs;
         reject_rvalue(vm, lhs, "cannot take the address of an rvalue");
         if (lhs->kind == ND_MEMBER && !is_error_type(lhs->ty) && lhs->member &&
             lhs->member->is_bitfield) {
@@ -1287,6 +1289,7 @@ static Node *check_call_arg(VirtualMachine *vm, CheckedCallWatch *watch,
                      type_arr(param_ty)->static_min);
         }
 
+        arg = cc_overload_convert(vm, arg, param_ty);
         if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
             warn_implicit_conversion(vm, arg, param_ty, tok);
             cc_check_checked_scope_conv(vm, arg, param_ty, tok);
@@ -1295,10 +1298,12 @@ static Node *check_call_arg(VirtualMachine *vm, CheckedCallWatch *watch,
         }
         param_ty = param_ty->next;
         ++*index;
-    } else if (arg->ty->kind == TY_FLOAT) {
+    } else {
+        cc_overload_reject(vm, arg);
         // If parameter type is omitted (e.g. in "..."), float
         // arguments are promoted to double.
-        arg = new_cast(vm, arg, ty_double);
+        if (arg->ty->kind == TY_FLOAT)
+            arg = new_cast(vm, arg, ty_double);
     }
     *param_ty_p = param_ty;
     return arg;
@@ -2398,6 +2403,7 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
     vm->compiler.unevaluated++;
     Node *ctrl = assign(vm, &tok, tok);
     add_type(vm, ctrl);
+    cc_overload_reject(vm, ctrl);
     vm->compiler.unevaluated--;
 
     Type *t1 = ctrl->ty;
@@ -3006,6 +3012,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         vm->compiler.unevaluated++;
         Node *node = unary(vm, rest, tok->next);
         add_type(vm, node);
+        cc_overload_reject(vm, node);
         vm->compiler.unevaluated--;
         if (node->ty->kind == TY_VLA) {
             Node *size = new_var_node(vm, type_arr(node->ty)->vla_size, tok);
@@ -3041,6 +3048,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         vm->compiler.unevaluated++;
         Node *node = unary(vm, rest, tok->next);
         add_type(vm, node);
+        cc_overload_reject(vm, node);
         vm->compiler.unevaluated--;
         int align = type_alignof(node->ty);
         if (node->kind == ND_VAR && node->var && node->var->align > align)
@@ -3100,6 +3108,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *operand = assign(vm, &tok, tok);
         *rest         = skip(vm, tok, ")");
         add_type(vm, operand);
+        cc_overload_reject(vm, operand);
         return new_num(vm, classify_type_code(operand->ty), start);
     }
 
@@ -5049,11 +5058,13 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                                 cc_overload_has(set, sc->var)))) {
                 if (equal(tok->next, "("))
                     return overloaded_call(vm, rest, tok->next, set, tok);
-                if (cc_overload_count(set) > 1)
-                    error_tok(vm, tok,
-                              "address of overloaded function '%.*s' is not "
-                              "supported; call it",
-                              tok->len, tok->loc);
+                if (cc_overload_count(set) > 1) {
+                    Node *ph = new_node(vm, ND_OVERLOAD, tok);
+                    node_misc_mut(vm, ph)->overload_set = set;
+                    ph->ty                              = ty_overload;
+                    *rest                               = tok->next;
+                    return ph;
+                }
                 if (!sc) {
                     Obj *only = cc_overload_first(set);
                     mark_function_referenced(vm, only);
