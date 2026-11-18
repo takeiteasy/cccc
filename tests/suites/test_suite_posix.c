@@ -3168,7 +3168,8 @@ int test_posix_langinfo(void) {
 // with a guest comparator, tfind hits, twalk counts leaf/postorder nodes
 // via a guest action, tdelete removes; lfind/lsearch over an int array.
 // hsearch's key must be heap-allocated (strdup), not a string literal --
-// hdestroy() on both macOS and Linux frees every stored key.
+// hdestroy() on macOS frees every stored key; glibc's does not, so the key is
+// freed by hand there.
 static int search_compar(const void *a, const void *b) {
     int ia = *(const int *)a, ib = *(const int *)b;
     return ia - ib;
@@ -3188,7 +3189,8 @@ int test_posix_search(void) {
     if (hcreate(16) == 0)
         return 1;
 
-    ENTRY e1 = {strdup("key1"), (void *)100};
+    char *key1_heap = strdup("key1");
+    ENTRY e1        = {key1_heap, (void *)100};
     if (!hsearch(e1, ENTER))
         return 2;
 
@@ -3202,6 +3204,9 @@ int test_posix_search(void) {
         return 4;
 
     hdestroy();
+#ifdef __linux__
+    free(key1_heap);
+#endif
 
     // A malloc'd key (VM heap memory) is released by hdestroy too.
     if (hcreate(8) == 0)
