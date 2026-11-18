@@ -62,6 +62,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -564,6 +567,7 @@ static void buf_add(Buf *b, const char *d, size_t n) {
 // TODO(#2133): a descendant that daemonised before the timeout has left the
 // tree; a Linux subreaper would catch it, macOS has no equivalent.
 static void kill_tree(pid_t root) {
+    pid_t self = getpid();
     kill(root, SIGSTOP);
     pid_t *seen  = malloc(sizeof *seen);
     size_t nseen = 0, cap = 1;
@@ -591,7 +595,11 @@ static void kill_tree(pid_t root) {
         for (int grew = 1; grew && pids && ppids;) {
             grew = 0;
             for (size_t i = 0; i < nrows; i++) {
-                int known = pids[i] == root, child = ppids[i] == root;
+                int known = pids[i] == root || pids[i] == self;
+                int child = ppids[i] == root;
+#ifdef __linux__
+                child |= ppids[i] == self;
+#endif
                 for (size_t k = 0; k < nseen; k++) {
                     known |= seen[k] == pids[i];
                     child |= seen[k] == ppids[i];
@@ -684,6 +692,8 @@ static int run_capture(char *const argv[], Buf *out, Buf *err, int timeout) {
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
         ;
     kill(-pid, SIGKILL);
+    while (waitpid(-1, NULL, WNOHANG) > 0)
+        ;
     return timed_out ? -1 : status;
 }
 
@@ -969,6 +979,9 @@ static int leak_pass(const Header *h, char *const *args, int timeout,
 
 int main(int argc, char **argv) {
     int timeout = 600, native = 0, leaks = 0, suite = 0, a = 1;
+#ifdef __linux__
+    prctl(PR_SET_CHILD_SUBREAPER, 1);
+#endif
     setenv("CCCC_NO_CONFIG", "1", 1); // a developer's ~/.cccc.toml must not leak in
     if (a < argc && !strcmp(argv[a], "--lint"))
         return lint(argv + a + 1, argc - a - 1);

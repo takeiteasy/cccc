@@ -106,7 +106,9 @@ set; non-zero is accepted for `--testing`/`--build` with
 `--testing` run fails on any `not ok` / `✗` / JSON fail line that no expect
 pattern matches (`testcheck` reports `unexpected failure line`).
 
-A test that passes `--timeout` (600s by default) is killed together with every process below it, including descendants in a process group of their own, such as the steps of a `--build` test.
+A test that passes `--timeout` (600s by default) is killed together with every process below it, including descendants in a process group of their own, such as the steps of a `--build` test. On Linux that includes a descendant that daemonised first;[^daemon] macOS leaves such a process running.
+
+[^daemon]: `testcheck` is a child subreaper (`PR_SET_CHILD_SUBREAPER`), so an orphan reparents to it and the process walk finds it. macOS has no equivalent.
 
 | Target | Files |
 |---|---|
