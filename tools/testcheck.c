@@ -557,7 +557,73 @@ static void buf_add(Buf *b, const char *d, size_t n) {
     b->data[b->len]  = '\0';
 }
 
-// Returns the wait status, or -1 on timeout (child group killed).
+// Kills `root` and everything below it, including descendants that made a
+// process group of their own (every --build step does). Each pass stops the
+// processes found so far, so nothing can fork or exit and reparent while the
+// tree is read again; the kill comes once the set stops growing.
+// TODO(#2133): a descendant that daemonised before the timeout has left the
+// tree; a Linux subreaper would catch it, macOS has no equivalent.
+static void kill_tree(pid_t root) {
+    kill(root, SIGSTOP);
+    pid_t *seen  = malloc(sizeof *seen);
+    size_t nseen = 0, cap = 1;
+    for (int pass = 0; pass < 8; pass++) {
+        FILE *ps = popen("ps -A -o pid= -o ppid=", "r");
+        if (!ps)
+            break;
+        size_t nrows = 0, rcap = 256;
+        pid_t *pids  = malloc(rcap * sizeof *pids);
+        pid_t *ppids = malloc(rcap * sizeof *ppids);
+        long   p, pp;
+        while (pids && ppids && fscanf(ps, "%ld %ld", &p, &pp) == 2) {
+            if (nrows == rcap) {
+                rcap  *= 2;
+                pids   = realloc(pids, rcap * sizeof *pids);
+                ppids  = realloc(ppids, rcap * sizeof *ppids);
+                if (!pids || !ppids)
+                    break;
+            }
+            pids[nrows]    = (pid_t)p;
+            ppids[nrows++] = (pid_t)pp;
+        }
+        pclose(ps);
+        size_t before = nseen;
+        for (int grew = 1; grew && pids && ppids;) {
+            grew = 0;
+            for (size_t i = 0; i < nrows; i++) {
+                int known = pids[i] == root, child = ppids[i] == root;
+                for (size_t k = 0; k < nseen; k++) {
+                    known |= seen[k] == pids[i];
+                    child |= seen[k] == ppids[i];
+                }
+                if (known || !child)
+                    continue;
+                if (nseen == cap) {
+                    cap  *= 2;
+                    seen  = realloc(seen, cap * sizeof *seen);
+                    if (!seen)
+                        break;
+                }
+                seen[nseen++] = pids[i];
+                kill(pids[i], SIGSTOP);
+                grew = 1;
+            }
+            if (!seen)
+                break;
+        }
+        free(pids);
+        free(ppids);
+        if (!seen || nseen == before)
+            break;
+    }
+    for (size_t i = 0; seen && i < nseen; i++)
+        kill(seen[i], SIGKILL);
+    free(seen);
+    kill(-root, SIGKILL);
+    kill(root, SIGKILL);
+}
+
+// Returns the wait status, or -1 on timeout (child tree killed).
 static int run_capture(char *const argv[], Buf *out, Buf *err, int timeout) {
     int po[2], pe[2];
     if (pipe(po) || pipe(pe))
@@ -610,7 +676,7 @@ static int run_capture(char *const argv[], Buf *out, Buf *err, int timeout) {
         }
     }
     if (timed_out)
-        kill(-pid, SIGKILL);
+        kill_tree(pid);
     for (int i = 0; i < 2; i++)
         if (fds[i].fd >= 0)
             close(fds[i].fd);

@@ -106,6 +106,8 @@ set; non-zero is accepted for `--testing`/`--build` with
 `--testing` run fails on any `not ok` / `✗` / JSON fail line that no expect
 pattern matches (`testcheck` reports `unexpected failure line`).
 
+A test that passes `--timeout` (600s by default) is killed together with every process below it, including descendants in a process group of their own, such as the steps of a `--build` test.
+
 | Target | Files |
 |---|---|
 | `test_warnings` | `test_warning_*` |

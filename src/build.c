@@ -358,19 +358,31 @@ static void build_passthru_err(const char *d, size_t n, void *u) {
 }
 
 #ifdef _POSIX_VERSION
-// Signals forwarded to the running step's process group, so an interrupt tears
-// the command down with the build instead of leaving it running.
+// Signals forwarded to the running step's process group and to the pool
+// children, so an interrupt tears them down with the build instead of leaving
+// them running.
 static const int step_signals[] = {SIGINT, SIGTERM, SIGHUP};
 #define NSTEP_SIGNALS ((int)(sizeof step_signals / sizeof *step_signals))
 
 static volatile sig_atomic_t step_pgid = 0;
 static struct sigaction      step_saved[NSTEP_SIGNALS];
 static volatile sig_atomic_t step_hooked[NSTEP_SIGNALS];
+static int                   fwd_hooks = 0;
+
+// In-flight pool children (target and compile pools), each signalled by pid.
+// Only touched with step_signals blocked.
+static pid_t *volatile fwd_pids             = NULL;
+static volatile sig_atomic_t fwd_cap        = 0;
+static int                   fwd_pool_depth = 0;
 
 static void step_signal_forward(int sig) {
     pid_t pgid = (pid_t)step_pgid;
     if (pgid > 0)
         kill(-pgid, sig);
+    pid_t *pids = fwd_pids;
+    for (int i = 0; pids && i < (int)fwd_cap; i++)
+        if (pids[i] > 0)
+            kill(pids[i], sig);
     for (int i = 0; i < NSTEP_SIGNALS; i++) {
         if (step_signals[i] != sig || !step_hooked[i])
             continue;
@@ -380,10 +392,13 @@ static void step_signal_forward(int sig) {
     raise(sig);
 }
 
-// A signal already ignored is left alone: a `nohup`'d build must not start
-// dying on SIGHUP just because it has a step running.
-static void step_signals_install(pid_t pgid) {
-    step_pgid = (sig_atomic_t)pgid;
+// Hooks nest: the first call installs the handler and the last unhook restores
+// the original dispositions. A signal already ignored is left alone: a
+// `nohup`'d build must not start dying on SIGHUP just because it has a step
+// running.
+static void fwd_hook(void) {
+    if (fwd_hooks++ > 0)
+        return;
     for (int i = 0; i < NSTEP_SIGNALS; i++) {
         struct sigaction sa, old;
         memset(&sa, 0, sizeof sa);
@@ -399,14 +414,111 @@ static void step_signals_install(pid_t pgid) {
     }
 }
 
-static void step_signals_restore(void) {
+static void fwd_unhook(void) {
+    if (--fwd_hooks > 0)
+        return;
     for (int i = 0; i < NSTEP_SIGNALS; i++) {
         if (!step_hooked[i])
             continue;
         sigaction(step_signals[i], &step_saved[i], NULL);
         step_hooked[i] = 0;
     }
+}
+
+static void fwd_block(sigset_t *saved) {
+    sigset_t block;
+    sigemptyset(&block);
+    for (int i = 0; i < NSTEP_SIGNALS; i++)
+        sigaddset(&block, step_signals[i]);
+    sigprocmask(SIG_BLOCK, &block, saved);
+}
+
+static void step_signals_install(pid_t pgid) {
+    step_pgid = (sig_atomic_t)pgid;
+    fwd_hook();
+}
+
+static void step_signals_restore(void) {
+    fwd_unhook();
     step_pgid = 0;
+}
+
+// TODO(#2134): the serial path's compiler child (run_argv_env) is not
+// registered here.
+// A pool of up to `n` children forked with fwd_pool_fork(). Pools nest only
+// one way (a lone target builds in-process while its compile pool runs, with
+// no target child in flight), so ending a pool clears every pid.
+static void fwd_pool_begin(int n) {
+    sigset_t saved;
+    fwd_block(&saved);
+    int used = 0;
+    for (int i = 0; i < (int)fwd_cap; i++)
+        used += fwd_pids[i] > 0;
+    if ((int)fwd_cap < used + n) {
+        pid_t *np = calloc((size_t)(used + n), sizeof *np);
+        if (np) {
+            int k = 0;
+            for (int i = 0; i < (int)fwd_cap; i++)
+                if (fwd_pids[i] > 0)
+                    np[k++] = fwd_pids[i];
+            free(fwd_pids);
+            fwd_pids = np;
+            fwd_cap  = (sig_atomic_t)(used + n);
+        }
+    }
+    fwd_pool_depth++;
+    fwd_hook();
+    sigprocmask(SIG_SETMASK, &saved, NULL);
+}
+
+static void fwd_pool_end(void) {
+    sigset_t saved;
+    fwd_block(&saved);
+    for (int i = 0; i < (int)fwd_cap; i++)
+        fwd_pids[i] = 0;
+    if (--fwd_pool_depth == 0) {
+        pid_t *old = fwd_pids;
+        fwd_pids   = NULL;
+        fwd_cap    = 0;
+        free(old);
+    }
+    fwd_unhook();
+    sigprocmask(SIG_SETMASK, &saved, NULL);
+}
+
+// fork() whose child is registered for signal forwarding before a signal can
+// arrive. The child forwards to nothing: its own steps register themselves.
+static pid_t fwd_pool_fork(void) {
+    sigset_t saved;
+    fwd_block(&saved);
+    pid_t pid = fork();
+    if (pid == 0) {
+        pid_t *old = fwd_pids;
+        fwd_pids   = NULL;
+        fwd_cap    = 0;
+        step_pgid  = 0;
+        free(old);
+    } else if (pid > 0) {
+        for (int i = 0; i < (int)fwd_cap; i++) {
+            if (fwd_pids[i] == 0) {
+                fwd_pids[i] = pid;
+                break;
+            }
+        }
+    }
+    sigprocmask(SIG_SETMASK, &saved, NULL);
+    return pid;
+}
+
+// Drops a reaped child. A signal landing between the reap and this call can
+// reach a reused pid; the window is microseconds.
+static void fwd_pool_reap(pid_t pid) {
+    sigset_t saved;
+    fwd_block(&saved);
+    for (int i = 0; i < (int)fwd_cap; i++)
+        if (fwd_pids[i] == pid)
+            fwd_pids[i] = 0;
+    sigprocmask(SIG_SETMASK, &saved, NULL);
 }
 
 // Polls until the step finishes, killing its group once the StepTimeout
@@ -2919,6 +3031,7 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
 
         int in_flight  = 0;
         int any_failed = 0;
+        fwd_pool_begin(jobs);
 
         for (int i = 0; i <= t->sources.len; i++) {
             // Drain one slot when the pool is full, or drain all on the final
@@ -2940,6 +3053,7 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
                     any_failed = 1;
                     break;
                 }
+                fwd_pool_reap(done);
                 for (int j = 0; j < jobs; j++) {
                     if (pool[j].pid != done)
                         continue;
@@ -3047,7 +3161,7 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
                 ++(*step);
             }
 
-            pid_t pid = fork();
+            pid_t pid = fwd_pool_fork();
             if (pid < 0) {
                 fprintf(stderr, "build: fork failed: %s\n", strerror(errno));
                 free(a.data);
@@ -3080,6 +3194,7 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
             }
         }
 
+        fwd_pool_end();
         free(pool);
         free_strarray(&owned);
         return any_failed ? 1 : 0;
@@ -3651,6 +3766,7 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
         // of concurrent compiler invocations never exceeds `jobs` (#557).
         TJob *inflight_jobs = calloc(ctx->jobs, sizeof(TJob));
         int   in_flight = 0, stop_dispatch = 0;
+        fwd_pool_begin(ctx->jobs);
 
         for (;;) {
             // Exit when no targets remain pending or in-flight.
@@ -3705,7 +3821,7 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
                         continue;
                     fflush(stdout);
                     fflush(stderr);
-                    pid_t pid = fork();
+                    pid_t pid = fwd_pool_fork();
                     if (pid < 0) {
                         fprintf(stderr, "build: fork failed: %s\n",
                                 strerror(errno));
@@ -3757,6 +3873,7 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
                 in_flight = 0;
                 break;
             }
+            fwd_pool_reap(done);
             for (int j = 0; j < ctx->jobs; j++) {
                 if (inflight_jobs[j].pid != done)
                     continue;
@@ -3784,6 +3901,7 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
                                 in_flight = 0;
                                 break;
                             }
+                            fwd_pool_reap(d2);
                             for (int k = 0; k < ctx->jobs; k++) {
                                 if (inflight_jobs[k].pid != d2)
                                     continue;
@@ -3801,6 +3919,7 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
             }
         }
 
+        fwd_pool_end();
         free(inflight_jobs);
     } else
 #endif

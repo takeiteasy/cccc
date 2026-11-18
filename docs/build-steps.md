@@ -31,7 +31,9 @@ Interrupting the build (`Ctrl-C`, `SIGTERM`, `SIGHUP`) kills the running step's
 group before the driver exits, so no command outlives the build. A job started
 with `&` is in that group, so a timeout or an interrupt kills it too. A signal the
 build already ignores stays ignored, so `nohup` still works; `Ctrl-Z` suspends
-the driver but not a running step.
+the driver but not a running step. The same signals sent to the driver alone
+(`kill -TERM <pid>`) also reach the per-target and compile children of a
+`--build-jobs` run.
 
 ```c
 BuildTarget *suite = RunCustom(ctx, "run-suite", "./app --selftest");
