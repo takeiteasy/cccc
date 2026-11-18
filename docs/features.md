@@ -1,6 +1,6 @@
 # Features
 
-CCCC is a C bytecode compiler and VM that acts as a drop-in frontend for `cc`/`clang`/`gcc`.
+CCCC is a C23 compiler that runs programs on a built-in bytecode VM or lowers them to portable C, and acts as a drop-in frontend for `cc`/`clang`/`gcc`.
 
 ## Language
 
@@ -45,5 +45,5 @@ CCCC is a C bytecode compiler and VM that acts as a drop-in frontend for `cc`/`c
 
 | Feature | Details |
 |---|---|
-| **Native compilation** | `-c=native` hands the compiled program to a host compiler as portable C ([native.md](native.md)) |
+| **Lowering to C** | `-c=native` lowers the program to portable C and builds it with a host compiler; `-m` and `-c=generated` write the C out ([native.md](native.md)) |
 | **Source maps** | JSON export for IDE integrations ([debugger-source-map.md](debugger-source-map.md)) |

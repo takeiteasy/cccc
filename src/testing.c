@@ -1680,12 +1680,6 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 s_fork_child_pid = 0;
                 if (fail_pipe[0] >= 0)
                     close(fail_pipe[0]);
-                // Prevent leaks -atExit instrumentation (handed down via
-                // MallocStackLogging / DYLD_INSERT_LIBRARIES) from hanging
-                // in the child when the test calls exit(2) or crashes.
-                unsetenv("MallocStackLogging");
-                unsetenv("MallocStackLoggingNoCompact");
-                unsetenv("DYLD_INSERT_LIBRARIES");
                 // Own guard: the parent's run state is not a valid jump target
                 // here, and a longjmp into it would resume the harness loop.
                 CCCCTestRunState child = {0};

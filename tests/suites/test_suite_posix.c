@@ -1,4 +1,3 @@
-// CCCC_LEAKS_SKIP: guest-forked children stop at exit under leaks -atExit
 // CCCC_FLAGS: --testing --posix-emulation
 // Consolidated suite: POSIX: unistd, dirent, glob, regex, socket, mman, etc.
 // Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi,

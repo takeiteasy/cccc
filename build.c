@@ -1022,7 +1022,9 @@ BuildTarget *test_extra(Builder *ctx) {
 // ---- test_leaks ------------------------------------------------------------
 // Every suite and loose test under `leaks -atExit` (macOS) or valgrind. Only
 // cccc's own process is checked, not the children a --testing run forks; see
-// tools/testcheck.c.
+// tools/testcheck.c. On macOS the binary is `cccc_leaks`, built with
+// CCCC_LEAK_PASS so the guest's wait calls continue a child that stopped at
+// exit (src/stdlib/posix_wait.c); every file in the pass runs against it.
 
 static BuildTarget *leak_suite_tests(Builder *ctx, BuildTarget *cccc,
                                      BuildTarget *check) {
@@ -1054,8 +1056,12 @@ BuildTarget *test_leaks(Builder *ctx) {
         fprintf(stderr, "build: test_leaks needs %s\n", tool);
         return RunCustom(ctx, "test-leaks", "true");
     }
-    BuildTarget *bt    = make_libbacktrace(ctx);
-    BuildTarget *cccc  = make_cccc_exe_named(ctx, bt, "cccc");
+    bool         darwin = strcmp(BuildHost(ctx), "darwin") == 0;
+    BuildTarget *bt     = make_libbacktrace(ctx);
+    BuildTarget *cccc =
+        make_cccc_exe_named(ctx, bt, darwin ? "cccc_leaks" : "cccc");
+    if (darwin)
+        AddDefine(cccc, "CCCC_LEAK_PASS", (const char *)0);
     BuildTarget *check = make_testcheck(ctx);
     BuildTarget *all   = RunCustom(ctx, "test-leaks", "true");
     DependsOn(all, leak_suite_tests(ctx, cccc, check));

@@ -2,9 +2,9 @@
 
 > **WARNING!** Work in progress. It relatively stable and able to fully compile itself but expect api/syntax/features changes.
 
-`CCCC` (**C**omprehensive **C** **C**ompensation **C**ompiler) is a C bytecode compiler + VM interpreter. C is compiled to custom bytecode, then interpreted in a built-in VM. CCCC is not designed to be a replacement for existing compilers (`cc` / `clang` / `gcc`), instead it's a drop-in frontend for them.
+`CCCC` (**C**omprehensive **C** **C**ompensation **C**ompiler) is a C23 compiler. It compiles C to custom bytecode and runs it in a built-in VM, or lowers the program to portable C for a native compiler (`cc` / `clang` / `gcc`) to build. CCCC is not designed to be a replacement for those compilers, instead it's a drop-in frontend for them.
 
-CCCC adds compile-time macro expansion and AST building on top of the existing toolchain: functions marked `@comptime` run inside the VM during compilation, and the result can be forwarded to your native compiler. A test framework and a build system are built in, so a project needs no external test runner or build tool.
+CCCC adds compile-time macro expansion and AST building on top of the existing toolchain: functions marked `@comptime` run inside the VM during compilation, and the result can be lowered to C and forwarded to your native compiler. A test framework and a build system are built in, so a project needs no external test runner or build tool.
 
 Targets **macOS** (aarch64) and **Linux** (aarch64/x86_64). Release builds: [github.com/takeiteasy/cccc/releases](https://github.com/takeiteasy/cccc/releases). Issue tracker: [todo.sr.ht/~takeiteasy/cccc](https://todo.sr.ht/~takeiteasy/cccc). Generated API docs for the public headers: [takeiteasy.github.io/cccc](https://takeiteasy.github.io/cccc/).
 
@@ -153,7 +153,7 @@ See [docs/templates.md](docs/templates.md), [docs/operators.md](docs/operators.m
 
 | Feature | Details |
 |---|---|
-| **Native compilation** | `-c=native` hands the compiled program to a host compiler as portable C ([native.md](docs/native.md)) |
+| **Lowering to C** | `-c=native` lowers the program to portable C and builds it with a host compiler; `-m` and `-c=generated` write the C out ([native.md](docs/native.md)) |
 | **Source maps** | JSON export for IDE integrations ([debugger-source-map.md](docs/debugger-source-map.md)) |
 
 ## Getting started

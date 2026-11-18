@@ -143,9 +143,10 @@ forks are not followed.
 On macOS `leaks -atExit` makes a process stop itself at exit, and the
 instrumentation is inherited by every forked child, so a child of cccc's own
 process stops for a tool that will only ever attach to the parent. cccc waits
-for a child through `cc_wait_resume` (`src/wait_stop.h`), which continues it;
-a guest program that forks is on its own, and a test whose *guest* forks
-carries `CCCC_LEAKS_SKIP`. Each file is capped with `--timeout`, short on
+for a child through `cc_wait_resume` (`src/wait_stop.h`), which continues it.
+The leak pass runs a `cccc_leaks` build (`-DCCCC_LEAK_PASS`) whose guest
+`wait`/`waitpid`/`wait3`/`wait4`/`waitid` do the same for a child the guest
+forks, unless the guest asked for `WUNTRACED`/`WSTOPPED`. Each file is capped with `--timeout`, short on
 macOS and the 600s default under valgrind, which is legitimately slower. The
 report is read with NUL bytes blanked, and a
 valgrind error that is not a leak (an uninitialised read) is labelled
