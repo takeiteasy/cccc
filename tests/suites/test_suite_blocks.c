@@ -608,10 +608,14 @@ static double dbl(double a) {
     return a * 2;
 }
 typedef int (^sum_block)(int, int, double);
+// The copy made for a block called straight from the call, kept so the test
+// can release it.
+static sum_block last_sum;
 static sum_block make_sum(void) {
-    return Block_copy(^int(int a, int b, double d) {
+    last_sum = Block_copy(^int(int a, int b, double d) {
       return a * 100 + b * 10 + (int)d;
     });
+    return last_sum;
 }
 
 [[cccc::test(return = 42)]]
@@ -645,6 +649,7 @@ int test_blocks_call_in_block_expression(void) {
     sum_block b = make_sum();
     int       r = make_sum()(1, add1(1), dbl(1.0));
     Block_release(b);
+    Block_release(last_sum);
     return r == 100 + 20 + 2 ? 42 : 1;
 }
 
@@ -660,10 +665,12 @@ int test_blocks_nested_block_calls(void) {
 }
 
 // The declarator inside `(^ ... )` applies to the block type.
+static int (^last_plus)(int);
 static int (^make_plus(int k))(int) {
-    return Block_copy(^int(int a) {
+    last_plus = Block_copy(^int(int a) {
       return a + k;
     });
+    return last_plus;
 }
 static int (^(*adder_factory)(int))(int) = make_plus;
 
@@ -672,6 +679,7 @@ int test_blocks_function_returning_block(void) {
     int (^add10)(int) = make_plus(10);
     int r             = add10(5) + make_plus(1)(26);
     Block_release(add10);
+    Block_release(last_plus);
     return r == 15 + 27 ? 42 : 1;
 }
 

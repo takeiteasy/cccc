@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: cccc frees its template registries, overload sets, member-pack and spliced-aggregate tables, template binding scopes, preparse scopes and `atexit` handler lists when it exits. They leaked on every run that used templates, overloadable functions or comptime calls, which failed 74 files in the macOS leak pass. See [test-infrastructure.md](docs/test-infrastructure.md).
 - Fixed: a `StepTimeout` kills every process below the step, including the steps of a nested `--build`, which run in process groups of their own and used to keep running after the step was reported timed out. See [build-steps.md](docs/build-steps.md).
 - Fixed: on Linux, `testcheck`'s timeout also kills a descendant that daemonised before the timeout, which used to survive. macOS still misses it. See [test-infrastructure.md](docs/test-infrastructure.md).
 - Fixed: a signal sent to the `--build` driver alone (`kill -TERM <pid>`, a CI cancel) reaches the per-target children of `--build-jobs`, the compiler children of the compile pool and the serial path's compiler, as `Ctrl-C` always did, instead of leaving them running. See [build-steps.md](docs/build-steps.md).

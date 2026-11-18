@@ -3345,6 +3345,7 @@ struct Scope {
     TagScopeNode *tags; // Linked list (kept for relfection.c iteration)
     HashMap var_map;    // O(1) name lookup; NULL buckets = use linear fallback
     HashMap tag_map;
+    struct Scope *owned_next; // Compiler.all_scopes chain; see new_scope()
 };
 
 /*!
@@ -4302,9 +4303,11 @@ typedef struct Compiler {
     Token  *agg_body;     // `{` of the aggregate struct_union_decl just parsed
     PreparseSeed
         *preparse_seeds;         // one per input; NULL without file-scope calls
+    int  preparse_seed_count;
     PreparseSeed    *parse_seed; // for the next runtime parse(), or NULL
     int              cur_input;  // input whose calls run or whose text parses
     Scope       *runtime_file_scope;
+    Scope       *all_scopes; // every new_scope(), whose maps cc_destroy frees
     Scope       *tmpl_bindings;   // detached scope holding the type parameters
     Scope       *tmpl_anchor;     // scope in which tmpl_bindings is consulted
     struct Template *tmpl_pattern;    // partial whose pattern is being parsed

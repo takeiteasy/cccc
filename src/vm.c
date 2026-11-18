@@ -1927,6 +1927,9 @@ void cc_destroy(VirtualMachine *vm) {
         free(vm->compiler.pragma_link_libs.data);
     }
 
+    free(vm->atexit_handlers);
+    free(vm->at_quick_exit_handlers);
+
     // Free linked programs array
     free(vm->compiler.link_progs);
     free(vm->compiler.global_aliases);
@@ -1945,6 +1948,20 @@ void cc_destroy(VirtualMachine *vm) {
     hashmap_deinit(&c->emit_include_paths);
     hashmap_deinit(&c->comptime_decl_index);
     hashmap_deinit(&c->comptime_tag_index);
+    HashMap *template_maps[] = {
+        &c->templates,         &c->template_insts, &c->template_aggs,
+        &c->scope_ords,        &c->ct_templates,   &c->ct_template_insts,
+        &c->ct_template_aggs,  &c->ct_scope_ords,  &c->overload_sets,
+        &c->member_pack_names, &c->spliced_aggs};
+    for (size_t i = 0; i < sizeof template_maps / sizeof *template_maps; i++)
+        hashmap_deinit(template_maps[i]);
+    for (int i = 0; c->preparse_seeds && i < c->preparse_seed_count; i++) {
+        PreparseSeed *seed = &c->preparse_seeds[i];
+        hashmap_deinit(&seed->templates);
+        hashmap_deinit(&seed->insts);
+        hashmap_deinit(&seed->aggs);
+        hashmap_deinit(&seed->scope_ords);
+    }
     hashmap_foreach(&c->kernel_meta, free_value_iter, NULL);
     hashmap_deinit(&c->kernel_meta);
     hashmap_deinit(&c->kernel_direct_local);
@@ -1985,6 +2002,13 @@ void cc_destroy(VirtualMachine *vm) {
 
     // Free scope HashMap buckets (heap-allocated; not in the arena)
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
+        hashmap_deinit_borrowed(&sc->var_map);
+        hashmap_deinit_borrowed(&sc->tag_map);
+    }
+
+    // Every scope new_scope() made, including the template bindings and the
+    // preparse scopes that are no longer on the chain.
+    for (Scope *sc = vm->compiler.all_scopes; sc; sc = sc->owned_next) {
         hashmap_deinit_borrowed(&sc->var_map);
         hashmap_deinit_borrowed(&sc->tag_map);
     }

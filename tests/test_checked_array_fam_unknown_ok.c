@@ -13,5 +13,7 @@ int main(void) {
     struct S *s = malloc(sizeof(struct S) + 8 * sizeof(int));
     s->n        = 1;
     s->d[3]     = 42;
-    return s->d[3];
+    int r       = s->d[3];
+    free(s);
+    return r;
 }

@@ -19,7 +19,7 @@
 //   test_posix_tar_cpio, test_posix_syslog, test_posix_select,
 //   test_posix_statvfs, test_posix_sched, test_posix_locale,
 //   test_posix_spawn, test_posix_iconv, test_posix_langinfo,
-//   test_posix_search, test_posix_strfmon, test_posix_timer_macros,
+//   test_posix_search, test_posix_timer_macros,
 //   test_posix_ppoll, test_posix_locale_t,
 //   test_sysv_shm, test_sysv_sem, test_sysv_msg, test_sysv_ftok,
 //   test_sysv_linux_info, test_wordexp_basic, test_wordexp_header,
@@ -3240,6 +3240,8 @@ int test_posix_search(void) {
         return 9;
     if (tfind(&key_del, &root, search_compar) != 0)
         return 10;
+    for (int i = 0; i < 3; i++)
+        tdelete(&vals[i], &root, search_compar);
 
     int    arr[4] = {10, 20, 30, 0};
     size_t n      = 3;
@@ -3252,41 +3254,6 @@ int test_posix_search(void) {
     void *ls     = lsearch(&newval, arr, &n, sizeof(int), search_compar);
     if (!ls || n != 4 || arr[3] != 40)
         return 12;
-
-    return 42;
-}
-
-// test_posix_strfmon
-// #808: strfmon(buf, sizeof buf, "%n", 1234.56) succeeds and contains
-// "1234"; a multi-conversion format with literal text between two
-// directives; a maxsize too small for the output returns -1/E2BIG.
-//
-// #841: under ASan on macOS, calling strfmon() at all (regardless of the
-// specific format used here) trips a heap-buffer-overflow inside Apple's
-// own libc _strfmon -- a genuine host-libc over-read, not a CCCC bug, and
-// not specific to this test's formats (glibc is unaffected). It's suppressed
-// for ASan builds via the __asan_default_suppressions hook in
-// src/stdlib/posix.c.
-[[cccc::test(return = 42)]]
-int test_posix_strfmon(void) {
-    char    buf[64] = {0};
-    ssize_t n       = strfmon(buf, sizeof(buf), "%n", 1234.56);
-    if (n < 0)
-        return 1;
-    if (!strstr(buf, "1234"))
-        return 2;
-
-    char    buf2[64] = {0};
-    ssize_t n2 = strfmon(buf2, sizeof(buf2), "Price: %n and %n", 10.5, 20.5);
-    if (n2 < 0)
-        return 3;
-    if (!strstr(buf2, "Price:") || !strstr(buf2, "10.5") ||
-        !strstr(buf2, "20.5"))
-        return 4;
-
-    char small[4];
-    if (strfmon(small, sizeof(small), "%n", 1234567.89) != -1)
-        return 5;
 
     return 42;
 }

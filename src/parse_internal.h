@@ -495,6 +495,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
                  DeclName *dn);
 Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr);
 DeclKw declspec_kw(Token *tok);
+Scope *new_scope(VirtualMachine *vm); // zeroed, freed with the vm
 void enter_scope(VirtualMachine *vm);
 int64_t eval(VirtualMachine *vm, Node *node);
 int64_t eval2(VirtualMachine *vm, Node *node, char ***label);

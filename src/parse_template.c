@@ -2576,8 +2576,7 @@ typedef struct {
 static void ensure_bindings(VirtualMachine *vm, Scope **bindings) {
     if (*bindings)
         return;
-    *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
-    memset(*bindings, 0, sizeof(Scope));
+    *bindings                  = new_scope(vm);
     vm->compiler.tmpl_bindings = *bindings;
 }
 
@@ -3318,8 +3317,7 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                    : NULL;
         if (impl) {
             // The partial's variables replace the primary's parameters.
-            bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
-            memset(bindings, 0, sizeof(Scope));
+            bindings                   = new_scope(vm);
             vm->compiler.tmpl_bindings = bindings;
             for (int k = 0; k < impl->nparams; k++) {
                 TemplateParam *p = &impl->params[k];
@@ -3467,8 +3465,7 @@ static void in_pattern_scope(VirtualMachine *vm, Template *t,
     snapshot_clear(vm);
     vm->compiler.scope       = tmpl_file_scope(vm);
     vm->compiler.tmpl_anchor = tmpl_file_scope(vm);
-    Scope *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
-    memset(bindings, 0, sizeof(Scope));
+    Scope *bindings            = new_scope(vm);
     vm->compiler.tmpl_bindings = bindings;
     body(vm, t);
     snapshot_restore(vm, &snap);
@@ -4656,8 +4653,7 @@ static void register_partial(VirtualMachine *vm, Template *pt) {
     snapshot_clear(vm);
     vm->compiler.scope       = tmpl_file_scope(vm);
     vm->compiler.tmpl_anchor = tmpl_file_scope(vm);
-    Scope *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
-    memset(bindings, 0, sizeof(Scope));
+    Scope *bindings            = new_scope(vm);
     vm->compiler.tmpl_bindings = bindings;
 
     for (int k = 0; k < pt->nparams; k++) {

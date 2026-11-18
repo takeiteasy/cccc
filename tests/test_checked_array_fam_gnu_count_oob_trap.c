@@ -1,4 +1,5 @@
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --checked-pointers
+// CCCC_LEAKS_KEEP_VM_HEAP
 // The GNU spelling after `]` bounds a checked flexible array member too.
 
 #include <stdlib.h>

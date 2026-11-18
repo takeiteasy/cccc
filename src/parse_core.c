@@ -269,9 +269,16 @@ int align_down(int n, int align) {
     return align_to(n - align + 1, align);
 }
 
-void enter_scope(VirtualMachine *vm) {
+Scope *new_scope(VirtualMachine *vm) {
     Scope *sc = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
     memset(sc, 0, sizeof(Scope));
+    sc->owned_next          = vm->compiler.all_scopes;
+    vm->compiler.all_scopes = sc;
+    return sc;
+}
+
+void enter_scope(VirtualMachine *vm) {
+    Scope *sc          = new_scope(vm);
     sc->next           = vm->compiler.scope;
     vm->compiler.scope = sc;
 }

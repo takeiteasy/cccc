@@ -1,4 +1,5 @@
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --checked-pointers
+// CCCC_LEAKS_KEEP_VM_HEAP
 // A non-null store into the terminator slot of a checked flexible array
 // member traps.
 

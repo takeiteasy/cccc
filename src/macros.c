@@ -4531,8 +4531,7 @@ Obj *cc_run_file_scope_calls(VirtualMachine *vm, Token **tok) {
     // macro_context_scope, so chaining that onto it would make a cycle, and
     // names the calls publish stay out of the session.
     Scope *scope = vm->compiler.scope;
-    Scope *temp  = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
-    memset(temp, 0, sizeof(*temp));
+    Scope *temp                   = new_scope(vm);
     temp->next                    = scope;
     Obj       *saved_globals_list = vm->compiler.macro_globals;
     Node     **saved_nodes        = vm->compiler.macro_vararg_nodes;
@@ -4740,9 +4739,7 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens,
     // Ensure a top-level scope exists so that macros can register typedefs,
     // enums, and struct tags that later parser code needs to resolve.
     if (!vm->compiler.scope) {
-        Scope *sc = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
-        memset(sc, 0, sizeof(Scope));
-        vm->compiler.scope = sc;
+        vm->compiler.scope = new_scope(vm);
     }
 
     // Scan every input token stream for file-scope calls.
@@ -4759,13 +4756,13 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens,
     vm->compiler.preparse_seeds = arena_alloc(
         &vm->compiler.parser_arena, sizeof(PreparseSeed) * (count ? count : 1));
     memset(vm->compiler.preparse_seeds, 0, sizeof(PreparseSeed) * count);
+    vm->compiler.preparse_seed_count = count;
     vm->compiler.in_preparse_calls = true;
     for (int fi = 0; fi < count; fi++) {
         if (!input_tokens[fi])
             continue;
         PreparseSeed *seed = &vm->compiler.preparse_seeds[fi];
-        seed->scope = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
-        memset(seed->scope, 0, sizeof(Scope));
+        seed->scope                     = new_scope(vm);
         seed->scope->next               = root;
         vm->compiler.scope              = seed->scope;
         vm->compiler.runtime_file_scope = seed->scope;

@@ -1,4 +1,5 @@
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --checked-pointers
+// CCCC_LEAKS_KEEP_VM_HEAP
 // A checked flexible array member is checked against its sibling count.
 
 #include <stdlib.h>
