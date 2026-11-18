@@ -26,6 +26,7 @@
 // status.
 
 #include "./internal.h"
+#include "kill_tree.h"
 #include "wait_stop.h"
 
 #include <errno.h>
@@ -519,8 +520,8 @@ static void fwd_pool_reap(pid_t pid) {
     sigprocmask(SIG_SETMASK, &saved, NULL);
 }
 
-// Polls until the step finishes, killing its group once the StepTimeout
-// deadline passes.
+// Polls until the step finishes, killing it and everything it started once the
+// StepTimeout deadline passes.
 static int wait_step_deadline(const BuildTarget *t, pid_t pid) {
     time_t deadline = time(NULL) + t->timeout_secs;
     for (;;) {
@@ -531,7 +532,7 @@ static int wait_step_deadline(const BuildTarget *t, pid_t pid) {
         if (r < 0)
             return 1;
         if (time(NULL) >= deadline) {
-            kill(-pid, SIGKILL);
+            cc_kill_tree(pid, 0);
             cc_wait_resume(pid, &status, 0);
             fprintf(stderr,
                     "build: custom step '%s' timed out after %d second(s)\n",

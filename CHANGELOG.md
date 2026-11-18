@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a `StepTimeout` kills every process below the step, including the steps of a nested `--build`, which run in process groups of their own and used to keep running after the step was reported timed out. See [build-steps.md](docs/build-steps.md).
 - Fixed: on Linux, `testcheck`'s timeout also kills a descendant that daemonised before the timeout, which used to survive. macOS still misses it. See [test-infrastructure.md](docs/test-infrastructure.md).
 - Fixed: a signal sent to the `--build` driver alone (`kill -TERM <pid>`, a CI cancel) reaches the per-target children of `--build-jobs`, the compiler children of the compile pool and the serial path's compiler, as `Ctrl-C` always did, instead of leaving them running. See [build-steps.md](docs/build-steps.md).
 - Fixed: `testcheck` kills the whole process tree under a test that times out, including descendants in a process group of their own (every `--build` step), instead of only the test's own group. See [test-infrastructure.md](docs/test-infrastructure.md).

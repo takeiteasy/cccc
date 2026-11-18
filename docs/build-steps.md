@@ -22,10 +22,11 @@ LinkWith(app, core);        // app gets -lcore
 | `StepTimeout(t, secs)` | Wall-clock limit; 0 (the default) means no limit |
 
 Every step runs in its own process group, so the command and anything it
-spawned are handled as one. When a `StepTimeout` limit passes the whole group
-is killed and the step fails, so one wedged command cannot stall the build
-until the outer timeout — useful for a step that runs a test binary, where a
-hang is the failure being looked for.
+spawned are handled as one. When a `StepTimeout` limit passes the step and
+every process below it is killed, including the steps of a nested `--build`
+that run in groups of their own, and the step fails. One wedged command cannot
+stall the build until the outer timeout — useful for a step that runs a test
+binary, where a hang is the failure being looked for.
 
 Interrupting the build (`Ctrl-C`, `SIGTERM`, `SIGHUP`) kills the running step's
 group before the driver exits, so no command outlives the build. A job started
