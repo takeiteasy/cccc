@@ -116,6 +116,9 @@ static char **merge_env(char *const extra_env[]) {
 // Used by the build.c SetTargetEnv() API (#842) — e.g. AFL_USE_ASAN=1 for the
 // afl-asan target — since neither RunCustom's vendored shell nor run_argv's
 // plain execvp gives a target's compiler child its own environment.
+pid_t (*cc_run_fork)(void) = NULL;
+void (*cc_run_reap)(pid_t) = NULL;
+
 int run_argv_env(char *const argv[], char *const envp[]) {
 #if defined(_WIN32)
     (void)argv;
@@ -123,7 +126,7 @@ int run_argv_env(char *const argv[], char *const envp[]) {
     fprintf(stderr, "error: -c=native is not supported on Windows yet\n");
     return 1;
 #else
-    pid_t pid = fork();
+    pid_t pid = cc_run_fork ? cc_run_fork() : fork();
     if (pid < 0) {
         fprintf(stderr, "error: failed to fork native compiler: %s\n",
                 strerror(errno));
@@ -150,6 +153,8 @@ int run_argv_env(char *const argv[], char *const envp[]) {
                 strerror(errno));
         return 1;
     }
+    if (cc_run_reap)
+        cc_run_reap(pid);
     if (WIFEXITED(status))
         return WEXITSTATUS(status);
     if (WIFSIGNALED(status))

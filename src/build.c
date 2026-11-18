@@ -443,8 +443,6 @@ static void step_signals_restore(void) {
     step_pgid = 0;
 }
 
-// TODO(#2134): the serial path's compiler child (run_argv_env) is not
-// registered here.
 // A pool of up to `n` children forked with fwd_pool_fork(). Pools nest only
 // one way (a lone target builds in-process while its compile pool runs, with
 // no target child in flight), so ending a pool clears every pid.
@@ -2036,10 +2034,20 @@ static int run_step(Builder *ctx, int n, int total, ArgVec *args,
     }
     if (ctx->dry_run)
         return 0;
-    if (t && t->env.len > 0)
-        return run_argv_env((char *const *)args->data,
-                            (char *const *)t->env.data);
-    return run_argv((char *const *)args->data);
+#ifdef _POSIX_VERSION
+    fwd_pool_begin(1);
+    cc_run_fork = fwd_pool_fork;
+    cc_run_reap = fwd_pool_reap;
+#endif
+    int rc = t && t->env.len > 0 ? run_argv_env((char *const *)args->data,
+                                                (char *const *)t->env.data)
+                                 : run_argv((char *const *)args->data);
+#ifdef _POSIX_VERSION
+    cc_run_fork = NULL;
+    cc_run_reap = NULL;
+    fwd_pool_end();
+#endif
+    return rc;
 }
 
 // Returns 1 if `src` matches any pattern in the target's exclude list.

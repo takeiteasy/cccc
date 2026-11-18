@@ -1693,6 +1693,10 @@ typedef struct {
 void argv_push(ArgVec *args, const char *arg);
 int run_argv(char *const argv[]);
 int run_argv_env(char *const argv[], char *const envp[]);
+// Optional fork and post-reap replacements for run_argv_env()'s child, set by
+// the build driver so its signal forwarder knows the compiler child.
+extern pid_t (*cc_run_fork)(void);
+extern void (*cc_run_reap)(pid_t);
 int run_argv_quiet(char *const argv[]);
 
 // Host `-std=` ladder (#1053/#1073/#1187/#1218/#1273/#1274): shared by

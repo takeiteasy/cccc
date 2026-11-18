@@ -7,7 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
-- Fixed: a signal sent to the `--build` driver alone (`kill -TERM <pid>`, a CI cancel) reaches the per-target children of `--build-jobs` and the compiler children of the compile pool, as `Ctrl-C` always did, instead of leaving them running. See [build-steps.md](docs/build-steps.md).
+- Fixed: a signal sent to the `--build` driver alone (`kill -TERM <pid>`, a CI cancel) reaches the per-target children of `--build-jobs`, the compiler children of the compile pool and the serial path's compiler, as `Ctrl-C` always did, instead of leaving them running. See [build-steps.md](docs/build-steps.md).
 - Fixed: `testcheck` kills the whole process tree under a test that times out, including descendants in a process group of their own (every `--build` step), instead of only the test's own group. See [test-infrastructure.md](docs/test-infrastructure.md).
 - Fixed: in a `RunCustom` command `a & b`, only `a` runs in the background; `b` runs in the foreground and its exit status is the step's. Both used to be backgrounded, so `sleep 1 & false` succeeded.
 - Fixed: a `RunCustom` step's `cmd &` job stays in the step's process group, so a `StepTimeout` or an interrupt kills it, and the step waits for it before finishing; it used to outlive both. A pipeline stage whose wait fails reports the step as failed rather than successful. See [build-steps.md](docs/build-steps.md).

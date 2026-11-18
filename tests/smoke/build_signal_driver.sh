@@ -1,6 +1,6 @@
 # A signal sent to the build driver alone (not its process group) reaches the
-# children it forked: the per-target children under --build-jobs and the
-# compiler children of the compile pool.
+# children it forked: the per-target children under --build-jobs, the compiler
+# children of the compile pool and the serial path's compiler.
 . "$(dirname "$0")/lib.sh"
 
 PIDS=
@@ -84,5 +84,22 @@ PIDS="$driver $(cat cc.pids)"
 kill -TERM "$driver"
 await 'for p in $(cat "$TMP/cc.pids"); do kill -0 "$p" 2>/dev/null && exit 1; done; exit 0' ||
     fail "a compile survived a signal to the driver"
+wait "$driver" 2>/dev/null
+
+# The serial path: one compiler at a time.
+rm -f cc.pids
+CCCC_BUILD_CC="$TMP/slowcc" "$CCCC" --build compile.c --build-jobs=1 \
+    </dev/null >drv3.txt 2>&1 &
+driver=$!
+PIDS=$driver
+await '[ -s "$TMP/cc.pids" ]' || {
+    cat drv3.txt >&2
+    fail "the serial compile never started"
+}
+PIDS="$driver $(cat cc.pids)"
+
+kill -TERM "$driver"
+await 'for p in $(cat "$TMP/cc.pids"); do kill -0 "$p" 2>/dev/null && exit 1; done; exit 0' ||
+    fail "the serial compile survived a signal to the driver"
 wait "$driver" 2>/dev/null
 exit 0
