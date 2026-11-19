@@ -22,7 +22,7 @@ tasks:
       cd cccc
       set -e
       # A manual submit clones the default branch.
-      git checkout devel
+      git checkout trunk
       git submodule update --init
       make
   - sandbox: |

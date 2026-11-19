@@ -110,15 +110,15 @@ two quadrants are only exercised at release time.
 
 ### sr.ht check
 
-`tools/check_srht.sh` needs `hut` and `jq`. It finds the `devel` job of
+`tools/check_srht.sh` needs `hut` and `jq`. It finds the `trunk` job of
 `.builds/linux-amd64.yml` for the commit and requires its `test` task to have
 passed. It fails when the job is missing, still running or red, printing the
 job URL.
 
 | Situation | Result |
 |-----------|--------|
-| `HEAD` is devel's tip, or has devel's tree (a merge) | checked |
-| `HEAD` differs from devel (a hotfix off `trunk`) | fails |
+| `HEAD` is trunk's tip, or has trunk's tree (a merge) | checked |
+| `HEAD` differs from trunk (a hotfix branch) | fails |
 | `CCCC_RELEASE_SKIP_SRHT=1 sh tools/release.sh 0.1.1` | check skipped |
 
 A failed `linux-amd64.yml` job also emails the maintainer.

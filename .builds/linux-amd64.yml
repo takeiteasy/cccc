@@ -32,11 +32,11 @@ triggers:
     to: George Watson <gigolo@hotmail.co.uk>
 tasks:
   - guard: |
-      # sr.ht submits one job per pushed ref; only devel is built here.
+      # sr.ht submits one job per pushed ref; only trunk is built here.
       # Runs when GIT_REF is unset (manual submit).
-      case "${GIT_REF:-refs/heads/devel}" in
-        refs/heads/devel|devel) ;;
-        *) echo "skipping ${GIT_REF}: only devel is built"; complete-build ;;
+      case "${GIT_REF:-refs/heads/trunk}" in
+        refs/heads/trunk|trunk) ;;
+        *) echo "skipping ${GIT_REF}: only trunk is built"; complete-build ;;
       esac
   - build: |
       # One pass: `make` builds ./cccc, the only compiler binary.

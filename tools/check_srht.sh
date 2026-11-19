@@ -3,8 +3,8 @@
 #
 # Usage: sh tools/check_srht.sh [commit]     (default HEAD)
 #
-# Looks for the .builds/linux-amd64.yml job that ran on devel for the commit
-# (or, when the commit is not devel's tip, for devel's tip if the trees are
+# Looks for the .builds/linux-amd64.yml job that ran on trunk for the commit
+# (or, when the commit is not trunk's tip, for trunk's tip if the trees are
 # identical, as with a merge) and requires its `test` task to have passed.
 set -e
 
@@ -18,11 +18,11 @@ for tool in hut jq; do
 done
 
 COMMIT=$(git rev-parse "${1:-HEAD}")
-DEVEL=$(git rev-parse devel)
-if [ "$COMMIT" != "$DEVEL" ]; then
-    git diff --quiet devel "$COMMIT" ||
-        die "$COMMIT is not devel's tip and differs from it; sr.ht only builds devel (hotfix? set CCCC_RELEASE_SKIP_SRHT=1)"
-    COMMIT=$DEVEL
+TRUNK=$(git rev-parse trunk)
+if [ "$COMMIT" != "$TRUNK" ]; then
+    git diff --quiet trunk "$COMMIT" ||
+        die "$COMMIT is not trunk's tip and differs from it; sr.ht only builds trunk (hotfix? set CCCC_RELEASE_SKIP_SRHT=1)"
+    COMMIT=$TRUNK
 fi
 
 CURSOR=
@@ -34,7 +34,7 @@ while [ "$PAGES" -lt 8 ]; do
         hut graphql builds) || die "hut could not query builds.sr.ht"
     JOB=$(printf '%s\n' "$PAGE" | jq -c --arg sha "$COMMIT" '
         [.jobs.results[]
-         | select((.tags | index("linux-amd64.yml")) and (.tags | index("devel")))
+         | select((.tags | index("linux-amd64.yml")) and (.tags | index("trunk")))
          | select(.note | contains("/commit/" + $sha))]
         | first // empty')
     [ -n "$JOB" ] && break
@@ -43,7 +43,7 @@ while [ "$PAGES" -lt 8 ]; do
     PAGES=$((PAGES + 1))
 done
 
-[ -n "$JOB" ] || die "no sr.ht linux-amd64 job found for $COMMIT; push devel to mirror and wait for it"
+[ -n "$JOB" ] || die "no sr.ht linux-amd64 job found for $COMMIT; push trunk to mirror and wait for it"
 
 ID=$(printf '%s\n' "$JOB" | jq -r .id)
 STATUS=$(printf '%s\n' "$JOB" | jq -r .status)
