@@ -341,11 +341,11 @@ struct OverloadSet {
 };
 
 static OverloadSet *find_set(VirtualMachine *vm, const char *name, int len) {
-    return hashmap_get2(&vm->compiler.overload_sets, name, len);
+    return hashmap_get2(overload_sets(vm), name, len);
 }
 
 OverloadSet *cc_overload_find(VirtualMachine *vm, Token *name_tok) {
-    if (!vm->compiler.saw_overloads)
+    if (!*saw_overloads(vm))
         return NULL;
     return find_set(vm, name_tok->loc, name_tok->len);
 }
@@ -452,13 +452,6 @@ static void reject_unsupported_combination(VirtualMachine *vm, Type *ty,
                   "overloadable function '%s' cannot be a method or an "
                   "operator",
                   name);
-    for (Type *p = ty->params; p; p = p->next)
-        for (CustomAttrUse *u = type_attrs(p)->custom_attrs; u; u = u->next)
-            if (!strcmp(u->name, "default"))
-                error_tok(vm, src,
-                          "overloadable function '%s' cannot have a @default "
-                          "parameter",
-                          name);
     if (cc_find_template(vm, src))
         error_tok(vm, src,
                   "overloadable function '%s' shares its name with a "
@@ -484,8 +477,8 @@ void cc_overload_declared(VirtualMachine *vm, Obj *fn, Type *ty, Token *src) {
         set = arena_alloc(&vm->compiler.parser_arena, sizeof *set);
         memset(set, 0, sizeof *set);
         set->name = src_name;
-        hashmap_put2(&vm->compiler.overload_sets, name, len, set);
-        vm->compiler.saw_overloads = true;
+        hashmap_put2(overload_sets(vm), name, len, set);
+        *saw_overloads(vm)         = true;
         Obj *plain                 = find_plain_function(vm, name, len);
         if (plain && plain != fn)
             add_member(vm, set, plain,
@@ -669,14 +662,51 @@ static int arg_count(Node *args) {
     return n;
 }
 
-static bool rank_candidate(VirtualMachine *vm, Candidate *c, Node *args,
-                           int nargs, bool allow_incompatible) {
-    Type *fty = c->fn->ty;
-    c->viable = false;
-    int np    = 0;
+static Type *param_named(Type *params, Token *key) {
+    for (Type *p = params; p; p = p->next)
+        if (token_is_name(key, p->param_name))
+            return p;
+    return NULL;
+}
+
+// Whether `fty` can take the arguments: the positional ones, then the keyed
+// ones by name, with every other parameter defaulted.
+static bool arguments_fit(Type *fty, int npos, KeyedArg *keyed) {
+    int np = 0;
     for (Type *p = fty->params; p; p = p->next)
         np++;
-    if (nargs < np || (nargs > np && !fty->is_variadic))
+    if (npos > np && !fty->is_variadic)
+        return false;
+    for (KeyedArg *k = keyed; k; k = k->next) {
+        Type *p = param_named(fty->params, k->key);
+        if (!p)
+            return false;
+        int index = 0;
+        for (Type *q = fty->params; q != p; q = q->next)
+            index++;
+        if (index < npos)
+            return false;
+    }
+    int index = 0;
+    for (Type *p = fty->params; p; p = p->next, index++) {
+        if (index < npos)
+            continue;
+        bool keyed_here = false;
+        for (KeyedArg *k = keyed; k && !keyed_here; k = k->next)
+            keyed_here = token_is_name(k->key, p->param_name);
+        if (!keyed_here && !param_default_use(p))
+            return false;
+    }
+    return true;
+}
+
+// Ranks are indexed by argument: the positional ones, then the keyed ones in
+// the order written. An omitted defaulted parameter has no rank.
+static bool rank_candidate(VirtualMachine *vm, Candidate *c, Node *args,
+                           int npos, KeyedArg *keyed, bool allow_incompatible) {
+    Type *fty = c->fn->ty;
+    c->viable = false;
+    if (!arguments_fit(fty, npos, keyed))
         return false;
     int   i = 0;
     Type *p = fty->params;
@@ -696,6 +726,16 @@ static bool rank_candidate(VirtualMachine *vm, Candidate *c, Node *args,
             c->r[i] = r;
         if (p)
             p = p->next;
+    }
+    for (KeyedArg *k = keyed; k; k = k->next, i++) {
+        Rank r = conversion_rank(vm, k->value, k->value->ty,
+                                 param_named(fty->params, k->key));
+        if (r == R_PTR_INCOMPATIBLE && !allow_incompatible)
+            return false;
+        if (r == R_NONE)
+            return false;
+        if (i < MAX_RANKED_ARGS)
+            c->r[i] = r;
     }
     c->viable = true;
     return true;
@@ -783,12 +823,46 @@ static void describe(Buf *out, Type *t) {
     }
 }
 
+// The source text of a parameter's @default value, or NULL.
+static const char *default_text(VirtualMachine *vm, Type *param, int *len) {
+    CustomAttrUse *use = param_default_use(param);
+    if (!use)
+        return NULL;
+    Token *first = use->tok->next->next, *last = first;
+    int    depth = 0;
+    for (Token *t = first; t->kind != TK_EOF; t = t->next) {
+        if (equal(t, "("))
+            depth++;
+        else if (equal(t, ")") && depth-- == 0)
+            break;
+        last = t;
+    }
+    const char *end = last->loc + last->len;
+    if (end < first->loc || end - first->loc > 64) {
+        *len = 3;
+        return "...";
+    }
+    *len = (int)(end - first->loc);
+    return first->loc;
+}
+
 static char *signature_text(VirtualMachine *vm, Obj *fn) {
     Buf out = {0};
     buf_puts(&out, obj_display_name(fn));
     buf_puts(&out, "(");
     for (Type *p = fn->ty->params; p; p = p->next) {
         describe(&out, p);
+        if (p->param_name) {
+            if (out.p[out.len - 1] != '*')
+                buf_puts(&out, " ");
+            buf_putn(&out, p->param_name->loc, p->param_name->len);
+        }
+        int         len;
+        const char *def = default_text(vm, p, &len);
+        if (def) {
+            buf_puts(&out, " = ");
+            buf_putn(&out, def, len);
+        }
         if (p->next || fn->ty->is_variadic)
             buf_puts(&out, ", ");
     }
@@ -813,8 +887,11 @@ static char *candidate_list(VirtualMachine *vm, OverloadSet *set) {
 
 // The member of `set` a call with `args` (typed) selects.
 Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
-                         Node *args) {
-    int        nargs     = arg_count(args);
+                         Node *args, KeyedArg *keyed) {
+    int npos  = arg_count(args);
+    int nargs = npos;
+    for (KeyedArg *k = keyed; k; k = k->next)
+        nargs++;
     Candidate *cands     = calloc((size_t)set->n, sizeof *cands);
     int        best      = -1;
     bool       ambiguous = false;
@@ -823,7 +900,7 @@ Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
     for (int pass = 0; pass < 2 && !viable; pass++) {
         for (int i = 0; i < set->n; i++) {
             cands[i].fn = set->m[i].fn;
-            if (rank_candidate(vm, &cands[i], args, nargs, pass == 1))
+            if (rank_candidate(vm, &cands[i], args, npos, keyed, pass == 1))
                 viable++;
         }
     }

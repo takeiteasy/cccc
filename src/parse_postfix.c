@@ -380,7 +380,7 @@ bool is_compound_literal_head(VirtualMachine *vm, Token *tok) {
 static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
                      Node *recv);
 static Node *funcall_parsed(VirtualMachine *vm, Token **rest, Token *close,
-                            Node *fn, Node *args);
+                            Node *fn, Node *args, KeyedArg *keyed);
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok);
 static bool is_keyed_arg(Token *tok);
 static Node *check_call_arg(VirtualMachine *vm, CheckedCallWatch *watch,
@@ -1465,24 +1465,17 @@ Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
     return finish_call(vm, fn, ty, head.next, param_ty, tok, false, &watch);
 }
 
-// A keyed argument `.name = value` of a call, waiting for its parameter.
-typedef struct KeyedArg {
-    struct KeyedArg *next;
-    Token           *key;
-    Node            *value;
-} KeyedArg;
-
 static bool is_keyed_arg(Token *tok) {
     return equal(tok, ".") && tok->next->kind == TK_IDENT &&
            equal(tok->next->next, "=");
 }
 
-static bool token_is_name(Token *tok, Token *name) {
+bool token_is_name(Token *tok, Token *name) {
     return name && tok->len == name->len &&
            !strncmp(tok->loc, name->loc, tok->len);
 }
 
-static CustomAttrUse *param_default_use(Type *param) {
+CustomAttrUse *param_default_use(Type *param) {
     for (CustomAttrUse *use = type_attrs(param)->custom_attrs; use;
          use                = use->next)
         if (!strcmp(use->name, "default"))
@@ -1898,7 +1891,8 @@ static Node *prepend_call_prelude(VirtualMachine *vm, Node *call, Node *prelude,
 // `pre`, when set, is the list of arguments already parsed, and `tok` the
 // closing `)`.
 static Node *funcall_impl(VirtualMachine *vm, Token **rest, Token *tok,
-                          Node *fn, Node *recv, Node *pre) {
+                          Node *fn, Node *recv, Node *pre,
+                          KeyedArg *pre_keyed) {
     add_type(vm, fn);
 
     if (fn->ty->kind != TY_FUNC &&
@@ -1913,7 +1907,7 @@ static Node *funcall_impl(VirtualMachine *vm, Token **rest, Token *tok,
     bool  deferred_splice = false;
     bool  parsed_arg      = false;
     bool       direct = fn->kind == ND_VAR && fn->var && fn->var->is_function;
-    KeyedArg  *keyed  = NULL;
+    KeyedArg        *keyed  = pre_keyed;
     KeyedArg **keyed_tail            = &keyed;
     CheckedCallWatch watch           = cc_checked_call_watch(vm, fn, tok);
     int              index           = 1;
@@ -1986,12 +1980,12 @@ static Node *funcall_impl(VirtualMachine *vm, Token **rest, Token *tok,
 
 static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
                      Node *recv) {
-    return funcall_impl(vm, rest, tok, fn, recv, NULL);
+    return funcall_impl(vm, rest, tok, fn, recv, NULL, NULL);
 }
 
 static Node *funcall_parsed(VirtualMachine *vm, Token **rest, Token *close,
-                            Node *fn, Node *args) {
-    return funcall_impl(vm, rest, close, fn, NULL, args);
+                            Node *fn, Node *args, KeyedArg *keyed) {
+    return funcall_impl(vm, rest, close, fn, NULL, args, keyed);
 }
 
 // The call `Name(args)` of function template `t` whose arguments are deduced:
@@ -2023,22 +2017,37 @@ static Node *deduced_call(VirtualMachine *vm, Token **rest, Token *tok,
         cc_deduce_call(vm, t, expl, nexplicit, head.next, site);
     mark_function_referenced(vm, inst->fn);
     return funcall_parsed(vm, rest, p, new_var_node(vm, inst->fn, site),
-                          head.next);
+                          head.next, NULL);
 }
 
 // The call `name(args)` of an overload set: the member the arguments select.
 static Node *overloaded_call(VirtualMachine *vm, Token **rest, Token *lparen,
                              OverloadSet *set, Token *site) {
-    Token *p    = lparen->next;
-    Node   head = {};
-    Node  *cur  = &head;
+    Token     *p          = lparen->next;
+    Node       head       = {};
+    Node      *cur        = &head;
+    KeyedArg  *keyed      = NULL;
+    KeyedArg **keyed_tail = &keyed;
     while (!equal(p, ")")) {
-        if (cur != &head)
+        if (cur != &head || keyed)
             p = skip(vm, p, ",");
-        if (is_keyed_arg(p))
-            error_tok(vm, p,
-                      "a call of an overloaded function takes positional "
-                      "arguments");
+        if (is_keyed_arg(p)) {
+            KeyedArg *k =
+                arena_alloc(&vm->compiler.parser_arena, sizeof(KeyedArg));
+            k->key = p->next;
+            for (KeyedArg *prev = keyed; prev; prev = prev->next)
+                if (token_is_name(k->key, prev->key))
+                    error_tok(vm, k->key, "parameter '%.*s' is given twice",
+                              k->key->len, k->key->loc);
+            p        = p->next->next->next;
+            k->value = assign(vm, &p, p);
+            add_type(vm, k->value);
+            *keyed_tail = k;
+            keyed_tail  = &k->next;
+            continue;
+        }
+        if (keyed)
+            error_tok(vm, p, "positional argument after a keyed argument");
         Node *arg = assign(vm, &p, p);
         add_type(vm, arg);
         if (arg->kind == ND_VAR && arg->var && arg->var->is_splice_placeholder)
@@ -2047,10 +2056,11 @@ static Node *overloaded_call(VirtualMachine *vm, Token **rest, Token *lparen,
                       "placeholder");
         cur = cur->next = arg;
     }
-    Obj *fn = cc_overload_resolve(vm, site, set, head.next);
+    Obj *fn = cc_overload_resolve(vm, site, set, head.next, keyed);
     mark_function_referenced(vm, fn);
     fn->is_used = true;
-    return funcall_parsed(vm, rest, p, new_var_node(vm, fn, site), head.next);
+    return funcall_parsed(vm, rest, p, new_var_node(vm, fn, site), head.next,
+                          keyed);
 }
 
 // __builtin_kernel_launch(kernel, global, local, args...) (cccc_launch in
@@ -5052,7 +5062,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             sc = find_var(vm, tok);
 
         // A name that carries an overload set: a call picks a member.
-        if (vm->compiler.saw_overloads) {
+        if (*saw_overloads(vm)) {
             OverloadSet *set = cc_overload_find(vm, tok);
             if (set && (!sc || (sc->var && sc->var->is_function &&
                                 cc_overload_has(set, sc->var)))) {

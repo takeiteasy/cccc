@@ -1949,10 +1949,10 @@ void cc_destroy(VirtualMachine *vm) {
     hashmap_deinit(&c->comptime_decl_index);
     hashmap_deinit(&c->comptime_tag_index);
     HashMap *template_maps[] = {
-        &c->templates,         &c->template_insts, &c->template_aggs,
-        &c->scope_ords,        &c->ct_templates,   &c->ct_template_insts,
-        &c->ct_template_aggs,  &c->ct_scope_ords,  &c->overload_sets,
-        &c->member_pack_names, &c->spliced_aggs};
+        &c->templates,        &c->template_insts,    &c->template_aggs,
+        &c->scope_ords,       &c->ct_templates,      &c->ct_template_insts,
+        &c->ct_template_aggs, &c->ct_scope_ords,     &c->overload_sets,
+        &c->ct_overload_sets, &c->member_pack_names, &c->spliced_aggs};
     for (size_t i = 0; i < sizeof template_maps / sizeof *template_maps; i++)
         hashmap_deinit(template_maps[i]);
     for (int i = 0; c->preparse_seeds && i < c->preparse_seed_count; i++) {

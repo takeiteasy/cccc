@@ -60,7 +60,30 @@ f(s);        // f(int): promotion beats conversion
 f(1.0f);     // f(double)
 ```
 
-A call with no viable candidate is `no matching function for call to 'f'`, and one with several best candidates is `call to 'f' is ambiguous`; both list the candidates. A string literal ranks as `char *`.
+A call with no viable candidate is `no matching function for call to 'f'`, and one with several best candidates is `call to 'f' is ambiguous`; both list the candidates with their parameter names and defaults. A string literal ranks as `char *`.
+
+## Defaults and keyed arguments
+
+A parameter with `@default` is optional, and `.name = value` gives an argument by parameter name, as for any function ([derive.md](derive.md#parameter-defaults)). Both take part in choosing the function.
+
+```c
+int __attribute__((overloadable)) area(int w, int h @default(24));
+int __attribute__((overloadable)) area(double r);
+
+area(5);            // area(int, int), h = 24
+area(.h = 2, .w = 5);
+area(2.0);          // area(double)
+```
+
+| Rule | Example |
+|---|---|
+| A function is a candidate when every parameter has an argument or a default | `area()` matches neither function above |
+| A key matches parameters by name; a function without that name is not a candidate | `area(.r = 1.0)` is `area(double)` |
+| A key cannot name a parameter that already has a positional argument | `area(1, .w = 2)` has no candidate |
+| An omitted default has no rank, so only the arguments given are compared | `f(1)` with `f(int)` and `f(int, int b @default(0))` is ambiguous |
+| Positional arguments come first, then keyed ones | `area(.w = 1, 2)` is an error |
+
+The unmarked function of a name takes defaults and keys too. An argument is checked against its parameter once the function is chosen.
 
 ## Taking the address
 
@@ -102,8 +125,6 @@ A parameter type that has no name to mangle (an anonymous struct) is an error; g
 |---|---|---|
 | `char` and `signed char` | One type in CCCC, so they cannot be overloads of each other | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
 | `__int128` and `_BitInt(128)` | One type in CCCC; a 128-bit parameter is an error | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
-| `@default` parameters | Rejected on an overloadable function | [#2084](https://todo.sr.ht/~takeiteasy/cccc/2084) |
-| Keyed arguments | A call of a set takes positional arguments | [#2085](https://todo.sr.ht/~takeiteasy/cccc/2085) |
 | `@method`, `@static_method`, `[[cccc::operator]]` | Rejected on an overloadable function | [#2086](https://todo.sr.ht/~takeiteasy/cccc/2086) |
 | A function template with the set's name | Rejected | [#2087](https://todo.sr.ht/~takeiteasy/cccc/2087) |
 | Block-scope declarations | Rejected | [#2090](https://todo.sr.ht/~takeiteasy/cccc/2090) |

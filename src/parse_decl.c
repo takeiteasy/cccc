@@ -2862,9 +2862,9 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     hashmap_deinit(&vm->compiler.global_decl_map);
     memset(&vm->compiler.global_decl_map, 0,
            sizeof(vm->compiler.global_decl_map));
-    hashmap_deinit(&vm->compiler.overload_sets);
-    memset(&vm->compiler.overload_sets, 0, sizeof(vm->compiler.overload_sets));
-    vm->compiler.saw_overloads = false;
+    hashmap_deinit(overload_sets(vm));
+    memset(overload_sets(vm), 0, sizeof(HashMap));
+    *saw_overloads(vm) = false;
     // Each program has its own template registry: the comptime program is
     // parsed in the middle of the runtime parse and must not discard the
     // runtime program's templates.

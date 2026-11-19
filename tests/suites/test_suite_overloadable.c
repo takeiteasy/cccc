@@ -374,3 +374,86 @@ void test_address_with_unmarked_member(void) {
     AssertEq(a(0), 1);
     AssertEq(b(0), 2);
 }
+
+// A parameter with a @default is optional, and a keyed argument picks its
+// parameter by name.
+static int OVL pad(int w, int h @ default(10)) {
+    return w * 100 + h;
+}
+static int OVL pad(double scale, int k @ default(1), int m @ default(2)) {
+    return (int)scale * 1000 + k * 10 + m;
+}
+
+[[cccc::test]]
+void test_default_fills_omitted_argument(void) {
+    AssertEq(pad(1), 110);
+    AssertEq(pad(1, 5), 105);
+    AssertEq(pad(2.0), 2012);
+    AssertEq(pad(2.0, 3), 2032);
+    AssertEq(pad(2.0, 3, 4), 2034);
+}
+
+[[cccc::test]]
+void test_keyed_arguments_pick_by_name(void) {
+    AssertEq(pad(.w = 3), 310);
+    AssertEq(pad(.h = 7, .w = 3), 307);
+    AssertEq(pad(.scale = 4.0), 4012);
+    AssertEq(pad(.scale = 4.0, .m = 9), 4019);
+    AssertEq(pad(5, .h = 6), 506);
+    AssertEq(pad(5.0, .m = 8), 5018);
+}
+
+// A default can name an earlier parameter; the declaration carries it and the
+// definition inherits it.
+static int OVL span(int lo, int hi @ default(lo * 2));
+static int OVL span(char *s);
+static int OVL span(int lo, int hi) {
+    return hi - lo;
+}
+static int OVL span(char *s) {
+    return 0;
+}
+
+[[cccc::test]]
+void test_default_names_earlier_parameter(void) {
+    AssertEq(span(10), 10);
+    AssertEq(span(.lo = 4), 4);
+    AssertEq(span(.hi = 9, .lo = 1), 8);
+    AssertEq(span("x"), 0);
+}
+
+// The unmarked function of a name can take defaults too.
+static int plain(int a, int b @ default(3)) {
+    return a + b;
+}
+static int OVL plain(double x) {
+    return -1;
+}
+
+[[cccc::test]]
+void test_default_on_unmarked_member(void) {
+    AssertEq(plain(1), 4);
+    AssertEq(plain(1, 1), 2);
+    AssertEq(plain(.b = 5, .a = 1), 6);
+    AssertEq(plain(1.5), -1);
+}
+
+// A keyed value that names a set is resolved against its parameter.
+static int OVL apply(int (*fn)(int), int v @ default(0)) {
+    return fn(v);
+}
+static int OVL apply(float unused) {
+    return -1;
+}
+static int OVL twice_of(int x) {
+    return x * 2;
+}
+static int OVL twice_of(double x) {
+    return 0;
+}
+
+[[cccc::test]]
+void test_keyed_argument_takes_set_address(void) {
+    AssertEq(apply(.fn = twice_of, .v = 4), 8);
+    AssertEq(apply(twice_of), 0);
+}

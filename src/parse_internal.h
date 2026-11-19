@@ -563,8 +563,26 @@ Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
 Node *addr_of_operand(VirtualMachine *vm, Node *n, Token *tok);
 void mark_function_referenced(VirtualMachine *vm, Obj *fn);
 
-// Function overloading (src/overload.c).
+// A keyed argument `.name = value` of a call, waiting for its parameter.
+typedef struct KeyedArg {
+    struct KeyedArg *next;
+    Token           *key;
+    Node            *value;
+} KeyedArg;
+bool token_is_name(Token *tok, Token *name);
+CustomAttrUse *param_default_use(Type *param);
+
+// Function overloading (src/overload.c). The overload sets of the program
+// being parsed: the comptime program has its own.
 typedef struct OverloadSet OverloadSet;
+static inline HashMap *overload_sets(VirtualMachine *vm) {
+    return vm->compiler.in_macro_mode ? &vm->compiler.ct_overload_sets
+                                      : &vm->compiler.overload_sets;
+}
+static inline bool *saw_overloads(VirtualMachine *vm) {
+    return vm->compiler.in_macro_mode ? &vm->compiler.ct_saw_overloads
+                                      : &vm->compiler.saw_overloads;
+}
 typedef struct {
     char  *name; // the name the function's Obj carries
     int    len;
@@ -582,7 +600,7 @@ Node *cc_overload_take_address(VirtualMachine *vm, Node *ph, Type *target);
 Node *cc_overload_convert(VirtualMachine *vm, Node *expr, Type *target);
 void cc_overload_reject(VirtualMachine *vm, Node *expr);
 Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
-                         Node *args);
+                         Node *args, KeyedArg *keyed);
 void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name);
 const char *overloadable_operator(Token *tok, Token **rest);

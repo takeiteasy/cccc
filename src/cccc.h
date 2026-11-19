@@ -4294,6 +4294,10 @@ typedef struct Compiler {
     bool         saw_templates;   // `@template`/`@inst` appeared in the input
     bool         saw_overloads;   // an `overloadable` function was declared
     HashMap      overload_sets;   // source name -> OverloadSet *
+    // The comptime program's own (the two above are the runtime program's);
+    // the overload accessors pick one by in_macro_mode.
+    bool    ct_saw_overloads;
+    HashMap ct_overload_sets;
     bool         saw_operator_templates; // a function template carries [[cccc::operator]]
     bool         saw_variadic_aggregate; // a variadic struct was defined
     HashMap      member_pack_names;      // `Ts... name;` in a variadic struct
