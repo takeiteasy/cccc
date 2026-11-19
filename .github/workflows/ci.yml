@@ -1,35 +1,22 @@
 name: Docs
 
-# GitHub-side "regular push" CI is docs-only (see CLAUDE.md's Branching
-# notes): builds the Doxygen HTML for the public headers under
-# include/cccc/ and publishes it to GitHub Pages
-# (https://takeiteasy.github.io/cccc/) on every push to `trunk`. `trunk` is
-# pushed to both `origin` (sr.ht) and `github` on every push to keep them
-# in sync -- sr.ht's .builds/linux-amd64.yml is what actually
-# bootstraps/builds/tests the compiler on every push (Linux amd64,
-# canonical); this workflow doesn't need a working `cccc` binary at all,
-# since Doxyfile's INPUT is just the public headers and `doxygen Doxyfile`
-# runs standalone.
-#
-# The full build+test+package for the three supported quadrants (Linux
-# amd64/aarch64, macOS arm64) only runs at release time, via
-# .github/workflows/release.yml (triggered by a `v*` tag push) -- not on
-# every push. See CLAUDE.md's Branching notes.
-#
-# pull_request builds (WARN_AS_ERROR in Doxyfile makes this a real
-# completeness gate on @param/@return coverage) but never deploys -- a PR
-# from a fork has no permission to publish Pages, and an unmerged PR's docs
-# shouldn't go live anyway.
+# The Doxygen docs build is not run on ordinary pushes (see CLAUDE.md's
+# Branching notes): it builds the HTML for the public headers under
+# include/cccc/, checks the doc links and publishes to GitHub Pages
+# (https://takeiteasy.github.io/cccc/) on a `v*` tag push (a release) or by
+# hand (Actions > Docs > Run workflow). sr.ht's .builds/linux-amd64.yml
+# builds and tests the compiler on every push; this workflow needs no `cccc`
+# binary, since Doxyfile's INPUT is just the public headers and `doxygen
+# Doxyfile` runs standalone. WARN_AS_ERROR in Doxyfile makes it a completeness
+# gate on @param/@return coverage.
 on:
   push:
-    branches: [trunk]
-  pull_request:
-    branches: [trunk]
+    tags: ["v*"]
+  workflow_dispatch:
 
-# No paths-ignore: this workflow's link check is what docs-only changes need.
 concurrency:
   group: docs-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -51,15 +38,12 @@ jobs:
         # silently breaking the published site unless this is present.
         run: touch build/docs/html/.nojekyll
       - uses: actions/configure-pages@v5
-        if: github.ref == 'refs/heads/trunk' && github.event_name == 'push'
       - uses: actions/upload-pages-artifact@v3
-        if: github.ref == 'refs/heads/trunk' && github.event_name == 'push'
         with:
           path: build/docs/html
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/trunk' && github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
       pages: write

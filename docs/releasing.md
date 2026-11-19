@@ -100,7 +100,7 @@ git push mirror v0.1.0
 (`origin` is github, `mirror` is sr.ht.) `trunk` is pushed to both remotes on every ordinary push
 too, not just at release time — `origin` needs to stay current since it hosts
 the Doxygen docs (GitHub Pages, via `.github/workflows/ci.yml`, deployed on
-every push to `trunk`). What's release-specific here is the **tag** push:
+every `v*` tag push or by hand). What's release-specific here is the **tag** push:
 pushing a `v*` tag to `origin` is what triggers
 `.github/workflows/release.yml` (see below), which is also where the two
 non-amd64 quadrants (Linux aarch64, macOS arm64) get built and tested —
@@ -131,9 +131,9 @@ build the `release` target, run the full test suite against that exact
 release binary, then package `cccc-<version>-<os>-<arch>.tar.gz` (binary +
 `LICENSE` + `README.md`), emit `SHA256SUMS`, and publish everything to the
 GitHub release for that tag. This is the only place Linux aarch64/macOS
-arm64 get built and tested at all — GitHub's regular-push
-workflow (`ci.yml`) only builds and publishes the Doxygen docs, so those
-two quadrants have no per-push coverage between releases.
+arm64 get built and tested at all — `ci.yml` only builds and publishes the
+Doxygen docs, so those two quadrants have no per-push coverage between
+releases.
 
 Testing the release binary itself (not just the debug build) before
 publishing is deliberate — an artifact that skipped the audit gate on its

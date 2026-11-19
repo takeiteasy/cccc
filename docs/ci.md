@@ -9,7 +9,7 @@ CI is split by host and by when it runs, because no one provider covers all thre
 | What | Host | Manifest | Trigger |
 |---|---|---|---|
 | Linux amd64 build and test (**canonical**) | sr.ht | [`.builds/linux-amd64.yml`](../.builds/linux-amd64.yml) | Every push to `trunk` (other refs exit in a guard task); a failure sends an email |
-| Doxygen build, link check, publish to GitHub Pages | GitHub Actions | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | Every push to `trunk`; build-only on pull requests |
+| Doxygen build, link check, publish to GitHub Pages | GitHub Actions | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | `v*` tag push, or run by hand (`workflow_dispatch`) |
 | Linux aarch64 and macOS arm64 build, test and package | GitHub Actions | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | `v*` tag push only |
 | `--sandbox` host test on native x86-64 (seccomp, x32 rule) | sr.ht | [`.builds/sandbox-x86.yml`](../.builds/sandbox-x86.yml) | Manual submit only (`hut builds submit`); fails if the sandbox is unavailable |
 
@@ -19,7 +19,7 @@ sr.ht runs (`-j 8`) `make`, then `./cccc --build build.c --build-target=test --b
 |---|---|
 | `builds.sr.ht` cannot run arm64 images (every arm64 cell in its compatibility matrix is empty, and three images failed with "Image .. is not available for arch .arm64.") | Those quadrants live on GitHub, so an aarch64 or macOS regression is caught at release time, not on the commit that caused it |
 | No CI job builds with `CCCC_HAS_CURL=1` | `test_url_include_basic.c`, `test_url_embed_basic.c` and `test_url_probes.c` are guarded on `__CCCC_HAS_CURL__` and become stubs, so URL include and embed fetching and their native replay have **no automated coverage**. Verify them in a `CCCC_HAS_CURL=1 ./cccc --build build.c --build-target=cccc` build ([headers-native.md](headers-native.md#url-includes)) |
-| Doxygen left sr.ht | Its `ubuntu/lts` image ships a doxygen that hangs when graphviz's `dot` is missing. The GitHub `ci.yml` job installs both and needs no `cccc` binary (`Doxyfile`'s `INPUT` is the public headers). `WARN_AS_ERROR` makes it a completeness gate on pull requests, which never deploy. `./cccc --build build.c --build-target=docs` works locally |
+| Doxygen left sr.ht | Its `ubuntu/lts` image ships a doxygen that hangs when graphviz's `dot` is missing. The GitHub `ci.yml` job installs both and needs no `cccc` binary (`Doxyfile`'s `INPUT` is the public headers). `WARN_AS_ERROR` makes it a completeness gate. `./cccc --build build.c --build-target=docs` works locally |
 
 The repo is mirrored to GitHub as a manual second remote; no credentials live in either CI system, so nothing pushes on its own. `trunk` goes to both:
 
