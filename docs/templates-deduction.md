@@ -1,6 +1,6 @@
 # Template Argument Deduction
 
-A function template called by name deduces its arguments from the types of the call's arguments. `@inst` is only needed to override or to name the function without calling it.
+A function template called by name deduces its arguments from the types of the call's arguments. `@inst` is only needed to override the deduced arguments or to name the function with no target type.
 
 ```c
 @template(T) T maxof(T a, T b) { return a > b ? a : b; }
@@ -56,6 +56,21 @@ int s = sum(v);                 // T is int
 double d = @inst(int) widen(1, 2.0);    // T is int, U is double
 double e = @inst(double) maxof(1, 2.5); // T is double; 1 converts
 ```
+
+## Naming a template without calling it
+
+A bare template name converted to a function pointer deduces its arguments from the pointer type. The deduction is exact, and the return type takes part.
+
+```c
+@template(T) T twice(T x) { return x + x; }
+@template(T) T zero(void) { return 0; }
+
+double (*p)(double) = twice;    // twice@(double)
+int (*z)(void) = zero;          // zero@(int): T comes from the return type
+int r = call_int(twice, 21);    // int call_int(int (*f)(int), int x): a target too
+```
+
+The name converts in an initializer, an assignment, a cast, a `return` and a function argument. Anywhere else (`twice + 1`, `void *p = twice;`, a variadic argument) it is an error: `'twice' is a template; instantiate it as 'twice@(args)' or '@inst(args) twice'`. A pointee never gains a qualifier, so `int (*)(int *)` does not name `f(const T *)`. When the name also has `overloadable` functions, one of the target's type wins ([attributes-overloadable.md](attributes-overloadable.md#templates)).
 
 ## Parameter packs
 
@@ -117,6 +132,7 @@ A defaulted parameter that is skipped while a later one is deduced is an error: 
 | A pack that is not a function parameter | `template parameter 'Ts' is not deduced by the arguments`; use `@inst` |
 | A defaulted parameter before a deduced pack | `template parameter 'U' has a default but a later parameter is deduced`; give it in `@inst` |
 | A keyed (`.b = 2`) argument or a splice placeholder | Positional arguments only; use `@inst` |
+| A bare template name passed to a parameter that is itself deduced (`apply(twice, 21)` with `T (*f)(T)`) | `this type cannot be a template argument`; use `@inst` ([#2137](https://todo.sr.ht/~takeiteasy/cccc/2137)) |
 | A shape that does not fit | `cannot deduce the arguments of 'f': argument 1 ('int') does not match its parameter` |
 
 Two function templates cannot share a name. A template that shares its name with an [overload set](attributes-overloadable.md#templates) is ranked with the set's functions, so a call takes the best of them.

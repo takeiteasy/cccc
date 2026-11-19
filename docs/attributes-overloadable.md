@@ -132,7 +132,8 @@ f(2.0);    // f<double>: its parameter matches exactly
 | A parameter the template names without a template parameter takes conversions | `m(T a, int b)` against `m(double, double)` |
 | Keyed arguments never select the template | `f(.x = 2.0)` ranks the functions |
 | `f@(int)(x)` and `@inst(int) f(x)` name the instance | They skip the set |
-| A bare name is the set only | `int (*p)(double) = f;` picks among the functions, not `f<double>` |
+| A bare name picks a function of the target's type, else deduces the template from it | `int (*p)(double) = f;` is `f<double>` when no function takes a `double`; `int (*p)(int) = f;` is `f(int)` |
+| A set with a template always needs a target type | `void *p = f;` is an error even when the set has one function |
 
 An error lists the template with the parameter types its arguments deduced: `candidate template: f(int *)`.
 
@@ -190,7 +191,6 @@ A parameter type that has no name to mangle (an anonymous struct) is an error; g
 |---|---|---|
 | `char` and `signed char` | One type in CCCC, so they cannot be overloads of each other | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
 | `__int128` and `_BitInt(128)` | One type in CCCC; a 128-bit parameter is an error | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
-| A bare name | Never picks a function template's instance, whatever the target type | [#2136](https://todo.sr.ht/~takeiteasy/cccc/2136) |
 | Block-scope declarations | Rejected | [#2090](https://todo.sr.ht/~takeiteasy/cccc/2090) |
 | Ranking | A few rare calls rank differently from Clang | [#2091](https://todo.sr.ht/~takeiteasy/cccc/2091) |
 | `enable_if`, `diagnose_if`, `pass_object_size` | Not recognized | |

@@ -5155,15 +5155,14 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             OverloadSet *set = cc_overload_find(vm, tok);
             if (set && (!sc || (sc->var && sc->var->is_function &&
                                 cc_overload_has(set, sc->var)))) {
-                if (equal(tok->next, "(")) {
-                    Template *t = vm->compiler.saw_templates
-                                      ? cc_find_template(vm, tok)
-                                      : NULL;
-                    return overloaded_call(vm, rest, tok->next, set,
-                                           t && t->kind == TMPL_FUNC ? t : NULL,
-                                           tok);
-                }
-                if (cc_overload_count(set) > 1) {
+                Template *t = vm->compiler.saw_templates
+                                  ? cc_find_template(vm, tok)
+                                  : NULL;
+                if (t && t->kind != TMPL_FUNC)
+                    t = NULL;
+                if (equal(tok->next, "("))
+                    return overloaded_call(vm, rest, tok->next, set, t, tok);
+                if (t || cc_overload_count(set) > 1) {
                     Node *ph = new_node(vm, ND_OVERLOAD, tok);
                     node_misc_mut(vm, ph)->overload_set = set;
                     ph->ty                              = ty_overload;
@@ -5176,6 +5175,17 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                     only->is_used = true;
                     return new_var_node(vm, only, tok);
                 }
+            }
+        }
+
+        // A function template named without a call: the target type deduces it.
+        if (!sc && vm->compiler.saw_templates && !equal(tok->next, "(")) {
+            Template *t = cc_find_template(vm, tok);
+            if (t && t->kind == TMPL_FUNC) {
+                Node *ph = new_node(vm, ND_OVERLOAD, tok);
+                ph->ty   = ty_overload;
+                *rest    = tok->next;
+                return ph;
             }
         }
 

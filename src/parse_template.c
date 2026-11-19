@@ -3773,6 +3773,31 @@ static int call_pack_item(VirtualMachine *vm, Template *t, bool report,
     return -1;
 }
 
+// The return type of `t` as a pattern, or NULL when it is more than a plain
+// type (a pack element `Ts...[0]`, a function pointer): a target then leaves it
+// to the instance.
+static Type *call_return_pattern(VirtualMachine *vm, Template *t) {
+    Token *p = t->marker_end;
+    for (;;) {
+        Token *q = skip_attr_groups(p);
+        if (q != p)
+            p = q;
+        else if (is_linkage_kw(p))
+            p = p->next;
+        else
+            break;
+    }
+    for (Token *q = p; q != t->name_tok; q = q->next)
+        if (q->kind == TK_EOF || equal(q, "(") || equal(q, "[") ||
+            equal(q, "..."))
+            return NULL;
+    if (p == t->name_tok)
+        return NULL;
+    Token *rest;
+    Type  *ty = typename(vm, &rest, clone_range(vm, p, t->name_tok));
+    return unqualified(vm, ty);
+}
+
 static void call_body(VirtualMachine *vm, Template *t) {
     pattern_vars(vm, t, false);
     Token *from = NULL, *to = NULL, *dots = NULL, *first = NULL;
@@ -3816,6 +3841,7 @@ static void call_body(VirtualMachine *vm, Template *t) {
         n++;
     }
     t->call_n        = n;
+    t->call_ret      = call_return_pattern(vm, t);
     t->call_variadic = ty->is_variadic;
     t->call_ready    = true;
 }
@@ -3935,11 +3961,14 @@ static Type *call_param_types(VirtualMachine *vm, Template *t, Node **av,
 // argument types, then from their defaults. A pack parameter takes the
 // arguments between the fixed ones, one type each. With `quiet`, a call that
 // does not deduce returns NULL; `*params` then takes its parameter types.
+// With a function type `target`, the call is the use of a bare name converted
+// to a pointer to it: `args` are its parameters, the deduction is exact (no
+// conversions) and the return type takes part. Always quiet.
 static TemplateArg *deduce_call_args(VirtualMachine *vm, Template *t,
                                      const TemplateArg *expl, int nexplicit,
                                      Node *args, Token *site, bool quiet,
                                      TemplateArg *stack, int *given_out,
-                                     Type **params) {
+                                     Type **params, Type *target) {
     bool has_pack = tmpl_has_pack(t);
     if (t->nparams > TMPL_MAX_ARGS)
         DEDUCE_ERROR(vm, site,
@@ -3975,11 +4004,19 @@ static TemplateArg *deduce_call_args(VirtualMachine *vm, Template *t,
     int     npack       = actual > kexp ? actual : kexp;
 
     Deduced d = {};
-    Matcher m           = {
-        .vm = vm, .pt = t, .d = &d, .site = site, .call = true, .quiet = quiet};
+    Matcher m           = {.vm    = vm,
+                           .pt    = t,
+                           .d     = &d,
+                           .site  = site,
+                           .call  = !target,
+                           .quiet = quiet || target};
     for (int k = 0; k < nfixed_expl; k++)
         if (!t->params[k].type_start)
             d.ty[k] = expl[k].ty;
+
+    Type *ret = target ? t->call_ret : NULL;
+    if (ret && !match_type(&m, ret, unqualified(vm, target->return_ty)))
+        return NULL;
 
     for (int i = 0; i < before && i < nargs; i++)
         if (!deduce_arg(&m, t, t->call_pat[i], av[i], i + 1, nfixed_expl))
@@ -4079,9 +4116,22 @@ static TemplateArg *deduce_call_args(VirtualMachine *vm, Template *t,
         memcpy(out + nfixed, elems, sizeof(TemplateArg) * npack);
         given = nfixed + npack;
     }
+    Type *ptys = NULL;
+    if (params || target)
+        ptys = call_param_types(vm, t, av, nargs, before, actual, out, given);
+    if (target) {
+        Type *want = target->params;
+        for (Type *have = ptys; have; have = have->next, want = want->next)
+            if (!want || !same_arg_type(vm, have, unqualified(vm, want), site))
+                return NULL;
+        if (want)
+            return NULL;
+        if (ret && !pattern_has_var(t, ret) &&
+            !same_arg_type(vm, ret, unqualified(vm, target->return_ty), site))
+            return NULL;
+    }
     if (params)
-        *params =
-            call_param_types(vm, t, av, nargs, before, actual, out, given);
+        *params = ptys;
     *given_out = given;
     return out;
 }
@@ -4094,7 +4144,7 @@ TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
     TemplateArg  stack[TMPL_STACK_PARAMS];
     int          given;
     TemplateArg *out = deduce_call_args(vm, t, expl, nexplicit, args, site,
-                                        false, stack, &given, NULL);
+                                        false, stack, &given, NULL, NULL);
     return instantiate_template(vm, t, out, given, site);
 }
 
@@ -4105,7 +4155,44 @@ TemplateCall *cc_template_call_candidate(VirtualMachine *vm, Template *t,
     TemplateCall *c = arena_alloc(&vm->compiler.parser_arena, sizeof *c);
     c->tmpl         = t;
     c->args = deduce_call_args(vm, t, NULL, 0, args, site, true, c->stack,
-                               &c->given, &c->params);
+                               &c->given, &c->params, NULL);
+    if (!c->args)
+        return NULL;
+    c->variadic = t->call_variadic;
+    return c;
+}
+
+// `t` as the function a bare name converted to a pointer to function type
+// `target` names, or NULL when `target` does not deduce it exactly.
+TemplateCall *cc_template_target_candidate(VirtualMachine *vm, Template *t,
+                                           Type *target, Token *site) {
+    if (!target || target->kind != TY_FUNC)
+        return NULL;
+    if (!t->call_ready)
+        in_pattern_scope(vm, t, call_body);
+    int n = 0;
+    for (Type *p = target->params; p; p = p->next)
+        n++;
+    bool packed = tmpl_has_pack(t) && t->call_pack_at >= 0;
+    if (target->is_variadic != t->call_variadic ||
+        (packed ? n < t->call_n : n != t->call_n))
+        return NULL;
+
+    Node  head = {};
+    Node *cur  = &head;
+    for (Type *p = target->params; p; p = p->next) {
+        Node *stub = arena_alloc(&vm->compiler.parser_arena, sizeof *stub);
+        memset(stub, 0, sizeof *stub);
+        stub->kind = ND_NULL_EXPR;
+        stub->ty   = p;
+        stub->tok  = site;
+        cur = cur->next = stub;
+    }
+
+    TemplateCall *c = arena_alloc(&vm->compiler.parser_arena, sizeof *c);
+    c->tmpl         = t;
+    c->args = deduce_call_args(vm, t, NULL, 0, head.next, site, true, c->stack,
+                               &c->given, &c->params, target);
     if (!c->args)
         return NULL;
     c->variadic = t->call_variadic;

@@ -477,6 +477,8 @@ TemplateCall *cc_template_call_candidate(VirtualMachine *vm, Template *t,
                                          Node *args, Token *site);
 TemplateInstance *cc_template_call_instantiate(VirtualMachine *vm,
                                                TemplateCall *c, Token *site);
+TemplateCall *cc_template_target_candidate(VirtualMachine *vm, Template *t,
+                                           Type *target, Token *site);
 Template *cc_parse_partial_inst(VirtualMachine *vm, Token **rest, Token *tok,
                                 TemplateArg *out, int *n);
 void cc_parse_file_scope_chain(VirtualMachine *vm, Token *tok);

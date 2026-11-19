@@ -569,7 +569,7 @@ static bool drops_qualifiers(Type *from_pointee, Type *to_pointee) {
 // How many members of `set` have the function type `target` points to; the
 // last one found is stored in `*found`. No conversion applies, as in Clang.
 static int count_matches(OverloadSet *set, Type *target, Obj **found) {
-    if (!target || target->kind != TY_PTR || target->base->kind != TY_FUNC)
+    if (!set || !target || target->kind != TY_PTR || target->base->kind != TY_FUNC)
         return 0;
     int n = 0;
     for (int i = 0; i < set->n; i++)
@@ -581,14 +581,44 @@ static int count_matches(OverloadSet *set, Type *target, Obj **found) {
     return n;
 }
 
+// The function template a placeholder's name also spells, if any.
+static Template *placeholder_template(VirtualMachine *vm, Node *ph) {
+    if (!vm->compiler.saw_templates)
+        return NULL;
+    Template *t = cc_find_template(vm, ph->tok);
+    return t && t->kind == TMPL_FUNC ? t : NULL;
+}
+
+static bool is_function_pointer(Type *ty) {
+    return ty && ty->kind == TY_PTR && ty->base->kind == TY_FUNC;
+}
+
+// How many functions placeholder `ph` names that `target` selects: a function
+// of the set whose type is the target's, else the one template instance the
+// target deduces (in `*tc`; nothing is instantiated).
+static int address_matches(VirtualMachine *vm, Node *ph, Type *target,
+                           Obj **fn, TemplateCall **tc) {
+    *tc       = NULL;
+    int count = count_matches(node_misc(ph)->overload_set, target, fn);
+    if (count || !is_function_pointer(target))
+        return count;
+    Template *t = placeholder_template(vm, ph);
+    if (!t)
+        return 0;
+    *tc = cc_template_target_candidate(vm, t, target->base, ph->tok);
+    return *tc != NULL;
+}
+
 static Rank conversion_rank(VirtualMachine *vm, Node *arg, Type *from,
                             Type *to) {
     if (from->kind == TY_ERROR || to->kind == TY_ERROR)
         return R_EXACT;
     if (from->kind == TY_OVERLOAD)
-        return count_matches(node_misc(arg)->overload_set, to, NULL) == 1
-                   ? R_EXACT
-                   : R_NONE;
+    {
+        Obj          *fn;
+        TemplateCall *tc;
+        return address_matches(vm, arg, to, &fn, &tc) == 1 ? R_EXACT : R_NONE;
+    }
     from = decayed(vm, from);
     // A string literal is `char[N]` in C; cccc types its elements const.
     if (arg && arg->kind == ND_VAR && arg->var && arg->var->is_string_literal &&
@@ -872,11 +902,17 @@ static char *candidate_list(VirtualMachine *vm, const char *name,
     return s;
 }
 
-static char *set_candidate_list(VirtualMachine *vm, OverloadSet *set) {
-    OverloadCand *cands = calloc((size_t)set->n, sizeof *cands);
-    for (int i = 0; i < set->n; i++)
+// The set's functions, and the function template of the placeholder's name.
+static char *placeholder_candidates(VirtualMachine *vm, Node *ph) {
+    OverloadSet *set  = node_misc(ph)->overload_set;
+    int          n    = set ? set->n : 0;
+    OverloadCand *cands = calloc((size_t)n + 1, sizeof *cands);
+    for (int i = 0; i < n; i++)
         cands[i].fn = set->m[i].fn;
-    char *s = candidate_list(vm, set->name, cands, set->n);
+    char *name = get_ident(vm, ph->tok);
+    char *s    = candidate_list(vm, name, cands, n);
+    if (placeholder_template(vm, ph))
+        s = arena_format(vm, "%s\n    candidate template: %s", s, name);
     free(cands);
     return s;
 }
@@ -981,21 +1017,40 @@ Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
 // The address of a set
 // ---------------------------------------------------------------------------
 
-// The member of the set named by placeholder `ph` that function pointer type
-// `target` selects, as a function name.
+// A lone function template's name where no target type deduces it.
+static void bare_template_error(VirtualMachine *vm, Token *tok) {
+    error_tok(vm, tok,
+              "'%.*s' is a template; instantiate it as '%.*s@(args)' or "
+              "'@inst(args) %.*s'",
+              tok->len, tok->loc, tok->len, tok->loc, tok->len, tok->loc);
+}
+
+// The function named by placeholder `ph` that function pointer type `target`
+// selects: a member of the set, else an instance of the template of its name.
 Node *cc_overload_take_address(VirtualMachine *vm, Node *ph, Type *target) {
-    OverloadSet *set   = node_misc(ph)->overload_set;
-    Obj         *fn    = NULL;
-    int          count = count_matches(set, target, &fn);
+    OverloadSet  *set = node_misc(ph)->overload_set;
+    Obj          *fn  = NULL;
+    TemplateCall *tc  = NULL;
+    int           count = address_matches(vm, ph, target, &fn, &tc);
+    if (!set && !is_function_pointer(target))
+        bare_template_error(vm, ph->tok);
+    char *name = get_ident(vm, ph->tok);
     if (count == 0)
         error_tok(vm, ph->tok,
-                  "no overloaded function '%s' matches the target type%s",
-                  set->name, set_candidate_list(vm, set));
+                  "no overloaded function '%s' matches the target type%s", name,
+                  placeholder_candidates(vm, ph));
     if (count > 1)
         error_tok(vm, ph->tok,
-                  "address of overloaded function '%s' is ambiguous%s",
-                  set->name, set_candidate_list(vm, set));
+                  "address of overloaded function '%s' is ambiguous%s", name,
+                  placeholder_candidates(vm, ph));
 
+    if (tc) {
+        fn = cc_template_call_instantiate(vm, tc, ph->tok)->fn;
+        if (!is_compatible(fn->ty, target->base))
+            error_tok(vm, ph->tok,
+                      "no overloaded function '%s' matches the target type%s",
+                      name, placeholder_candidates(vm, ph));
+    }
     mark_function_referenced(vm, fn);
     fn->is_used = true;
     if (type_attrs(fn->ty)->attr_error_msg && vm->compiler.dead_code_depth == 0)
@@ -1019,8 +1074,10 @@ void cc_overload_reject(VirtualMachine *vm, Node *expr) {
     if (!expr || expr->kind != ND_OVERLOAD || vm->compiler.in_type_lookahead)
         return;
     OverloadSet *set = node_misc(expr)->overload_set;
+    if (!set)
+        bare_template_error(vm, expr->tok);
     error_tok(vm, expr->tok,
               "reference to overloaded function '%s' could not be resolved; "
               "did you mean to call it?%s",
-              set->name, set_candidate_list(vm, set));
+              set->name, placeholder_candidates(vm, expr));
 }
