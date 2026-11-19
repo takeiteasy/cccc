@@ -67,7 +67,8 @@ void test_variadic_argument(void) {
     printf("%p", twice);
 }
 
-[[cccc::test(error = "no overloaded function 'constp' matches the target type")]]
+[[cccc::test(
+    error = "no overloaded function 'constp' matches the target type")]]
 void test_no_added_qualifier(void) {
     int (*p)(int *) = constp;
 }
@@ -77,12 +78,14 @@ void test_fixed_parameter_differs(void) {
     int (*p)(int, int) = mixed;
 }
 
-[[cccc::test(error = "no overloaded function 'fixed1' matches the target type")]]
+[[cccc::test(
+    error = "no overloaded function 'fixed1' matches the target type")]]
 void test_parameter_count(void) {
     int (*p)(int, int) = fixed1;
 }
 
-[[cccc::test(error = "no overloaded function 'vararg' matches the target type")]]
+[[cccc::test(
+    error = "no overloaded function 'vararg' matches the target type")]]
 void test_variadic_mismatch(void) {
     int (*p)(int) = vararg;
 }

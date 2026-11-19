@@ -95,7 +95,7 @@ static int OVL pick_one(char *s) {
 
 [[cccc::test]]
 void test_set_function_wins(void) {
-    int (*fi)(int)   = pick_one;
+    int (*fi)(int)    = pick_one;
     int (*fs)(char *) = pick_one;
     AssertEq(fi(0), 1);
     AssertEq(fs(0), 2);

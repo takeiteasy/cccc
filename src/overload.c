@@ -569,7 +569,8 @@ static bool drops_qualifiers(Type *from_pointee, Type *to_pointee) {
 // How many members of `set` have the function type `target` points to; the
 // last one found is stored in `*found`. No conversion applies, as in Clang.
 static int count_matches(OverloadSet *set, Type *target, Obj **found) {
-    if (!set || !target || target->kind != TY_PTR || target->base->kind != TY_FUNC)
+    if (!set || !target || target->kind != TY_PTR ||
+        target->base->kind != TY_FUNC)
         return 0;
     int n = 0;
     for (int i = 0; i < set->n; i++)
@@ -596,8 +597,8 @@ static bool is_function_pointer(Type *ty) {
 // How many functions placeholder `ph` names that `target` selects: a function
 // of the set whose type is the target's, else the one template instance the
 // target deduces (in `*tc`; nothing is instantiated).
-static int address_matches(VirtualMachine *vm, Node *ph, Type *target,
-                           Obj **fn, TemplateCall **tc) {
+static int address_matches(VirtualMachine *vm, Node *ph, Type *target, Obj **fn,
+                           TemplateCall **tc) {
     *tc       = NULL;
     int count = count_matches(node_misc(ph)->overload_set, target, fn);
     if (count || !is_function_pointer(target))
@@ -613,8 +614,7 @@ static Rank conversion_rank(VirtualMachine *vm, Node *arg, Type *from,
                             Type *to) {
     if (from->kind == TY_ERROR || to->kind == TY_ERROR)
         return R_EXACT;
-    if (from->kind == TY_OVERLOAD)
-    {
+    if (from->kind == TY_OVERLOAD) {
         Obj          *fn;
         TemplateCall *tc;
         return address_matches(vm, arg, to, &fn, &tc) == 1 ? R_EXACT : R_NONE;
@@ -904,8 +904,8 @@ static char *candidate_list(VirtualMachine *vm, const char *name,
 
 // The set's functions, and the function template of the placeholder's name.
 static char *placeholder_candidates(VirtualMachine *vm, Node *ph) {
-    OverloadSet *set  = node_misc(ph)->overload_set;
-    int          n    = set ? set->n : 0;
+    OverloadSet  *set   = node_misc(ph)->overload_set;
+    int           n     = set ? set->n : 0;
     OverloadCand *cands = calloc((size_t)n + 1, sizeof *cands);
     for (int i = 0; i < n; i++)
         cands[i].fn = set->m[i].fn;
@@ -1028,9 +1028,9 @@ static void bare_template_error(VirtualMachine *vm, Token *tok) {
 // The function named by placeholder `ph` that function pointer type `target`
 // selects: a member of the set, else an instance of the template of its name.
 Node *cc_overload_take_address(VirtualMachine *vm, Node *ph, Type *target) {
-    OverloadSet  *set = node_misc(ph)->overload_set;
-    Obj          *fn  = NULL;
-    TemplateCall *tc  = NULL;
+    OverloadSet  *set   = node_misc(ph)->overload_set;
+    Obj          *fn    = NULL;
+    TemplateCall *tc    = NULL;
     int           count = address_matches(vm, ph, target, &fn, &tc);
     if (!set && !is_function_pointer(target))
         bare_template_error(vm, ph->tok);
