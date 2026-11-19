@@ -194,6 +194,7 @@ v * 2.5;           // vec_mul_dbl
 | `a != b`, `a < b` | An exact function for the operator, `==` or `<=>` is tried before any ranked one |
 | `a[i]` | An overloadable `[]` function takes the index types it names exactly, then ranked |
 | Plain function of the set | The unmarked function of a name keeps its plain name and cannot be a method of the same name |
+| In a block | A method or operator declared in a block belongs to its type and outlives the block, unlike a block's overload set ([methods.md](methods.md#declaring)) |
 | In a struct body | `@overloadable` on an in-struct method or operator ([methods.md](methods.md#defining-in-the-struct)) |
 
 A call with no match is `no matching function for call to 'f'`, and one with several best candidates is `call to 'f' is ambiguous`, as for a function. For an operator the candidates are named `operator*`; an operator with no matching function is still `invalid operands to *`.

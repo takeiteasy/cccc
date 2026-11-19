@@ -30,6 +30,8 @@ The optional second argument names the method, so two structs can each have a `l
 
 The attribute works on structs and unions you do not own. The function is declared before the call that uses it.
 
+A method belongs to its type, not to a scope: one declared inside a block can be called after the block ends. The same holds for an operator.
+
 The functions [derive attributes](derive.md#methods) generate are registered as methods of their struct.
 
 ## Defining in the struct
