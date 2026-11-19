@@ -4127,6 +4127,7 @@ typedef struct {
     bool        recv_ptr;
     bool        is_static; // called as T.name(...), has no receiver
     Obj        *fn;
+    int         next; // Next overload of the same name, index + 1; 0 ends it
 } MethodEntry;
 
 typedef struct MemberAlias {

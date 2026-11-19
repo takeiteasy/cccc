@@ -86,7 +86,7 @@ float n = Vec2.len(&a);     // Vec2_len(&a): any method, arguments passed as wri
 | `static` in the body | marks the method even when its first parameter is `T *`; `static inline` is still `static inline` |
 | `T.f` | calls the function bound to (`T`, `f`), static or not; the arguments are not changed |
 | `v.f()` / `p->f()` | an error for a static method |
-| Names | one namespace per type, so a static and an instance method cannot share a name |
+| Names | one namespace per type, so a static and an instance method cannot share a name, even among [overloads](attributes-overloadable.md#methods-and-operators) |
 | Defaults and keys | `T.f(.b = 2)` works as for a direct call |
 
 ## Receiver
@@ -104,13 +104,32 @@ An rvalue receiver (`make().len()`) passed to a `T *` parameter is copied into a
 
 A member named `f` wins: `s.f(x)` is a method call only when `T` has no member `f`. Methods are keyed by (`T`, name), and the receiver type must match exactly.
 
+## Overloads
+
+Several [`overloadable`](attributes-overloadable.md#methods-and-operators) functions can share a method name; the arguments after the receiver pick one.
+
+```c
+[[cccc::method(Vec2, scale)]]
+__attribute__((overloadable))
+Vec2 vec2_scale(Vec2 *self, float k);
+
+[[cccc::method(Vec2, scale)]]
+__attribute__((overloadable))
+Vec2 vec2_scale(Vec2 *self, Vec2 other);
+
+v.scale(2.0f);    // the float one
+v.scale(w);       // the Vec2 one
+```
+
 ## Errors
 
 | Case | Diagnostic |
 |---|---|
 | `T` is not a struct or union | `method receiver type must be a struct or union` |
 | First parameter is not `T`, `T *` or `const T *` | `method 'f' must take the receiver type as its first parameter` |
-| Two functions for the same (`T`, name) | `method 'f' is already defined for this type` |
+| Two functions for the same (`T`, name), unless all are overloadable with different parameters | `method 'f' is already defined for this type` |
+| Overloads that mix static and instance | `method 'f' cannot be both static and an instance method` |
+| No overload fits, or several fit equally | `no matching function for call to 'f'`, `call to 'f' is ambiguous` |
 | No member or method `f` | `no such member 'f'` |
 | Method used without a call (`auto g = s.f;`) | `'f' is a method; call it as a method or name the function directly` |
 | In-struct function with no parameters | `method 'f' must take the receiver type as its first parameter` (a `static` one is allowed) |

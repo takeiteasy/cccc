@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `overloadable` functions can be `[[cccc::method]]`, `[[cccc::static_method]]` and `[[cccc::operator]]` functions, in a file or in a struct body. Several of them can share a method name or an operator, and the call (`v.f(x)`, `T.f(...)`, `a * 2`, `a[i]`) picks one by ranking its arguments or operands; an exact match comes first. See [attributes-overloadable.md](docs/attributes-overloadable.md#methods-and-operators).
 - Added: an `overloadable` function can have `@default` parameters, and a call of an overload set can use keyed arguments (`f(.w = 3)`). An omitted default is not ranked, and a key that names no parameter of a function rules that function out; the candidate lists in the errors show parameter names and defaults. See [attributes-overloadable.md](docs/attributes-overloadable.md).
 - Fixed: the comptime program keeps its own overload sets, so a comptime handler that runs while the runtime program is parsed (every `@default` parameter) no longer discards the overloadable functions declared so far.
 - Added: a function name that stands for several `overloadable` functions converts to the one whose type the target names, as in Clang: `int (*p)(int) = f;`, `&f`, `(int (*)(double))f`, an assignment, a `return`, a function-pointer argument, including one to another overloaded function. Any other use is an error. See [attributes-overloadable.md](docs/attributes-overloadable.md).

@@ -381,6 +381,11 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
                      Node *recv);
 static Node *funcall_parsed(VirtualMachine *vm, Token **rest, Token *close,
                             Node *fn, Node *args, KeyedArg *keyed);
+static Node *method_funcall_parsed(VirtualMachine *vm, Token **rest,
+                                   Token *close, Node *fn, Node *recv,
+                                   Node *args, KeyedArg *keyed);
+static Token *parse_call_args(VirtualMachine *vm, Token *lparen, Node **args,
+                              KeyedArg **keyed);
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok);
 static bool is_keyed_arg(Token *tok);
 static Node *check_call_arg(VirtualMachine *vm, CheckedCallWatch *watch,
@@ -407,6 +412,48 @@ void mark_function_referenced(VirtualMachine *vm, Obj *fn) {
         arena_strarray_push(vm, &obj_fn_mut(vm, vm->compiler.current_fn)->refs, fn->name);
     else
         fn->is_root = true;
+}
+
+// The overload of the method `head` heads that the arguments select; an
+// instance method's receiver, when `skip_recv`, is not one of them.
+static MethodEntry *pick_method(VirtualMachine *vm, Token *name,
+                                MethodEntry *head, bool skip_recv, Node *args,
+                                KeyedArg *keyed) {
+    Compiler *c = &vm->compiler;
+    int       n = 0;
+    for (MethodEntry *e = head;; e = &c->methods[e->next - 1]) {
+        n++;
+        if (!e->next)
+            break;
+    }
+    OverloadCand *cands = calloc((size_t)n, sizeof *cands);
+    int           k     = n;
+    for (MethodEntry *e = head;; e = &c->methods[e->next - 1]) {
+        Type *params = e->fn->ty->params;
+        cands[--k] = (OverloadCand){e->fn, skip_recv && !e->is_static && params
+                                               ? params->next
+                                               : params};
+        if (!e->next)
+            break;
+    }
+    int npos = 0;
+    for (Node *a = args; a; a = a->next)
+        npos++;
+    Node **array = calloc((size_t)npos + 1, sizeof *array);
+    int    i     = 0;
+    for (Node *a = args; a; a = a->next)
+        array[i++] = a;
+    Obj *fn =
+        cc_overload_pick(vm, name, arena_strndup(vm, name->loc, name->len),
+                         cands, n, array, npos, keyed, true);
+    free(array);
+    free(cands);
+    for (MethodEntry *e = head;; e = &c->methods[e->next - 1]) {
+        if (e->fn == fn)
+            return e;
+        if (!e->next)
+            return head;
+    }
 }
 
 // `base.name(...)` or `base->name(...)` where name is a method of base's type
@@ -444,6 +491,13 @@ static Node *method_call(VirtualMachine *vm, Token **rest, Node *base,
                   "function directly",
                   name->len, name->loc);
 
+    Node     *args  = NULL;
+    KeyedArg *keyed = NULL;
+    Token    *close = NULL;
+    if (m->next) {
+        close = parse_call_args(vm, name->next, &args, &keyed);
+        m     = pick_method(vm, name, m, true, args, keyed);
+    }
     Node *recv = base;
     if (arrow && !m->recv_ptr) {
         recv = new_unary(vm, ND_DEREF, base, tok);
@@ -452,8 +506,10 @@ static Node *method_call(VirtualMachine *vm, Token **rest, Node *base,
         recv = addr_of_operand(vm, base, tok);
     }
     mark_function_referenced(vm, m->fn);
-    return funcall(vm, rest, name->next->next, new_var_node(vm, m->fn, name),
-                   recv);
+    Node *fn = new_var_node(vm, m->fn, name);
+    if (close)
+        return method_funcall_parsed(vm, rest, close, fn, recv, args, keyed);
+    return funcall(vm, rest, name->next->next, fn, recv);
 }
 
 // `T.f(...)` at tok: a struct or union type, spelled as a typedef name, `struct
@@ -504,6 +560,15 @@ static Node *type_method_call(VirtualMachine *vm, Token **rest, Type *ty,
     if (!equal(name->next, "("))
         error_tok(vm, name, "'%.*s' is a method; call it as T.%.*s(...)",
                   name->len, name->loc, name->len, name->loc);
+    if (m->next) {
+        Node     *args  = NULL;
+        KeyedArg *keyed = NULL;
+        Token    *close = parse_call_args(vm, name->next, &args, &keyed);
+        m               = pick_method(vm, name, m, false, args, keyed);
+        mark_function_referenced(vm, m->fn);
+        return funcall_parsed(vm, rest, close, new_var_node(vm, m->fn, name),
+                              args, keyed);
+    }
     mark_function_referenced(vm, m->fn);
     return funcall(vm, rest, name->next->next, new_var_node(vm, m->fn, name),
                    NULL);
@@ -2020,22 +2085,23 @@ static Node *deduced_call(VirtualMachine *vm, Token **rest, Token *tok,
                           head.next, NULL);
 }
 
-// The call `name(args)` of an overload set: the member the arguments select.
-static Node *overloaded_call(VirtualMachine *vm, Token **rest, Token *lparen,
-                             OverloadSet *set, Token *site) {
+// The arguments of the call whose `(` is `lparen`, typed: the positional ones
+// in `*args` and the keyed ones in `*keyed`. Returns the closing `)`.
+static Token *parse_call_args(VirtualMachine *vm, Token *lparen, Node **args,
+                              KeyedArg **keyed) {
     Token     *p          = lparen->next;
     Node       head       = {};
     Node      *cur        = &head;
-    KeyedArg  *keyed      = NULL;
-    KeyedArg **keyed_tail = &keyed;
+    KeyedArg **keyed_tail = keyed;
+    *keyed                = NULL;
     while (!equal(p, ")")) {
-        if (cur != &head || keyed)
+        if (cur != &head || *keyed)
             p = skip(vm, p, ",");
         if (is_keyed_arg(p)) {
             KeyedArg *k =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(KeyedArg));
             k->key = p->next;
-            for (KeyedArg *prev = keyed; prev; prev = prev->next)
+            for (KeyedArg *prev = *keyed; prev; prev = prev->next)
                 if (token_is_name(k->key, prev->key))
                     error_tok(vm, k->key, "parameter '%.*s' is given twice",
                               k->key->len, k->key->loc);
@@ -2046,7 +2112,7 @@ static Node *overloaded_call(VirtualMachine *vm, Token **rest, Token *lparen,
             keyed_tail  = &k->next;
             continue;
         }
-        if (keyed)
+        if (*keyed)
             error_tok(vm, p, "positional argument after a keyed argument");
         Node *arg = assign(vm, &p, p);
         add_type(vm, arg);
@@ -2056,11 +2122,27 @@ static Node *overloaded_call(VirtualMachine *vm, Token **rest, Token *lparen,
                       "placeholder");
         cur = cur->next = arg;
     }
-    Obj *fn = cc_overload_resolve(vm, site, set, head.next, keyed);
+    *args = head.next;
+    return p;
+}
+
+// A method call whose arguments are parsed: `recv` is the first argument.
+static Node *method_funcall_parsed(VirtualMachine *vm, Token **rest,
+                                   Token *close, Node *fn, Node *recv,
+                                   Node *args, KeyedArg *keyed) {
+    return funcall_impl(vm, rest, close, fn, recv, args, keyed);
+}
+
+// The call `name(args)` of an overload set: the member the arguments select.
+static Node *overloaded_call(VirtualMachine *vm, Token **rest, Token *lparen,
+                             OverloadSet *set, Token *site) {
+    Node     *args  = NULL;
+    KeyedArg *keyed = NULL;
+    Token    *p     = parse_call_args(vm, lparen, &args, &keyed);
+    Obj      *fn    = cc_overload_resolve(vm, site, set, args, keyed);
     mark_function_referenced(vm, fn);
     fn->is_used = true;
-    return funcall_parsed(vm, rest, p, new_var_node(vm, fn, site), head.next,
-                          keyed);
+    return funcall_parsed(vm, rest, p, new_var_node(vm, fn, site), args, keyed);
 }
 
 // __builtin_kernel_launch(kernel, global, local, args...) (cccc_launch in

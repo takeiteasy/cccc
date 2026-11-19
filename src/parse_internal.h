@@ -601,6 +601,17 @@ Node *cc_overload_convert(VirtualMachine *vm, Node *expr, Type *target);
 void cc_overload_reject(VirtualMachine *vm, Node *expr);
 Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
                          Node *args, KeyedArg *keyed);
+
+// A function the arguments are ranked against, and the parameter types they
+// are matched to (for a bound operator, the operand types).
+typedef struct {
+    Obj  *fn;
+    Type *params;
+} OverloadCand;
+
+Obj *cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
+                      const OverloadCand *cands, int n, Node **args, int npos,
+                      KeyedArg *keyed, bool required);
 void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name);
 const char *overloadable_operator(Token *tok, Token **rest);
@@ -612,6 +623,8 @@ bool cc_instantiate_operator_template(VirtualMachine *vm, const char *sym,
                                       Token *tok);
 Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
                         Node *rhs, Token *tok);
+Node *try_bound_operator(VirtualMachine *vm, const char *sym, Node *lhs,
+                         Node *rhs, Token *tok, bool ranked);
 Node *overloaded_subscript(VirtualMachine *vm, Node *base, Node *idx,
                            Token *tok);
 bool arith_operand_ok(Type *ty, bool integer_only);

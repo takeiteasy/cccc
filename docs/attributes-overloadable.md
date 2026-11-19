@@ -109,6 +109,44 @@ int (*r)(double) = (int (*)(double))hop;
 
 Exactly one overload must have the pointed-to type. No conversion applies, so `int (*)(long)` matches neither `hop(int)` nor `hop(double)`, and an error lists the candidates. Naming a set anywhere else is an error: `1 ? hop : hop`, `p == hop`, `sizeof hop`, `_Generic(hop, ...)`, `typeof(hop)`, `(void *)hop` and a variadic argument. An `unavailable` overload cannot have its address taken.
 
+## Methods and operators
+
+Overloadable functions can share a method name or an operator. The call picks among them as it does for a function call.
+
+```c
+typedef struct { int x, y; } Vec;
+
+[[cccc::method(Vec, scale)]]
+__attribute__((overloadable))
+Vec vec_scale_int(Vec *self, int k);
+
+[[cccc::method(Vec, scale)]]
+__attribute__((overloadable))
+Vec vec_scale_dbl(Vec *self, double k);
+
+[[cccc::operator(*)]]
+__attribute__((overloadable))
+Vec vec_mul_dbl(Vec a, double k);
+
+v.scale(2);        // vec_scale_int
+Vec.scale(&v, 2.0);  // vec_scale_dbl
+v * 2.5;           // vec_mul_dbl
+```
+
+| Rule | Behavior |
+|---|---|
+| Who may share a method name | Overloadable functions only; two plain functions for one (`T`, name) are an error |
+| Static and instance | One name is all static or all instance: `method 'f' cannot be both static and an instance method` |
+| `s.f(args)` | The receiver is not ranked; the arguments after it are |
+| `T.f(args)` | Every parameter is ranked, the receiver of an instance method included |
+| Operators | An exact match on the operand types wins, then an operator template, then the overloadable functions are ranked on the operands |
+| `a != b`, `a < b` | An exact function for the operator, `==` or `<=>` is tried before any ranked one |
+| `a[i]` | An overloadable `[]` function takes the index types it names exactly, then ranked |
+| Plain function of the set | The unmarked function of a name keeps its plain name and cannot be a method of the same name |
+| In a struct body | `@overloadable` on an in-struct method or operator ([methods.md](methods.md#defining-in-the-struct)) |
+
+A call with no match is `no matching function for call to 'f'`, and one with several best candidates is `call to 'f' is ambiguous`, as for a function. For an operator the candidates are named `operator*`; an operator with no matching function is still `invalid operands to *`.
+
 ## Names in the output
 
 Each marked function is named by its Itanium C++ mangling, the one Clang uses, so `twice(double)` is `_Z5twiced`. `-m` and `-c=native` print and link that name, and a Clang-built object that defines the same overloads links against it. The unmarked function keeps its plain name. `__func__` and diagnostics give the name as written.
@@ -125,7 +163,6 @@ A parameter type that has no name to mangle (an anonymous struct) is an error; g
 |---|---|---|
 | `char` and `signed char` | One type in CCCC, so they cannot be overloads of each other | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
 | `__int128` and `_BitInt(128)` | One type in CCCC; a 128-bit parameter is an error | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
-| `@method`, `@static_method`, `[[cccc::operator]]` | Rejected on an overloadable function | [#2086](https://todo.sr.ht/~takeiteasy/cccc/2086) |
 | A function template with the set's name | Rejected | [#2087](https://todo.sr.ht/~takeiteasy/cccc/2087) |
 | Block-scope declarations | Rejected | [#2090](https://todo.sr.ht/~takeiteasy/cccc/2090) |
 | Ranking | A few rare calls rank differently from Clang | [#2091](https://todo.sr.ht/~takeiteasy/cccc/2091) |

@@ -445,13 +445,8 @@ static void mismatch(VirtualMachine *vm, Token *tok, const char *name,
 }
 
 // Features an overload set does not combine with yet.
-static void reject_unsupported_combination(VirtualMachine *vm, Type *ty,
-                                           Token *src, const char *name) {
-    if (type_attrs(ty)->method_of || type_attrs(ty)->operator_sym)
-        error_tok(vm, src,
-                  "overloadable function '%s' cannot be a method or an "
-                  "operator",
-                  name);
+static void reject_unsupported_combination(VirtualMachine *vm, Token *src,
+                                           const char *name) {
     if (cc_find_template(vm, src))
         error_tok(vm, src,
                   "overloadable function '%s' shares its name with a "
@@ -472,7 +467,7 @@ void cc_overload_declared(VirtualMachine *vm, Obj *fn, Type *ty, Token *src) {
 
     char *src_name = get_ident(vm, src);
     if (marked)
-        reject_unsupported_combination(vm, ty, src, src_name);
+        reject_unsupported_combination(vm, src, src_name);
     if (!set) {
         set = arena_alloc(&vm->compiler.parser_arena, sizeof *set);
         memset(set, 0, sizeof *set);
@@ -655,13 +650,6 @@ typedef struct {
     bool viable;
 } Candidate;
 
-static int arg_count(Node *args) {
-    int n = 0;
-    for (Node *a = args; a; a = a->next)
-        n++;
-    return n;
-}
-
 static Type *param_named(Type *params, Token *key) {
     for (Type *p = params; p; p = p->next)
         if (token_is_name(key, p->param_name))
@@ -671,24 +659,25 @@ static Type *param_named(Type *params, Token *key) {
 
 // Whether `fty` can take the arguments: the positional ones, then the keyed
 // ones by name, with every other parameter defaulted.
-static bool arguments_fit(Type *fty, int npos, KeyedArg *keyed) {
+static bool arguments_fit(Type *params, bool variadic, int npos,
+                          KeyedArg *keyed) {
     int np = 0;
-    for (Type *p = fty->params; p; p = p->next)
+    for (Type *p = params; p; p = p->next)
         np++;
-    if (npos > np && !fty->is_variadic)
+    if (npos > np && !variadic)
         return false;
     for (KeyedArg *k = keyed; k; k = k->next) {
-        Type *p = param_named(fty->params, k->key);
+        Type *p = param_named(params, k->key);
         if (!p)
             return false;
         int index = 0;
-        for (Type *q = fty->params; q != p; q = q->next)
+        for (Type *q = params; q != p; q = q->next)
             index++;
         if (index < npos)
             return false;
     }
     int index = 0;
-    for (Type *p = fty->params; p; p = p->next, index++) {
+    for (Type *p = params; p; p = p->next, index++) {
         if (index < npos)
             continue;
         bool keyed_here = false;
@@ -702,16 +691,16 @@ static bool arguments_fit(Type *fty, int npos, KeyedArg *keyed) {
 
 // Ranks are indexed by argument: the positional ones, then the keyed ones in
 // the order written. An omitted defaulted parameter has no rank.
-static bool rank_candidate(VirtualMachine *vm, Candidate *c, Node *args,
-                           int npos, KeyedArg *keyed, bool allow_incompatible) {
-    Type *fty = c->fn->ty;
+static bool rank_candidate(VirtualMachine *vm, Candidate *c, Type *params,
+                           Node **args, int npos, KeyedArg *keyed,
+                           bool allow_incompatible) {
     c->viable = false;
-    if (!arguments_fit(fty, npos, keyed))
+    if (!arguments_fit(params, c->fn->ty->is_variadic, npos, keyed))
         return false;
-    int   i = 0;
-    Type *p = fty->params;
-    for (Node *a = args; a; a = a->next, i++) {
-        Rank r;
+    Type *p = params;
+    for (int i = 0; i < npos; i++) {
+        Node *a = args[i];
+        Rank  r;
         if (i >= MAX_RANKED_ARGS)
             r = R_ELLIPSIS;
         else if (p) {
@@ -727,9 +716,10 @@ static bool rank_candidate(VirtualMachine *vm, Candidate *c, Node *args,
         if (p)
             p = p->next;
     }
+    int i = npos;
     for (KeyedArg *k = keyed; k; k = k->next, i++) {
         Rank r = conversion_rank(vm, k->value, k->value->ty,
-                                 param_named(fty->params, k->key));
+                                 param_named(params, k->key));
         if (r == R_PTR_INCOMPATIBLE && !allow_incompatible)
             return false;
         if (r == R_NONE)
@@ -874,44 +864,56 @@ static char *signature_text(VirtualMachine *vm, Obj *fn) {
     return s;
 }
 
-static char *candidate_list(VirtualMachine *vm, OverloadSet *set) {
+static char *candidate_list(VirtualMachine *vm, const OverloadCand *cands,
+                            int n) {
     Buf out = {0};
-    for (int i = 0; i < set->n; i++) {
+    for (int i = 0; i < n; i++) {
         buf_puts(&out, "\n    candidate: ");
-        buf_puts(&out, signature_text(vm, set->m[i].fn));
+        buf_puts(&out, signature_text(vm, cands[i].fn));
     }
     char *s = arena_strndup(vm, out.p ? out.p : "", out.len);
     free(out.p);
     return s;
 }
 
-// The member of `set` a call with `args` (typed) selects.
-Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
-                         Node *args, KeyedArg *keyed) {
-    int npos  = arg_count(args);
+static char *set_candidate_list(VirtualMachine *vm, OverloadSet *set) {
+    OverloadCand *cands = calloc((size_t)set->n, sizeof *cands);
+    for (int i = 0; i < set->n; i++)
+        cands[i].fn = set->m[i].fn;
+    char *s = candidate_list(vm, cands, set->n);
+    free(cands);
+    return s;
+}
+
+// The candidate a call with `npos` positional and the keyed arguments selects.
+// NULL when none fits and `required` is false; an ambiguous call is an error.
+Obj *cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
+                      const OverloadCand *cands, int n, Node **args, int npos,
+                      KeyedArg *keyed, bool required) {
     int nargs = npos;
     for (KeyedArg *k = keyed; k; k = k->next)
         nargs++;
-    Candidate *cands     = calloc((size_t)set->n, sizeof *cands);
+    Candidate *ranked    = calloc((size_t)n, sizeof *ranked);
     int        best      = -1;
     bool       ambiguous = false;
     int        viable    = 0;
 
     for (int pass = 0; pass < 2 && !viable; pass++) {
-        for (int i = 0; i < set->n; i++) {
-            cands[i].fn = set->m[i].fn;
-            if (rank_candidate(vm, &cands[i], args, npos, keyed, pass == 1))
+        for (int i = 0; i < n; i++) {
+            ranked[i].fn = cands[i].fn;
+            if (rank_candidate(vm, &ranked[i], cands[i].params, args, npos,
+                               keyed, pass == 1))
                 viable++;
         }
     }
 
-    for (int i = 0; i < set->n && viable; i++) {
-        if (!cands[i].viable)
+    for (int i = 0; i < n && viable; i++) {
+        if (!ranked[i].viable)
             continue;
         bool beats_all = true;
-        for (int j = 0; j < set->n; j++)
-            if (j != i && cands[j].viable &&
-                compare_candidates(&cands[i], &cands[j], nargs) <= 0)
+        for (int j = 0; j < n; j++)
+            if (j != i && ranked[j].viable &&
+                compare_candidates(&ranked[i], &ranked[j], nargs) <= 0)
                 beats_all = false;
         if (beats_all) {
             best = i;
@@ -920,16 +922,38 @@ Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
     }
     if (best < 0 && viable)
         ambiguous = true;
-    Obj *chosen = best >= 0 ? cands[best].fn : NULL;
-    free(cands);
+    Obj *chosen = best >= 0 ? ranked[best].fn : NULL;
+    free(ranked);
 
+    if (!viable && !required)
+        return NULL;
     if (!viable)
-        error_tok(vm, site, "no matching function for call to '%s'%s",
-                  set->name, candidate_list(vm, set));
+        error_tok(vm, site, "no matching function for call to '%s'%s", name,
+                  candidate_list(vm, cands, n));
     if (ambiguous)
-        error_tok(vm, site, "call to '%s' is ambiguous%s", set->name,
-                  candidate_list(vm, set));
+        error_tok(vm, site, "call to '%s' is ambiguous%s", name,
+                  candidate_list(vm, cands, n));
     return chosen;
+}
+
+// The member of `set` a call with `args` (typed) selects.
+Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
+                         Node *args, KeyedArg *keyed) {
+    int npos = 0;
+    for (Node *a = args; a; a = a->next)
+        npos++;
+    Node **array = calloc((size_t)npos + 1, sizeof *array);
+    int    i     = 0;
+    for (Node *a = args; a; a = a->next)
+        array[i++] = a;
+    OverloadCand *cands = calloc((size_t)set->n, sizeof *cands);
+    for (i = 0; i < set->n; i++)
+        cands[i] = (OverloadCand){set->m[i].fn, set->m[i].fn->ty->params};
+    Obj *fn = cc_overload_pick(vm, site, set->name, cands, set->n, array, npos,
+                               keyed, true);
+    free(cands);
+    free(array);
+    return fn;
 }
 
 // ---------------------------------------------------------------------------
@@ -945,11 +969,11 @@ Node *cc_overload_take_address(VirtualMachine *vm, Node *ph, Type *target) {
     if (count == 0)
         error_tok(vm, ph->tok,
                   "no overloaded function '%s' matches the target type%s",
-                  set->name, candidate_list(vm, set));
+                  set->name, set_candidate_list(vm, set));
     if (count > 1)
         error_tok(vm, ph->tok,
                   "address of overloaded function '%s' is ambiguous%s",
-                  set->name, candidate_list(vm, set));
+                  set->name, set_candidate_list(vm, set));
 
     mark_function_referenced(vm, fn);
     fn->is_used = true;
@@ -977,5 +1001,5 @@ void cc_overload_reject(VirtualMachine *vm, Node *expr) {
     error_tok(vm, expr->tok,
               "reference to overloaded function '%s' could not be resolved; "
               "did you mean to call it?%s",
-              set->name, candidate_list(vm, set));
+              set->name, set_candidate_list(vm, set));
 }

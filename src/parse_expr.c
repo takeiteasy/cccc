@@ -1083,20 +1083,22 @@ static Node *new_comparison(VirtualMachine *vm, const char *sym, NodeKind kind,
                             bool swap, Node *lhs, Node *rhs, Token *tok) {
     add_type(vm, lhs);
     add_type(vm, rhs);
-    Node *ov = try_overloaded_op(vm, sym, lhs, rhs, tok);
-    if (!ov && !strcmp(sym, "!=")) {
-        Node *eq = try_overloaded_op(vm, "==", lhs, rhs, tok);
-        if (eq)
-            ov = new_unary(vm, ND_NOT, eq, tok);
-    }
-    if (ov)
-        return ov;
-    if (sym[0] == '<' || sym[0] == '>') {
-        Node *cmp = try_overloaded_op(vm, "<=>", lhs, rhs, tok);
-        if (cmp) {
-            Node *zero = new_num(vm, 0, tok);
-            return swap ? new_binary(vm, kind, zero, cmp, tok)
-                        : new_binary(vm, kind, cmp, zero, tok);
+    for (int ranked = 0; ranked < 2; ranked++) {
+        Node *ov = try_bound_operator(vm, sym, lhs, rhs, tok, ranked);
+        if (!ov && !strcmp(sym, "!=")) {
+            Node *eq = try_bound_operator(vm, "==", lhs, rhs, tok, ranked);
+            if (eq)
+                ov = new_unary(vm, ND_NOT, eq, tok);
+        }
+        if (ov)
+            return ov;
+        if (sym[0] == '<' || sym[0] == '>') {
+            Node *cmp = try_bound_operator(vm, "<=>", lhs, rhs, tok, ranked);
+            if (cmp) {
+                Node *zero = new_num(vm, 0, tok);
+                return swap ? new_binary(vm, kind, zero, cmp, tok)
+                            : new_binary(vm, kind, cmp, zero, tok);
+            }
         }
     }
     if (is_aggregate(lhs->ty) || is_aggregate(rhs->ty))
@@ -1616,7 +1618,7 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
                                "parameters"
                              : "operator function '%s' must take two "
                                "parameters",
-                  fn->name);
+                  obj_display_name(fn));
 
     OperatorEntry e = {.sym = sym, .fn = fn};
     e.lhs           = operator_operand(vm, lp, &e.lhs_ptr);
@@ -1625,12 +1627,11 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
             error_tok(vm, tok,
                       "operator function '%s' needs a struct or union "
                       "operand",
-                      fn->name);
+                      obj_display_name(fn));
         if (sym[0] == '!' && !is_integer(ty->return_ty) &&
             !is_flonum(ty->return_ty) && ty->return_ty->kind != TY_PTR)
-            error_tok(vm, tok,
-                      "operator function '%s' must return a scalar",
-                      fn->name);
+            error_tok(vm, tok, "operator function '%s' must return a scalar",
+                      obj_display_name(fn));
     } else {
         e.rhs = operator_operand(vm, rp, &e.rhs_ptr);
     }
@@ -1639,17 +1640,17 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
         error_tok(vm, tok,
                   "subscript operator function '%s' needs a struct or union "
                   "first operand",
-                  fn->name);
+                  obj_display_name(fn));
     if (!unary && !is_aggregate(e.lhs) && !is_aggregate(e.rhs))
         error_tok(vm, tok,
                   "operator function '%s' needs a struct or union operand",
-                  fn->name);
+                  obj_display_name(fn));
     if (subscript &&
         (ty->return_ty->kind != TY_PTR || ty->return_ty->base->kind == TY_VOID))
         error_tok(vm, tok,
                   "subscript operator function '%s' must return a pointer to "
                   "an object",
-                  fn->name);
+                  obj_display_name(fn));
 
     bool shift      = !strcmp(sym, "<<") || !strcmp(sym, ">>");
     bool comparison = !unary && !shift &&
@@ -1659,7 +1660,7 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
         error_tok(vm, tok,
                   "comparison operator function '%s' must return an integer "
                   "or bool",
-                  fn->name);
+                  obj_display_name(fn));
 
     Type *bucket  = unary ? e.lhs : operator_bucket_type(e.lhs, e.rhs);
     int   sym_len = (int)strlen(e.sym);
@@ -1668,12 +1669,14 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
         OperatorEntry *o = &c->operators[i - 1];
         if (o->fn == fn)
             return;
+        bool overloads = ty->is_overloadable && o->fn->ty->is_overloadable;
         if (!o->rhs == unary && is_compatible(o->lhs, e.lhs) &&
-            (subscript || unary || is_compatible(o->rhs, e.rhs)))
+            (unary || (subscript && !overloads) ||
+             is_compatible(o->rhs, e.rhs)))
             error_tok(vm, tok,
                       "operator '%s' is already defined for these "
                       "operand types (by '%s')",
-                      e.sym, o->fn->name);
+                      e.sym, obj_display_name(o->fn));
     }
 
     if (c->noperators == c->operators_cap) {
@@ -1690,8 +1693,7 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
 }
 
 // Drops the operator and method entries registered after the first `nops` and
-// `nmeths`. An operator bucket head returns to the entry before it; a method
-// name has only one entry.
+// `nmeths`. A bucket or method head returns to the entry before it.
 void rewind_bindings(VirtualMachine *vm, int nops, int nmeths) {
     Compiler *c = &vm->compiler;
     while (c->noperators > nops) {
@@ -1701,7 +1703,8 @@ void rewind_bindings(VirtualMachine *vm, int nops, int nmeths) {
     }
     while (c->nmethods > nmeths) {
         MethodEntry *e = &c->methods[--c->nmethods];
-        binding_set_head(c, e->recv, 'm', e->name, (int)strlen(e->name), 0);
+        binding_set_head(c, e->recv, 'm', e->name, (int)strlen(e->name),
+                         e->next);
     }
 }
 
@@ -1713,7 +1716,7 @@ void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
     MethodEntry e = {.recv      = recv,
                      .name      = type_attrs(ty)->method_name
                                       ? type_attrs(ty)->method_name
-                                      : fn->name,
+                                      : obj_display_name(fn),
                      .is_static = type_attrs(ty)->method_static,
                      .fn        = fn};
     if (!e.is_static) {
@@ -1722,23 +1725,32 @@ void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
             error_tok(vm, tok,
                       "method '%s' must take the receiver type as its first "
                       "parameter",
-                      fn->name);
+                      obj_display_name(fn));
         Type *operand = operator_operand(vm, self, &e.recv_ptr);
         if (!is_compatible(operand, recv))
             error_tok(vm, tok,
                       "method '%s' must take the receiver type as its first "
                       "parameter",
-                      fn->name);
+                      obj_display_name(fn));
     }
 
     int name_len = (int)strlen(e.name);
-    int existing = binding_head(c, recv, 'm', e.name, name_len);
-    if (existing) {
-        if (c->methods[existing - 1].fn == fn)
+    int head     = binding_head(c, recv, 'm', e.name, name_len);
+    for (int i = head; i; i = c->methods[i - 1].next) {
+        MethodEntry *o = &c->methods[i - 1];
+        if (o->fn == fn)
             return;
-        error_tok(vm, tok, "method '%s' is already defined for this type",
-                  e.name);
+        if (!ty->is_overloadable || !o->fn->ty->is_overloadable ||
+            is_compatible(o->fn->ty, ty))
+            error_tok(vm, tok, "method '%s' is already defined for this type",
+                      e.name);
+        if (o->is_static != e.is_static)
+            error_tok(vm, tok,
+                      "method '%s' cannot be both static and an instance "
+                      "method",
+                      e.name);
     }
+    e.next = head;
 
     if (c->nmethods == c->methods_cap) {
         int          cap = c->methods_cap ? c->methods_cap * 2 : 8;
@@ -1782,10 +1794,63 @@ static Node *new_operator_call(VirtualMachine *vm, Obj *fn, Node **args,
     return seq;
 }
 
+// The overloadable operator functions bound to `sym` for this bucket whose
+// operand count is `n`, ranked against `ops`. The operands of a struct or union
+// type rank by value, whatever their qualifiers. NULL when none fits; an
+// ambiguous pick is an error.
+static OperatorEntry *pick_ranked_operator(VirtualMachine *vm, Token *tok,
+                                           Type *bucket, const char *sym,
+                                           Node **ops, int n) {
+    Compiler *c       = &vm->compiler;
+    int       sym_len = (int)strlen(sym);
+    int       head    = binding_head(c, bucket, 'o', sym, sym_len);
+    int       count   = 0;
+    for (int i = head; i; i = c->operators[i - 1].next) {
+        OperatorEntry *e  = &c->operators[i - 1];
+        count            += e->fn->ty->is_overloadable && (!e->rhs == (n == 1));
+    }
+    if (!count)
+        return NULL;
+
+    OverloadCand *cands = calloc((size_t)count, sizeof *cands);
+    int           k     = count;
+    for (int i = head; i; i = c->operators[i - 1].next) {
+        OperatorEntry *e = &c->operators[i - 1];
+        if (!e->fn->ty->is_overloadable || (!e->rhs != (n == 1)))
+            continue;
+        Type *l = copy_type(vm, e->lhs);
+        l->next = NULL;
+        if (e->rhs) {
+            l->next       = copy_type(vm, e->rhs);
+            l->next->next = NULL;
+        }
+        cands[--k] = (OverloadCand){e->fn, l};
+    }
+
+    Node  stubs[2];
+    Node *args[2];
+    for (int i = 0; i < n; i++) {
+        args[i] = ops[i];
+        if (is_aggregate(ops[i]->ty)) {
+            stubs[i]    = *ops[i];
+            stubs[i].ty = unqualified(vm, ops[i]->ty);
+            args[i]     = &stubs[i];
+        }
+    }
+    Obj *fn = cc_overload_pick(vm, tok, arena_format(vm, "operator%s", sym),
+                               cands, count, args, n, NULL, false);
+    free(cands);
+    for (int i = head; fn && i; i = c->operators[i - 1].next)
+        if (c->operators[i - 1].fn == fn)
+            return &c->operators[i - 1];
+    return NULL;
+}
+
 // A call to the function bound to sym for these operands, or NULL when neither
-// operand is a struct/union or none matches exactly.
-Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
-                        Node *rhs, Token *tok) {
+// operand is a struct/union or none matches. An exact match comes first, then
+// an operator template; `ranked` instead ranks the overloadable functions.
+Node *try_bound_operator(VirtualMachine *vm, const char *sym, Node *lhs,
+                         Node *rhs, Token *tok, bool ranked) {
     if (!vm->compiler.noperators && !vm->compiler.saw_operator_templates)
         return NULL;
     add_type(vm, lhs);
@@ -1794,28 +1859,43 @@ Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
         return NULL;
     Type *lt = unqualified(vm, lhs->ty);
     Type *rt = unqualified(vm, rhs->ty);
-    for (int pass = 0; pass < 2; pass++) {
+    OperatorEntry *e  = NULL;
+    if (ranked) {
+        Node *ops[2] = {lhs, rhs};
+        e = pick_ranked_operator(vm, tok, operator_bucket_type(lt, rt), sym,
+                                 ops, 2);
+    }
+    for (int pass = 0; !ranked && !e && pass < 2; pass++) {
         int head = binding_head(&vm->compiler, operator_bucket_type(lt, rt),
                                 'o', sym, (int)strlen(sym));
         for (int i = head; i; i = vm->compiler.operators[i - 1].next) {
-            OperatorEntry *e = &vm->compiler.operators[i - 1];
-            if (!e->rhs || !is_compatible(e->lhs, lt) ||
-                !is_compatible(e->rhs, rt))
-                continue;
-            Node *args[2] = {
-                e->lhs_ptr ? addr_of_operand(vm, lhs, tok) : lhs,
-                e->rhs_ptr ? addr_of_operand(vm, rhs, tok) : rhs,
-            };
-            mark_function_referenced(vm, e->fn);
-            return new_operator_call(
-                vm, e->fn, args,
-                node_has_side_effects(lhs) || node_has_side_effects(rhs), tok);
+            OperatorEntry *o = &vm->compiler.operators[i - 1];
+            if (o->rhs && is_compatible(o->lhs, lt) &&
+                is_compatible(o->rhs, rt)) {
+                e = o;
+                break;
+            }
         }
-        if (pass || !cc_instantiate_operator_template(vm, sym, lt, rt, false,
-                                                      tok))
+        if (e || pass ||
+            !cc_instantiate_operator_template(vm, sym, lt, rt, false, tok))
             break;
     }
-    return NULL;
+    if (!e)
+        return NULL;
+    Node *args[2] = {
+        e->lhs_ptr ? addr_of_operand(vm, lhs, tok) : lhs,
+        e->rhs_ptr ? addr_of_operand(vm, rhs, tok) : rhs,
+    };
+    mark_function_referenced(vm, e->fn);
+    return new_operator_call(
+        vm, e->fn, args,
+        node_has_side_effects(lhs) || node_has_side_effects(rhs), tok);
+}
+
+Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
+                        Node *rhs, Token *tok) {
+    Node *ov = try_bound_operator(vm, sym, lhs, rhs, tok, false);
+    return ov ? ov : try_bound_operator(vm, sym, lhs, rhs, tok, true);
 }
 
 // `sym operand` for a struct or union operand: a call to the one-parameter
@@ -1826,54 +1906,68 @@ Node *overloaded_unary(VirtualMachine *vm, const char *sym, Node *operand,
     if (!is_aggregate(operand->ty))
         return NULL;
     Type *ty = unqualified(vm, operand->ty);
-    for (int pass = 0; pass < 2; pass++) {
+    OperatorEntry *e  = NULL;
+    for (int pass = 0; !e && pass < 2; pass++) {
         int head =
             binding_head(&vm->compiler, ty, 'o', sym, (int)strlen(sym));
         for (int i = head; i; i = vm->compiler.operators[i - 1].next) {
-            OperatorEntry *e = &vm->compiler.operators[i - 1];
-            if (e->rhs || !is_compatible(e->lhs, ty))
-                continue;
-            Node *arg =
-                e->lhs_ptr ? addr_of_operand(vm, operand, tok) : operand;
-            mark_function_referenced(vm, e->fn);
-            return new_call(vm, new_var_node(vm, e->fn, tok), &arg, 1, tok);
+            OperatorEntry *o = &vm->compiler.operators[i - 1];
+            if (!o->rhs && is_compatible(o->lhs, ty)) {
+                e = o;
+                break;
+            }
         }
-        if (pass ||
+        if (e || pass ||
             !cc_instantiate_operator_template(vm, sym, ty, NULL, true, tok))
             break;
     }
-    error_tok(vm, tok, "invalid operand to unary %s", sym);
-    return NULL;
+    if (!e)
+        e = pick_ranked_operator(vm, tok, ty, sym, &operand, 1);
+    if (!e)
+        error_tok(vm, tok, "invalid operand to unary %s", sym);
+    Node *arg = e->lhs_ptr ? addr_of_operand(vm, operand, tok) : operand;
+    mark_function_referenced(vm, e->fn);
+    return new_call(vm, new_var_node(vm, e->fn, tok), &arg, 1, tok);
 }
 
 // `base[idx]` for a struct or union base: `*f(&base, idx)` through the `[]`
-// function, whose result is an lvalue. NULL when base is not an aggregate.
+// function, whose result is an lvalue. NULL when base is not an aggregate. An
+// overloadable `[]` function takes only the index type it names before ranking.
 Node *overloaded_subscript(VirtualMachine *vm, Node *base, Node *idx,
                            Token *tok) {
     add_type(vm, base);
     if (!is_aggregate(base->ty))
         return NULL;
+    add_type(vm, idx);
     Type *bt = unqualified(vm, base->ty);
-    for (int pass = 0; pass < 2; pass++) {
+    Type          *it = unqualified(vm, idx->ty);
+    OperatorEntry *e  = NULL;
+    for (int pass = 0; !e && pass < 2; pass++) {
         int head = binding_head(&vm->compiler, bt, 'o', "[]", 2);
         for (int i = head; i; i = vm->compiler.operators[i - 1].next) {
-            OperatorEntry *e = &vm->compiler.operators[i - 1];
-            if (!is_compatible(e->lhs, bt))
-                continue;
-            Node *args[2] = {e->lhs_ptr ? addr_of_operand(vm, base, tok) : base,
-                             idx};
-            mark_function_referenced(vm, e->fn);
-            Node *call = new_operator_call(
-                vm, e->fn, args,
-                node_has_side_effects(base) || node_has_side_effects(idx), tok);
-            return new_unary(vm, ND_DEREF, call, tok);
+            OperatorEntry *o = &vm->compiler.operators[i - 1];
+            if (is_compatible(o->lhs, bt) &&
+                (!o->fn->ty->is_overloadable || is_compatible(o->rhs, it))) {
+                e = o;
+                break;
+            }
         }
-        if (pass ||
+        if (e || pass ||
             !cc_instantiate_operator_template(vm, "[]", bt, NULL, false, tok))
             break;
     }
-    error_tok(vm, tok, "invalid operands to []");
-    return NULL;
+    if (!e) {
+        Node *ops[2] = {base, idx};
+        e            = pick_ranked_operator(vm, tok, bt, "[]", ops, 2);
+    }
+    if (!e)
+        error_tok(vm, tok, "invalid operands to []");
+    Node *args[2] = {e->lhs_ptr ? addr_of_operand(vm, base, tok) : base, idx};
+    mark_function_referenced(vm, e->fn);
+    Node *call = new_operator_call(
+        vm, e->fn, args,
+        node_has_side_effects(base) || node_has_side_effects(idx), tok);
+    return new_unary(vm, ND_DEREF, call, tok);
 }
 
 // C requires arithmetic operands to `* /` and unary `+ -`, and integer

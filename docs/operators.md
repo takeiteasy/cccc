@@ -84,7 +84,7 @@ int *p = &buf[3];
 
 - The first parameter is `T` or `T *`, and the function returns a pointer to an object (not `void *`).
 - The index converts like a function argument, so `buf[1]` and `buf[n]` work with a `size_t` parameter.
-- A type has one `[]` function. A second one is an error whatever its index type.
+- A type has one `[]` function. A second one is an error whatever its index type, unless both are [overloadable](attributes-overloadable.md#methods-and-operators): then each takes the index types it names, exactly first, then ranked.
 - In a struct body it is `int *operator[](Buf *b, size_t i)`, named `Buf_operator_index`.
 - A pointer or array of structs (`p[i]`) indexes as usual.
 
@@ -106,7 +106,7 @@ bool zero = !a;       // vec2_is_zero(&a)
 - `-` and `+` take one or two parameters; `~` and `!` take one; every other symbol takes two.
 - The parameter is `T` or `T *`, received as in [Rules](#rules). `!` returns an integer, float or pointer.
 - A struct or union operand with no matching function is an error (`invalid operand to unary -`).
-- `++a` and `--a` are `a = a + 1` and `a = a - 1`; `a++` and `a--` do the same and yield the old value. They need the `T + int` / `T - int` function exactly (the `1` is an `int`, so `T + long` is not found). `a` is evaluated once, and `a++` is an rvalue.
+- `++a` and `--a` are `a = a + 1` and `a = a - 1`; `a++` and `a--` do the same and yield the old value. They need the `T + int` / `T - int` function (the `1` is an `int`, so `T + long` is found only as an overload that ranks). `a` is evaluated once, and `a++` is an rvalue.
 - In a struct body a unary and a binary `-` coexist: `Vec2 operator-(Vec2 a)` and `Vec2 operator-(Vec2 a, Vec2 b)`.
 
 ## Rules
@@ -114,7 +114,7 @@ bool zero = !a;       // vec2_is_zero(&a)
 - A binary function takes two parameters, and at least one operand is a struct or union.
 - A parameter of type `T *` receives `&operand`; a `T` parameter receives the value.
 - An rvalue operand (`make() == b`, `(a + b) == b`) passed to a `T *` parameter is copied into a temporary first, so writes through the pointer are discarded.
-- Operand types match exactly. `Vec2 * int` and `int * Vec2` are two functions.
+- Operand types match exactly. `Vec2 * int` and `int * Vec2` are two functions. When none matches exactly, the [overloadable](attributes-overloadable.md#methods-and-operators) functions for the operator are ranked on the operands, so `v * 2` can call `(Vec2, double)`; an exact match anywhere, `<=>` included, comes before a ranked `<`.
 - A comparison returns an integer or `bool`. Shifts are not comparisons.
 - `a != b` calls the `!=` function when one exists, else `!(a == b)` through the `==` function.
 - `a < b`, `a <= b`, `a > b` and `a >= b` call their own function when one exists, else the `<=>` function and compare its result with 0. `==` and `!=` never use `<=>`.

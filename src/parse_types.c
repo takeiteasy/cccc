@@ -2398,6 +2398,15 @@ static Token *skip_attribute(Token *tok) {
 
 // Operator spellings `operator` cannot name, so `operator&&(` is diagnosed
 // rather than parsed as a member.
+// Whether the declaration specifiers from `start` up to the name carry
+// `overloadable`.
+static bool declared_overloadable(Token *start, Token *name) {
+    for (Token *t = start; t != name; t = t->next)
+        if (equal(t, "overloadable") || equal(t, "__overloadable__"))
+            return true;
+    return false;
+}
+
 static bool is_unoverloadable_operator(Token *tok) {
     static const char *const ops[] = {"&&", "||", "=",  "++", "--", "->",
                                       "+=", "-=", "*=", "/=", "%=", "&=",
@@ -2534,11 +2543,14 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
             bool method_static = false;
             for (Token *t = tok; !method_op && t != method_name; t = t->next)
                 method_static |= equal(t, "static");
+            bool method_overloadable = declared_overloadable(tok, method_name);
             if (method_op)
                 for (PendingMethod *q = vm->compiler.pending_methods; q;
                      q                = q->next)
                     if (q->owner == ty && q->operator_sym == method_op &&
-                        q->operator_unary == method_unary)
+                        q->operator_unary == method_unary &&
+                        !(method_overloadable &&
+                          declared_overloadable(q->start, q->name)))
                         error_tok(vm, method_name,
                                   "operator '%s' is already defined in this "
                                   "struct; use [[cccc::operator]] on a free "
