@@ -596,6 +596,10 @@ static inline HashMap *overload_sets(VirtualMachine *vm) {
     return vm->compiler.in_macro_mode ? &vm->compiler.ct_overload_sets
                                       : &vm->compiler.overload_sets;
 }
+static inline HashMap *file_overload_sets(VirtualMachine *vm) {
+    return vm->compiler.in_macro_mode ? &vm->compiler.ct_file_overload_sets
+                                      : &vm->compiler.file_overload_sets;
+}
 static inline bool *saw_overloads(VirtualMachine *vm) {
     return vm->compiler.in_macro_mode ? &vm->compiler.ct_saw_overloads
                                       : &vm->compiler.saw_overloads;
@@ -607,9 +611,11 @@ typedef struct {
 } OverloadName;
 char *cc_mangle_overload(VirtualMachine *vm, Token *site, const char *name,
                          int name_len, Type *fn);
-OverloadName cc_overload_decl_name(VirtualMachine *vm, Type *ty, Token *tok);
+OverloadName cc_overload_decl_name(VirtualMachine *vm, Type *ty, Token *tok,
+                                   bool defines_body);
 void cc_overload_declared(VirtualMachine *vm, Obj *fn, Type *ty, Token *src);
 OverloadSet *cc_overload_find(VirtualMachine *vm, Token *name_tok);
+bool cc_overload_hides_templates(OverloadSet *set);
 bool cc_overload_has(OverloadSet *set, Obj *fn);
 int cc_overload_count(OverloadSet *set);
 Obj *cc_overload_first(OverloadSet *set);

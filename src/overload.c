@@ -338,16 +338,48 @@ struct OverloadSet {
     char           *name;
     OverloadMember *m;
     int             n, cap;
+    bool            block; // declared in a block, so it hides a template
+    bool            ct;    // the comptime program's
 };
 
+// The registry entry of `name`: every declaration of it, in any scope.
 static OverloadSet *find_set(VirtualMachine *vm, const char *name, int len) {
     return hashmap_get2(overload_sets(vm), name, len);
 }
 
+// The set `sc` itself declares for `name`.
+static OverloadSet *scope_set(VirtualMachine *vm, Scope *sc, const char *name,
+                              int len) {
+    OverloadSet *set =
+        sc->next ? hashmap_get2(&sc->overloads, name, len)
+                 : hashmap_get2(file_overload_sets(vm), name, len);
+    return set && set->ct == vm->compiler.in_macro_mode ? set : NULL;
+}
+
+// The set `name_tok` denotes: that of the innermost scope declaring the name,
+// unless a variable or typedef of a scope inside it hides the set.
 OverloadSet *cc_overload_find(VirtualMachine *vm, Token *name_tok) {
     if (!*saw_overloads(vm))
         return NULL;
-    return find_set(vm, name_tok->loc, name_tok->len);
+    const char *name = name_tok->loc;
+    int         len  = name_tok->len;
+    for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
+        OverloadSet *set = scope_set(vm, sc, name, len);
+        if (set)
+            return set;
+        VarScope *vs = NULL;
+        if (sc == vm->compiler.tmpl_anchor && vm->compiler.tmpl_bindings)
+            vs = scope_find_var(vm->compiler.tmpl_bindings, (char *)name, len);
+        if (!vs)
+            vs = scope_find_var(sc, (char *)name, len);
+        if (vs)
+            return NULL;
+    }
+    return NULL;
+}
+
+bool cc_overload_hides_templates(OverloadSet *set) {
+    return set->block;
 }
 
 bool cc_overload_has(OverloadSet *set, Obj *fn) {
@@ -379,12 +411,16 @@ static void add_member(VirtualMachine *vm, OverloadSet *set, Obj *fn, char *sig,
     set->m[set->n++] = (OverloadMember){fn, sig, marked};
 }
 
-// The plain-named function `name` that is in scope, if any.
-static Obj *find_plain_function(VirtualMachine *vm, const char *name, int len) {
+// The plain-named function `name` that is in scope, if any; with `block_only`,
+// only one the current scope declares.
+static Obj *find_plain_function(VirtualMachine *vm, const char *name, int len,
+                                bool block_only) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         VarScope *vs = scope_find_var(sc, (char *)name, len);
         if (vs)
             return vs->var && vs->var->is_function ? vs->var : NULL;
+        if (block_only)
+            break;
     }
     return NULL;
 }
@@ -407,15 +443,17 @@ static void reject_second_unmarked(VirtualMachine *vm, Type *ty, Token *tok,
 
 // The name a declaration of `ty` goes by: the Itanium name for an overloadable
 // function, otherwise its own.
-OverloadName cc_overload_decl_name(VirtualMachine *vm, Type *ty, Token *tok) {
+OverloadName cc_overload_decl_name(VirtualMachine *vm, Type *ty, Token *tok,
+                                   bool defines_body) {
     OverloadName r = {get_ident(vm, tok), tok->len, tok};
     if (ty && ty->kind == TY_FUNC && !ty->is_overloadable)
         reject_second_unmarked(vm, ty, tok, r.name);
     if (!ty || ty->kind != TY_FUNC || !ty->is_overloadable)
         return r;
-    if (vm->compiler.current_fn)
+    if (defines_body && vm->compiler.current_fn)
         error_tok(vm, tok,
-                  "overloadable function '%s' must be declared at file scope",
+                  "overloadable function '%s' cannot be a nested function "
+                  "definition",
                   r.name);
     if (ty->is_unprototyped)
         error_tok(vm, tok, "overloadable function '%s' must have a prototype",
@@ -444,6 +482,40 @@ static void mismatch(VirtualMachine *vm, Token *tok, const char *name,
               name);
 }
 
+// Adds declaration `fn`, whose Itanium name is `sig`, to the set of `src`'s
+// name that the current scope declares.
+static void join_scope_set(VirtualMachine *vm, Obj *fn, char *sig, bool marked,
+                           Token *src) {
+    bool     in_block = vm->compiler.current_fn != NULL;
+    HashMap *map      = in_block ? &vm->compiler.scope->overloads
+                                 : file_overload_sets(vm);
+    OverloadSet *set  = hashmap_get2(map, src->loc, src->len);
+    if (!set) {
+        set = arena_alloc(&vm->compiler.parser_arena, sizeof *set);
+        memset(set, 0, sizeof *set);
+        set->name  = get_ident(vm, src);
+        set->block = in_block;
+        set->ct    = vm->compiler.in_macro_mode;
+        hashmap_put2(map, src->loc, src->len, set);
+        Obj *plain = find_plain_function(vm, src->loc, src->len, in_block);
+        if (plain && plain != fn)
+            add_member(vm, set, plain,
+                       mangle_function(vm, src, set->name, src->len, plain->ty,
+                                       true),
+                       false);
+    }
+    for (int i = 0; i < set->n; i++) {
+        OverloadMember *o = &set->m[i];
+        if (o->fn == fn)
+            return;
+        if (o->sig && sig && !strcmp(o->sig, sig)) {
+            o->fn = fn; // a redefinition that replaces its predecessor
+            return;
+        }
+    }
+    add_member(vm, set, fn, sig, marked);
+}
+
 // Records declaration `fn` of type `ty`, and checks the marking rules: every
 // function of a name carries the attribute but for at most one, and a
 // redeclaration agrees with what it redeclares.
@@ -462,21 +534,22 @@ void cc_overload_declared(VirtualMachine *vm, Obj *fn, Type *ty, Token *src) {
         set->name = src_name;
         hashmap_put2(overload_sets(vm), name, len, set);
         *saw_overloads(vm)         = true;
-        Obj *plain                 = find_plain_function(vm, name, len);
+        Obj *plain                 = find_plain_function(vm, name, len, false);
         if (plain && plain != fn)
             add_member(vm, set, plain,
                        mangle_function(vm, src, src_name, len, plain->ty, true),
                        false);
     }
+    char *sig = mangle_function(vm, src, src_name, len, fn->ty, !marked);
     if (cc_overload_has(set, fn)) {
         if (marked) {
             fn->display_name = src_name;
             fn->tok          = src;
         }
+        join_scope_set(vm, fn, sig, marked, src);
         return;
     }
 
-    char *sig = mangle_function(vm, src, src_name, len, fn->ty, !marked);
     for (int i = 0; i < set->n; i++) {
         OverloadMember *o = &set->m[i];
         if (o->sig && sig && !strcmp(o->sig, sig)) {
@@ -493,6 +566,7 @@ void cc_overload_declared(VirtualMachine *vm, Obj *fn, Type *ty, Token *src) {
     }
     add_member(vm, set, fn, sig, marked);
 named:
+    join_scope_set(vm, fn, sig, marked, src);
     if (marked) {
         fn->display_name = src_name;
         fn->tok          = src;
@@ -584,7 +658,8 @@ static int count_matches(OverloadSet *set, Type *target, Obj **found) {
 
 // The function template a placeholder's name also spells, if any.
 static Template *placeholder_template(VirtualMachine *vm, Node *ph) {
-    if (!vm->compiler.saw_templates)
+    OverloadSet *set = node_misc(ph)->overload_set;
+    if (!vm->compiler.saw_templates || (set && set->block))
         return NULL;
     Template *t = cc_find_template(vm, ph->tok);
     return t && t->kind == TMPL_FUNC ? t : NULL;

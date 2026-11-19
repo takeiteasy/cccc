@@ -3354,6 +3354,7 @@ struct Scope {
     TagScopeNode *tags; // Linked list (kept for relfection.c iteration)
     HashMap var_map;    // O(1) name lookup; NULL buckets = use linear fallback
     HashMap tag_map;
+    HashMap overloads; // source name -> the OverloadSet declared in this block
     struct Scope *owned_next; // Compiler.all_scopes chain; see new_scope()
 };
 
@@ -4295,11 +4296,17 @@ typedef struct Compiler {
     bool         skip_preprocess; // Skip preprocessing step
     bool         saw_templates;   // `@template`/`@inst` appeared in the input
     bool         saw_overloads;   // an `overloadable` function was declared
-    HashMap      overload_sets;   // source name -> OverloadSet *
-    // The comptime program's own (the two above are the runtime program's);
+    // Every declaration of an overloadable name, whatever its scope: source
+    // name -> OverloadSet *. Checks the marking rules.
+    HashMap overload_sets;
+    // What a name denotes at file scope; a block scope's own sets are in
+    // Scope.overloads.
+    HashMap file_overload_sets;
+    // The comptime program's own (the three above are the runtime program's);
     // the overload accessors pick one by in_macro_mode.
     bool    ct_saw_overloads;
     HashMap ct_overload_sets;
+    HashMap ct_file_overload_sets;
     bool         saw_operator_templates; // a function template carries [[cccc::operator]]
     bool         saw_variadic_aggregate; // a variadic struct was defined
     HashMap      member_pack_names;      // `Ts... name;` in a variadic struct

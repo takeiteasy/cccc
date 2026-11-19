@@ -29,13 +29,36 @@ Every declaration of the name carries the attribute, with one exception: at most
 | A declaration of a marked name is marked | `int f(int) __attribute__((overloadable)); float f(float);` is an error unless `f(float)` is the one unmarked function |
 | A redeclaration agrees with the declaration | `int g(int) __attribute__((overloadable)); int g(int) {}` is an error |
 | A marked function has a prototype | `int h() __attribute__((overloadable));` is an error before C23 |
-| A marked function is at file scope | A block-scope declaration is an error |
 | `(...)` alone is allowed | `void honeypot(...);` with `overloadable` and `unavailable` |
 
 ```c
 int f(int x) { return 1; }                                    // keeps the name `f`
 int __attribute__((overloadable)) f(double x) { return 2; }   // `_Z1fd`
 ```
+
+## Block scope
+
+A block can declare `overloadable` functions. Inside the block, the functions it declares for a name are the whole set, as in C++: they hide any outer set, plain function, variable or [function template](templates-deduction.md) of that name, and end with the block. Redeclaring a function of the file's set brings it into the block's set, and a function declared only in a block can be defined later at file scope.
+
+```c
+int __attribute__((overloadable)) f(int x)    { return 1; }
+int __attribute__((overloadable)) f(double x) { return 2; }
+
+int main(void) {
+    {
+        int __attribute__((overloadable)) f(int);
+        f(1.0);     // f(int): the block's set is just f(int)
+    }
+    return f(1.0);  // f(double): the file's set again
+}
+```
+
+| Rule | Example |
+|---|---|
+| A block's set has only what the block declares | A block with `f(int)` cannot call `f(double)` |
+| A block's function is not in the file's set | After `{ int f(long) __attribute__((overloadable)); }`, `f(1L)` is ambiguous |
+| The marking rules hold across scopes | `int f(int);` in a block is an error when `f` is marked, and so is an unmarked file-scope definition of a function a block declared marked |
+| A nested function definition is not overloadable | `int __attribute__((overloadable)) f(int x) { ... }` inside a function is an error |
 
 ## Choosing a function
 
@@ -191,6 +214,5 @@ A parameter type that has no name to mangle (an anonymous struct) is an error; g
 |---|---|---|
 | `char` and `signed char` | One type in CCCC, so they cannot be overloads of each other | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
 | `__int128` and `_BitInt(128)` | One type in CCCC; a 128-bit parameter is an error | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
-| Block-scope declarations | Rejected | [#2090](https://todo.sr.ht/~takeiteasy/cccc/2090) |
 | Ranking | A few rare calls rank differently from Clang | [#2091](https://todo.sr.ht/~takeiteasy/cccc/2091) |
 | `enable_if`, `diagnose_if`, `pass_object_size` | Not recognized | |

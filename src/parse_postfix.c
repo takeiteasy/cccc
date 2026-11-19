@@ -5153,9 +5153,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // A name that carries an overload set: a call picks a member.
         if (*saw_overloads(vm)) {
             OverloadSet *set = cc_overload_find(vm, tok);
-            if (set && (!sc || (sc->var && sc->var->is_function &&
-                                cc_overload_has(set, sc->var)))) {
-                Template *t = vm->compiler.saw_templates
+            if (set) {
+                Template *t = vm->compiler.saw_templates &&
+                                      !cc_overload_hides_templates(set)
                                   ? cc_find_template(vm, tok)
                                   : NULL;
                 if (t && t->kind != TMPL_FUNC)
@@ -5169,7 +5169,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                     *rest                               = tok->next;
                     return ph;
                 }
-                if (!sc) {
+                if (!(sc && sc->var && sc->var->is_function &&
+                      cc_overload_has(set, sc->var))) {
                     Obj *only = cc_overload_first(set);
                     mark_function_referenced(vm, only);
                     only->is_used = true;

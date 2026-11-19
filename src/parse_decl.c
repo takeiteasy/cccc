@@ -557,7 +557,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
     if (!dn.tok)
         error_tok(vm, dn.pos, "function name omitted");
 
-    OverloadName on       = cc_overload_decl_name(vm, ty, dn.tok);
+    OverloadName on       = cc_overload_decl_name(vm, ty, dn.tok, false);
     char        *name_str = on.name;
     check_sentinel_variadic(vm, ty, dn.tok);
     resolve_type_checked_bounds(vm, ty);
@@ -799,7 +799,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     ty          = apply_var_attrs_to_type(vm, ty, attr);
     if (!dn.tok)
         error_tok(vm, dn.pos, "function name omitted");
-    OverloadName on       = cc_overload_decl_name(vm, ty, dn.tok);
+    OverloadName on       = cc_overload_decl_name(vm, ty, dn.tok, !equal(tok, ";"));
     char        *name_str = on.name;
 
     // `void f(void) _Checked { ... }`
@@ -2864,6 +2864,8 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
            sizeof(vm->compiler.global_decl_map));
     hashmap_deinit(overload_sets(vm));
     memset(overload_sets(vm), 0, sizeof(HashMap));
+    hashmap_deinit(file_overload_sets(vm));
+    memset(file_overload_sets(vm), 0, sizeof(HashMap));
     *saw_overloads(vm) = false;
     // Each program has its own template registry: the comptime program is
     // parsed in the middle of the runtime parse and must not discard the

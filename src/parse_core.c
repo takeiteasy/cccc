@@ -326,6 +326,7 @@ static void warn_unused_scope(VirtualMachine *vm, Scope *sc) {
 void free_scope_maps(Scope *sc) {
     hashmap_deinit_borrowed(&sc->var_map);
     hashmap_deinit_borrowed(&sc->tag_map);
+    hashmap_deinit_borrowed(&sc->overloads);
 }
 
 void leave_scope(VirtualMachine *vm) {
