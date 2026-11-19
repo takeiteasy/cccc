@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: a function template can share its name with an `overloadable` set. A call ranks the template's deduced instance with the set's functions, as in C++: an exact parameter match wins, a function wins a tie, and a template whose arguments do not deduce is no candidate. An empty-pack function instance is named `f_` rather than `f`. See [attributes-overloadable.md](docs/attributes-overloadable.md#templates).
 - Added: `overloadable` functions can be `[[cccc::method]]`, `[[cccc::static_method]]` and `[[cccc::operator]]` functions, in a file or in a struct body. Several of them can share a method name or an operator, and the call (`v.f(x)`, `T.f(...)`, `a * 2`, `a[i]`) picks one by ranking its arguments or operands; an exact match comes first. See [attributes-overloadable.md](docs/attributes-overloadable.md#methods-and-operators).
 - Added: an `overloadable` function can have `@default` parameters, and a call of an overload set can use keyed arguments (`f(.w = 3)`). An omitted default is not ranked, and a key that names no parameter of a function rules that function out; the candidate lists in the errors show parameter names and defaults. See [attributes-overloadable.md](docs/attributes-overloadable.md).
 - Fixed: the comptime program keeps its own overload sets, so a comptime handler that runs while the runtime program is parsed (every `@default` parameter) no longer discards the overloadable functions declared so far.

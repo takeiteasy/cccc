@@ -119,6 +119,6 @@ A defaulted parameter that is skipped while a later one is deduced is an error: 
 | A keyed (`.b = 2`) argument or a splice placeholder | Positional arguments only; use `@inst` |
 | A shape that does not fit | `cannot deduce the arguments of 'f': argument 1 ('int') does not match its parameter` |
 
-Several functions cannot share one template name, so a bare call never picks between candidates.
+Two function templates cannot share a name. A template that shares its name with an [overload set](attributes-overloadable.md#templates) is ranked with the set's functions, so a call takes the best of them.
 
 An error inside the instance carries the usual `in instantiation of` note at the call.

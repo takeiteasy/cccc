@@ -233,6 +233,7 @@ An instance is `Name_Arg` for each argument, as for any template[^names].
 |---|---|
 | `@inst(int, char) Tuple` | `Tuple_int_char` |
 | `@inst Tuple` (empty pack) | `Tuple` |
+| `f()` of a function template with an empty pack | `f_` |
 | `@inst(int, 2, 3) Nd` | `Nd_int_2_3` |
 
 ## Limits

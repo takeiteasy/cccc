@@ -109,6 +109,33 @@ int (*r)(double) = (int (*)(double))hop;
 
 Exactly one overload must have the pointed-to type. No conversion applies, so `int (*)(long)` matches neither `hop(int)` nor `hop(double)`, and an error lists the candidates. Naming a set anywhere else is an error: `1 ? hop : hop`, `p == hop`, `sizeof hop`, `_Generic(hop, ...)`, `typeof(hop)`, `(void *)hop` and a variadic argument. An `unavailable` overload cannot have its address taken.
 
+## Templates
+
+A [function template](templates-deduction.md) can share its name with a set. A call ranks the set's functions together with the template's instance, as in C++.
+
+```c
+int __attribute__((overloadable)) f(int x)  { return 1; }
+int __attribute__((overloadable)) f(long x) { return 2; }
+
+@template(T)
+int f(T x) { return 10; }
+
+f(1);      // f(int): the template ties, and a function wins a tie
+f(2.0);    // f<double>: its parameter matches exactly
+```
+
+| Rule | Example |
+|---|---|
+| The arguments deduce the template's parameters, which then rank as exact matches | `f(2.0)` is `f<double>`, not `f(int)` with a conversion |
+| A function that ranks as well as the template wins | `f(1)` is `f(int)` |
+| A template whose arguments do not deduce is no candidate, and is not an error | `f(&x)` with `T *` and `f(int)` ranks only `f(int)` |
+| A parameter the template names without a template parameter takes conversions | `m(T a, int b)` against `m(double, double)` |
+| Keyed arguments never select the template | `f(.x = 2.0)` ranks the functions |
+| `f@(int)(x)` and `@inst(int) f(x)` name the instance | They skip the set |
+| A bare name is the set only | `int (*p)(double) = f;` picks among the functions, not `f<double>` |
+
+An error lists the template with the parameter types its arguments deduced: `candidate template: f(int *)`.
+
 ## Methods and operators
 
 Overloadable functions can share a method name or an operator. The call picks among them as it does for a function call.
@@ -163,7 +190,7 @@ A parameter type that has no name to mangle (an anonymous struct) is an error; g
 |---|---|---|
 | `char` and `signed char` | One type in CCCC, so they cannot be overloads of each other | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
 | `__int128` and `_BitInt(128)` | One type in CCCC; a 128-bit parameter is an error | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
-| A function template with the set's name | Rejected | [#2087](https://todo.sr.ht/~takeiteasy/cccc/2087) |
+| A bare name | Never picks a function template's instance, whatever the target type | [#2136](https://todo.sr.ht/~takeiteasy/cccc/2136) |
 | Block-scope declarations | Rejected | [#2090](https://todo.sr.ht/~takeiteasy/cccc/2090) |
 | Ranking | A few rare calls rank differently from Clang | [#2091](https://todo.sr.ht/~takeiteasy/cccc/2091) |
 | `enable_if`, `diagnose_if`, `pass_object_size` | Not recognized | |

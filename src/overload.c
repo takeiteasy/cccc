@@ -444,16 +444,6 @@ static void mismatch(VirtualMachine *vm, Token *tok, const char *name,
               name);
 }
 
-// Features an overload set does not combine with yet.
-static void reject_unsupported_combination(VirtualMachine *vm, Token *src,
-                                           const char *name) {
-    if (cc_find_template(vm, src))
-        error_tok(vm, src,
-                  "overloadable function '%s' shares its name with a "
-                  "template",
-                  name);
-}
-
 // Records declaration `fn` of type `ty`, and checks the marking rules: every
 // function of a name carries the attribute but for at most one, and a
 // redeclaration agrees with what it redeclares.
@@ -466,8 +456,6 @@ void cc_overload_declared(VirtualMachine *vm, Obj *fn, Type *ty, Token *src) {
         return;
 
     char *src_name = get_ident(vm, src);
-    if (marked)
-        reject_unsupported_combination(vm, src, src_name);
     if (!set) {
         set = arena_alloc(&vm->compiler.parser_arena, sizeof *set);
         memset(set, 0, sizeof *set);
@@ -645,9 +633,9 @@ static Rank conversion_rank(VirtualMachine *vm, Node *arg, Type *from,
 enum { MAX_RANKED_ARGS = 64 };
 
 typedef struct {
-    Obj *fn;
     Rank r[MAX_RANKED_ARGS];
     bool viable;
+    bool is_template;
 } Candidate;
 
 static Type *param_named(Type *params, Token *key) {
@@ -692,10 +680,10 @@ static bool arguments_fit(Type *params, bool variadic, int npos,
 // Ranks are indexed by argument: the positional ones, then the keyed ones in
 // the order written. An omitted defaulted parameter has no rank.
 static bool rank_candidate(VirtualMachine *vm, Candidate *c, Type *params,
-                           Node **args, int npos, KeyedArg *keyed,
-                           bool allow_incompatible) {
+                           bool variadic, Node **args, int npos,
+                           KeyedArg *keyed, bool allow_incompatible) {
     c->viable = false;
-    if (!arguments_fit(params, c->fn->ty->is_variadic, npos, keyed))
+    if (!arguments_fit(params, variadic, npos, keyed))
         return false;
     Type *p = params;
     for (int i = 0; i < npos; i++) {
@@ -836,11 +824,12 @@ static const char *default_text(VirtualMachine *vm, Type *param, int *len) {
     return first->loc;
 }
 
-static char *signature_text(VirtualMachine *vm, Obj *fn) {
+static char *signature_of(VirtualMachine *vm, const char *name, Type *params,
+                          bool variadic) {
     Buf out = {0};
-    buf_puts(&out, obj_display_name(fn));
+    buf_puts(&out, name);
     buf_puts(&out, "(");
-    for (Type *p = fn->ty->params; p; p = p->next) {
+    for (Type *p = params; p; p = p->next) {
         describe(&out, p);
         if (p->param_name) {
             if (out.p[out.len - 1] != '*')
@@ -853,10 +842,10 @@ static char *signature_text(VirtualMachine *vm, Obj *fn) {
             buf_puts(&out, " = ");
             buf_putn(&out, def, len);
         }
-        if (p->next || fn->ty->is_variadic)
+        if (p->next || variadic)
             buf_puts(&out, ", ");
     }
-    if (fn->ty->is_variadic)
+    if (variadic)
         buf_puts(&out, "...");
     buf_puts(&out, ")");
     char *s = arena_strndup(vm, out.p, out.len);
@@ -864,12 +853,19 @@ static char *signature_text(VirtualMachine *vm, Obj *fn) {
     return s;
 }
 
-static char *candidate_list(VirtualMachine *vm, const OverloadCand *cands,
-                            int n) {
+static char *signature_text(VirtualMachine *vm, Obj *fn) {
+    return signature_of(vm, obj_display_name(fn), fn->ty->params,
+                        fn->ty->is_variadic);
+}
+
+static char *candidate_list(VirtualMachine *vm, const char *name,
+                            const OverloadCand *cands, int n) {
     Buf out = {0};
     for (int i = 0; i < n; i++) {
-        buf_puts(&out, "\n    candidate: ");
-        buf_puts(&out, signature_text(vm, cands[i].fn));
+        const TemplateCall *t = cands[i].tmpl;
+        buf_puts(&out, t ? "\n    candidate template: " : "\n    candidate: ");
+        buf_puts(&out, t ? signature_of(vm, name, t->params, t->variadic)
+                         : signature_text(vm, cands[i].fn));
     }
     char *s = arena_strndup(vm, out.p ? out.p : "", out.len);
     free(out.p);
@@ -880,16 +876,33 @@ static char *set_candidate_list(VirtualMachine *vm, OverloadSet *set) {
     OverloadCand *cands = calloc((size_t)set->n, sizeof *cands);
     for (int i = 0; i < set->n; i++)
         cands[i].fn = set->m[i].fn;
-    char *s = candidate_list(vm, cands, set->n);
+    char *s = candidate_list(vm, set->name, cands, set->n);
     free(cands);
     return s;
 }
 
-// The candidate a call with `npos` positional and the keyed arguments selects.
-// NULL when none fits and `required` is false; an ambiguous call is an error.
-Obj *cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
-                      const OverloadCand *cands, int n, Node **args, int npos,
-                      KeyedArg *keyed, bool required) {
+// Whether two candidates rank every argument alike.
+static bool same_ranks(const Candidate *a, const Candidate *b, int nargs) {
+    for (int i = 0; i < nargs && i < MAX_RANKED_ARGS; i++)
+        if (a->r[i] != b->r[i])
+            return false;
+    return true;
+}
+
+// Whether `a` wins over `b`: it ranks better, or alike while `b` is a
+// function template and `a` is not.
+static bool wins_over(const Candidate *a, const Candidate *b, int nargs) {
+    int cmp = compare_candidates(a, b, nargs);
+    return cmp > 0 || (cmp == 0 && b->is_template && !a->is_template &&
+                       same_ranks(a, b, nargs));
+}
+
+// The index of the candidate a call with `npos` positional and the keyed
+// arguments selects. -1 when none fits and `required` is false; an ambiguous
+// call is an error.
+int cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
+                     const OverloadCand *cands, int n, Node **args, int npos,
+                     KeyedArg *keyed, bool required) {
     int nargs = npos;
     for (KeyedArg *k = keyed; k; k = k->next)
         nargs++;
@@ -900,8 +913,11 @@ Obj *cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
 
     for (int pass = 0; pass < 2 && !viable; pass++) {
         for (int i = 0; i < n; i++) {
-            ranked[i].fn = cands[i].fn;
-            if (rank_candidate(vm, &ranked[i], cands[i].params, args, npos,
+            const OverloadCand *c = &cands[i];
+            ranked[i].is_template = c->tmpl != NULL;
+            bool variadic =
+                c->tmpl ? c->tmpl->variadic : c->fn->ty->is_variadic;
+            if (rank_candidate(vm, &ranked[i], c->params, variadic, args, npos,
                                keyed, pass == 1))
                 viable++;
         }
@@ -913,7 +929,7 @@ Obj *cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
         bool beats_all = true;
         for (int j = 0; j < n; j++)
             if (j != i && ranked[j].viable &&
-                compare_candidates(&ranked[i], &ranked[j], nargs) <= 0)
+                !wins_over(&ranked[i], &ranked[j], nargs))
                 beats_all = false;
         if (beats_all) {
             best = i;
@@ -922,23 +938,23 @@ Obj *cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
     }
     if (best < 0 && viable)
         ambiguous = true;
-    Obj *chosen = best >= 0 ? ranked[best].fn : NULL;
     free(ranked);
 
     if (!viable && !required)
-        return NULL;
+        return -1;
     if (!viable)
         error_tok(vm, site, "no matching function for call to '%s'%s", name,
-                  candidate_list(vm, cands, n));
+                  candidate_list(vm, name, cands, n));
     if (ambiguous)
         error_tok(vm, site, "call to '%s' is ambiguous%s", name,
-                  candidate_list(vm, cands, n));
-    return chosen;
+                  candidate_list(vm, name, cands, n));
+    return best;
 }
 
-// The member of `set` a call with `args` (typed) selects.
+// The member of `set` a call with `args` (typed) selects, or NULL when
+// function template `tmpl`, if given, is the better candidate.
 Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
-                         Node *args, KeyedArg *keyed) {
+                         Node *args, KeyedArg *keyed, TemplateCall *tmpl) {
     int npos = 0;
     for (Node *a = args; a; a = a->next)
         npos++;
@@ -946,11 +962,16 @@ Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
     int    i     = 0;
     for (Node *a = args; a; a = a->next)
         array[i++] = a;
-    OverloadCand *cands = calloc((size_t)set->n, sizeof *cands);
+    int           n     = set->n + (tmpl != NULL);
+    OverloadCand *cands = calloc((size_t)n, sizeof *cands);
     for (i = 0; i < set->n; i++)
-        cands[i] = (OverloadCand){set->m[i].fn, set->m[i].fn->ty->params};
-    Obj *fn = cc_overload_pick(vm, site, set->name, cands, set->n, array, npos,
-                               keyed, true);
+        cands[i] = (OverloadCand){.fn     = set->m[i].fn,
+                                  .params = set->m[i].fn->ty->params};
+    if (tmpl)
+        cands[set->n] = (OverloadCand){.params = tmpl->params, .tmpl = tmpl};
+    int  best = cc_overload_pick(vm, site, set->name, cands, n, array, npos,
+                                 keyed, true);
+    Obj *fn   = best >= 0 ? cands[best].fn : NULL;
     free(cands);
     free(array);
     return fn;

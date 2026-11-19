@@ -443,9 +443,9 @@ static MethodEntry *pick_method(VirtualMachine *vm, Token *name,
     int    i     = 0;
     for (Node *a = args; a; a = a->next)
         array[i++] = a;
-    Obj *fn =
-        cc_overload_pick(vm, name, arena_strndup(vm, name->loc, name->len),
-                         cands, n, array, npos, keyed, true);
+    int at = cc_overload_pick(vm, name, arena_strndup(vm, name->loc, name->len),
+                              cands, n, array, npos, keyed, true);
+    Obj *fn = at < 0 ? NULL : cands[at].fn;
     free(array);
     free(cands);
     for (MethodEntry *e = head;; e = &c->methods[e->next - 1]) {
@@ -2133,13 +2133,20 @@ static Node *method_funcall_parsed(VirtualMachine *vm, Token **rest,
     return funcall_impl(vm, rest, close, fn, recv, args, keyed);
 }
 
-// The call `name(args)` of an overload set: the member the arguments select.
+// The call `name(args)` of an overload set: the member the arguments select,
+// or the instance of function template `tmpl` of the same name when that
+// ranks better.
 static Node *overloaded_call(VirtualMachine *vm, Token **rest, Token *lparen,
-                             OverloadSet *set, Token *site) {
+                             OverloadSet *set, Template *tmpl, Token *site) {
     Node     *args  = NULL;
     KeyedArg *keyed = NULL;
     Token    *p     = parse_call_args(vm, lparen, &args, &keyed);
-    Obj      *fn    = cc_overload_resolve(vm, site, set, args, keyed);
+    TemplateCall *call  = tmpl && !keyed
+                              ? cc_template_call_candidate(vm, tmpl, args, site)
+                              : NULL;
+    Obj          *fn    = cc_overload_resolve(vm, site, set, args, keyed, call);
+    if (!fn)
+        fn = cc_template_call_instantiate(vm, call, site)->fn;
     mark_function_referenced(vm, fn);
     fn->is_used = true;
     return funcall_parsed(vm, rest, p, new_var_node(vm, fn, site), args, keyed);
@@ -5148,8 +5155,14 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             OverloadSet *set = cc_overload_find(vm, tok);
             if (set && (!sc || (sc->var && sc->var->is_function &&
                                 cc_overload_has(set, sc->var)))) {
-                if (equal(tok->next, "("))
-                    return overloaded_call(vm, rest, tok->next, set, tok);
+                if (equal(tok->next, "(")) {
+                    Template *t = vm->compiler.saw_templates
+                                      ? cc_find_template(vm, tok)
+                                      : NULL;
+                    return overloaded_call(vm, rest, tok->next, set,
+                                           t && t->kind == TMPL_FUNC ? t : NULL,
+                                           tok);
+                }
                 if (cc_overload_count(set) > 1) {
                     Node *ph = new_node(vm, ND_OVERLOAD, tok);
                     node_misc_mut(vm, ph)->overload_set = set;
@@ -5164,15 +5177,6 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                     return new_var_node(vm, only, tok);
                 }
             }
-        }
-
-        // An empty pack's instance is named like its template, which a bare
-        // call must still reach.
-        if (sc && sc->var && sc->var->is_tmpl_inst &&
-            vm->compiler.saw_templates && equal(tok->next, "(")) {
-            Template *own = cc_find_template(vm, tok);
-            if (own && own->kind == TMPL_FUNC)
-                sc = NULL;
         }
 
         if (sc && sc->var)

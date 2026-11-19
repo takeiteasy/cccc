@@ -1837,8 +1837,9 @@ static OperatorEntry *pick_ranked_operator(VirtualMachine *vm, Token *tok,
             args[i]     = &stubs[i];
         }
     }
-    Obj *fn = cc_overload_pick(vm, tok, arena_format(vm, "operator%s", sym),
+    int  at = cc_overload_pick(vm, tok, arena_format(vm, "operator%s", sym),
                                cands, count, args, n, NULL, false);
+    Obj *fn = at < 0 ? NULL : cands[at].fn;
     free(cands);
     for (int i = head; fn && i; i = c->operators[i - 1].next)
         if (c->operators[i - 1].fn == fn)

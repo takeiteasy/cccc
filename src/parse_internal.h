@@ -462,6 +462,21 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
 TemplateInstance *cc_deduce_call(VirtualMachine *vm, Template *t,
                                  const TemplateArg *expl, int nexplicit,
                                  Node *args, Token *site);
+
+// A function template that a call deduces, ranked against the functions of an
+// overload set of its name. `params` are the types it would take.
+typedef struct {
+    Template    *tmpl;
+    TemplateArg *args;
+    int          given;
+    Type        *params;
+    bool         variadic;
+    TemplateArg  stack[TMPL_MAX_ARGS];
+} TemplateCall;
+TemplateCall *cc_template_call_candidate(VirtualMachine *vm, Template *t,
+                                         Node *args, Token *site);
+TemplateInstance *cc_template_call_instantiate(VirtualMachine *vm,
+                                               TemplateCall *c, Token *site);
 Template *cc_parse_partial_inst(VirtualMachine *vm, Token **rest, Token *tok,
                                 TemplateArg *out, int *n);
 void cc_parse_file_scope_chain(VirtualMachine *vm, Token *tok);
@@ -600,18 +615,22 @@ Node *cc_overload_take_address(VirtualMachine *vm, Node *ph, Type *target);
 Node *cc_overload_convert(VirtualMachine *vm, Node *expr, Type *target);
 void cc_overload_reject(VirtualMachine *vm, Node *expr);
 Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
-                         Node *args, KeyedArg *keyed);
+                         Node *args, KeyedArg *keyed, TemplateCall *tmpl);
 
 // A function the arguments are ranked against, and the parameter types they
-// are matched to (for a bound operator, the operand types).
+// are matched to (for a bound operator, the operand types). A function
+// template's deduced call is `tmpl`, with no `fn`.
 typedef struct {
-    Obj  *fn;
-    Type *params;
+    Obj          *fn;
+    Type         *params;
+    TemplateCall *tmpl;
 } OverloadCand;
 
-Obj *cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
-                      const OverloadCand *cands, int n, Node **args, int npos,
-                      KeyedArg *keyed, bool required);
+// The index of the candidate the arguments select, -1 when none fits and
+// `required` is false; an ambiguous call is an error.
+int cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
+                     const OverloadCand *cands, int n, Node **args, int npos,
+                     KeyedArg *keyed, bool required);
 void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name);
 const char *overloadable_operator(Token *tok, Token **rest);
