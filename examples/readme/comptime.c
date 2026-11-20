@@ -20,15 +20,15 @@ emit_vec2_int();
 int TABLE_SIZE = pow2(8);                  // 256, computed at compile time
 
 int main(void) {
-    Vec2@(int) a = { 3, 4 };
-    Vec2@(int) b = { square(2), 5 };       // square(2) -> (2) * (2)
+    Vec2<int> a = { 3, 4 };
+    Vec2<int> b = { square(2), 5 };                  // square(2) -> (2) * (2)
     printf("%d %d\n", TABLE_SIZE, vec2_dot(a, b));   // 256 32
     return 0;
 }
 
 // Discovered and run by `cccc --testing comptime.c`.
 @test void dot_product(void) {
-    Vec2@(int) a = { 3, 4 }, b = { square(2), 5 };
+    Vec2<int> a = { 3, 4 }, b = { square(2), 5 };
     AssertEq(vec2_dot(a, b), 32);
 }
 

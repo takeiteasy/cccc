@@ -2630,7 +2630,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
                 !is_typename_ex(vm, tok, false))
                 error_tok(vm, tok,
                           "'%.*s' is a template; instantiate it as "
-                          "'%.*s@(args)' or '@inst(args) %.*s'",
+                          "'%.*s<args>' or '@inst(args) %.*s'",
                           tok->len, tok->loc, tok->len, tok->loc, tok->len,
                           tok->loc);
         }

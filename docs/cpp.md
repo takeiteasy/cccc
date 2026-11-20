@@ -19,7 +19,7 @@ A template is a pattern that becomes a real type or function per argument list. 
 
 | | C++ | CCCC |
 |---|---|---|
-| Arguments | Deduced from a call (`max(1, 2)`) | Function templates: deduced from a call, `max(1, 2)`, or written, `max@(int)(1, 2)`[^spelling]; type templates: written, `Vec@(int)` |
+| Arguments | Deduced from a call (`max(1, 2)`) | Function templates: deduced from a call, `max(1, 2)`, or written, `max<int>(1, 2)`[^spelling]; type templates: written, `Vec<int>` |
 | Parameter kinds | Types, constants, templates (template template) | Types and constants: integers, `float`, `double`, function and object pointers |
 | Defaults | Yes | Yes, last, and may name earlier parameters |
 | Packs and folds | `Ts...`, `sizeof...`, fold expressions | Same, see [templates-variadic.md](templates-variadic.md) |
@@ -35,7 +35,7 @@ A template is a pattern that becomes a real type or function per argument list. 
 The body is kept as tokens. A template that is never used is never compiled, and an error in an instance is reported at the template body with the instantiation site:
 
 ```c
-@template(T) int f(void) { T x; return x.nope; }   // fine until f@(int)() is used
+@template(T) int f(void) { T x; return x.nope; }   // fine until f<int>() is used
 ```
 
 C++ checks non-dependent names at definition; CCCC checks everything at instantiation. In both, using an operator the argument lacks is a compile error, but CCCC has no way to select another candidate: there is no SFINAE, so a failed instance is an error, not a skipped overload.
@@ -96,7 +96,7 @@ An rvalue receiver (`make().len()`) passed to a `T *` parameter is copied into a
 
 ### Templates and members
 
-A method or operator written in a struct template's body belongs to every instance; the receiver is `struct Vec2 *`, as the template name stands for the instance. An operator written once as a function template is instantiated from its operands, so `a + b` over a `Vec2@(int)` makes `vadd_int`:
+A method or operator written in a struct template's body belongs to every instance; the receiver is `struct Vec2 *`, as the template name stands for the instance. An operator written once as a function template is instantiated from its operands, so `a + b` over a `Vec2<int>` makes `vadd_int`:
 
 ```c
 @template(T) struct Vec2 {
@@ -190,5 +190,5 @@ C++ ties ownership to the type through constructors, destructors and move semant
 
 No classes or inheritance, operator overloading beyond operand-type selection, function overloading except through `overloadable`, references (`T &`), namespaces, default function arguments in the C++ sense (`@default` on a parameter is the nearest, see [derive.md](derive.md)), lambdas (blocks and GNU nested functions are the nearest), `auto` return types, `std` containers, exceptions, RTTI and `virtual`.
 
-[^spelling]: The prefix `@inst(int) max`, the postfix `max@(int)` and the keyword `__inst(int) max` name the same instance; see [templates.md](templates.md#spellings).
+[^spelling]: The prefix `@inst(int) max`, the postfix `max<int>` (or `max@(int)`) and the keyword `__inst(int) max` name the same instance; see [templates.md](templates.md#spellings).
 

@@ -1095,7 +1095,7 @@ Obj *cc_overload_resolve(VirtualMachine *vm, Token *site, OverloadSet *set,
 // A lone function template's name where no target type deduces it.
 static void bare_template_error(VirtualMachine *vm, Token *tok) {
     error_tok(vm, tok,
-              "'%.*s' is a template; instantiate it as '%.*s@(args)' or "
+              "'%.*s' is a template; instantiate it as '%.*s<args>' or "
               "'@inst(args) %.*s'",
               tok->len, tok->loc, tok->len, tok->loc, tok->len, tok->loc);
 }

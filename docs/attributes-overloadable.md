@@ -154,7 +154,7 @@ f(2.0);    // f<double>: its parameter matches exactly
 | A template whose arguments do not deduce is no candidate, and is not an error | `f(&x)` with `T *` and `f(int)` ranks only `f(int)` |
 | A parameter the template names without a template parameter takes conversions | `m(T a, int b)` against `m(double, double)` |
 | Keyed arguments never select the template | `f(.x = 2.0)` ranks the functions |
-| `f@(int)(x)` and `@inst(int) f(x)` name the instance | They skip the set |
+| `f<int>(x)` and `@inst(int) f(x)` name the instance | They skip the set |
 | A bare name picks a function of the target's type, else deduces the template from it | `int (*p)(double) = f;` is `f<double>` when no function takes a `double`; `int (*p)(int) = f;` is `f(int)` |
 | A set with a template always needs a target type | `void *p = f;` is an error even when the set has one function |
 

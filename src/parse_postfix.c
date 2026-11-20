@@ -3043,6 +3043,7 @@ static Node *stmt_expr_body(VirtualMachine *vm, Node *blk) {
 }
 
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
+    cc_rewrite_angle_inst(vm, tok);
     Token *start = tok;
 
     if (tok->kind == TK_BACKTICK_STR)
@@ -5441,7 +5442,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         } else if (vm->compiler.saw_templates && cc_find_template(vm, tok)) {
             msg = arena_format(vm,
                                "'%.*s' is a template; instantiate it as "
-                               "'%.*s@(args)' or '@inst(args) %.*s'",
+                               "'%.*s<args>' or '@inst(args) %.*s'",
                                tok->len, tok->loc, tok->len, tok->loc, tok->len,
                                tok->loc);
         } else {

@@ -456,6 +456,8 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
                                        Token *site);
 TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
                                          Token *tok);
+bool cc_split_close_angle(VirtualMachine *vm, Token *tok);
+void cc_rewrite_angle_inst(VirtualMachine *vm, Token *tok);
 // The most parameters a function template can have when called without
 // `@inst`, and the most a partial specialization or operator can bind.
 #define TMPL_MAX_ARGS 16

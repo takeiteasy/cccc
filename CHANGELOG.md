@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `Name<T>` and `f<T>(...)` instantiate a template, as `Name@(T)` does: `Vec<Vec<int>> v;`, `max<int>(1, 2)`, `Box<int>.wrap(3)`, `@specialize(Pair<T, Vec<U>>)`, and a default such as `@template(T, U = Pair<T, int>)`. A `<` starts an argument list only after the name of a template defined earlier and not hidden by a variable; a closing `>>` closes two lists. A constant argument containing `>` goes in parentheses. The docs and README examples use `<>`; `@(` and `@inst` still work.
+
 ## [0.36.0] - 2026-11-20
 
 - Added: `-Woverride-init` (in `-Wall`) warns when an initializer element assigns a variable that has a member's name, such as `{.a = 1, b = 3}`. The code is valid C, since `b = 3` assigns the local `b` and initializes the next member with the result, but it is almost always a missing `.`. Parenthesize the assignment, `(b = 3)`, to keep it. See [warnings.md](docs/warnings.md).

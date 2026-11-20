@@ -7,7 +7,7 @@ A template whose last parameter ends in `...` takes any number of arguments ther
 @template(Ts...) int sum(Ts... xs) { return (xs + ... + 0); }
 
 @inst(int, char) Tuple t = {40, 2};
-int s = sum@(int, long)(40, 2);                        // sum_int_long
+int s = sum<int, long>(40, 2);                        // sum_int_long
 ```
 
 ## Declaring a pack
@@ -67,12 +67,12 @@ A pattern is the list item before `...`: everything since the last comma, semico
 
 A declared pack has the same length as the template's pack, and expands the same way in the body (`rest...`, `rest...[0]`, `sizeof...(rest)`).
 
-A call that names no `@inst` deduces the pack from its arguments, one type per argument: `sum(40, 2L)` is `sum@(int, long)`. `@inst(int) sum(40, 2L)` names the first element and deduces the rest. See [deduction](templates-deduction.md#parameter-packs).
+A call that names no `@inst` deduces the pack from its arguments, one type per argument: `sum(40, 2L)` is `sum<int, long>`. `@inst(int) sum(40, 2L)` names the first element and deduces the rest. See [deduction](templates-deduction.md#parameter-packs).
 
 ### Patterns
 
 ```c
-@template(Ts...) int doubled(Ts... xs) { return sum@(Ts...)(xs * 2 ...); }
+@template(Ts...) int doubled(Ts... xs) { return sum<Ts...>(xs * 2 ...); }
 @template(Ts...) int sizes(void)       { int a[] = {sizeof(Ts)...}; return a[0]; }
 @template(T, Ts...) struct Wrap        { @inst(T, Ts...) Tuple t; };   // forwarding
 ```
@@ -104,21 +104,21 @@ A pattern may hold expansions and folds of its own. Each `...` expands the packs
 ```c
 @template(Ts...) struct Tuple { Ts... v; };
 
-Tuple@(long, long) t = {4, 2};
+Tuple<long, long> t = {4, 2};
 int a = add(t.v...);            // add(t.v0, t.v1)
 int b = (t.v + ...);            // (t.v0 + t.v1)
 int n = sizeof...(t.v);         // 2
 int c = t.v...[1];              // t.v1
 ```
 
-`t` is any expression of the instance type (`o.inner`, `p->`, `(*p)`, `get()`), and it is repeated for each member, so `get().v...` calls `get` once per member. An instance holds the pack its selected specialization declares: `Tuple@(int, char)` with `@specialize(int, Ts...) struct Tuple { int first; }` has no `v`, and `t.v...` is an error: `the pattern before '...' contains no parameter pack`. A bare `t.v` is an error too: `member pack 'v' must be expanded with '...'`.
+`t` is any expression of the instance type (`o.inner`, `p->`, `(*p)`, `get()`), and it is repeated for each member, so `get().v...` calls `get` once per member. An instance holds the pack its selected specialization declares: `Tuple<int, char>` with `@specialize(int, Ts...) struct Tuple { int first; }` has no `v`, and `t.v...` is an error: `the pattern before '...' contains no parameter pack`. A bare `t.v` is an error too: `member pack 'v' must be expanded with '...'`.
 
 A pattern may name several instances (`a.v + b.v ...`) when their packs have the same length: `the packs in one pattern have different lengths (2 and 3)`.
 
 A function template's pattern may also hold its own pack: `xs + t.v ...` adds each element of `xs` to the matching member of `t`, in a call, an initializer list or a fold. The two packs must have the same length.
 
 ```c
-@template(Ts...) int weigh(Tuple@(Ts...) t, Ts... xs) {
+@template(Ts...) int weigh(Tuple<Ts...> t, Ts... xs) {
     return add2(xs + t.v ...);  // add2(xs0 + t.v0, xs1 + t.v1)
 }
 ```
@@ -126,17 +126,17 @@ A function template's pattern may also hold its own pack: `xs + t.v ...` adds ea
 A struct or union template body expands a member pack in a member declaration, such as an array length. A template pack may share the pattern:
 
 ```c
-Tuple@(char, int) bytes;
+Tuple<char, int> bytes;
 
 @template(Ts...) struct Sized {
-    char b[(sizeof(Ts) + sizeof(bytes.v) + ...)];  // Sized@(char, int): 10 bytes
+    char b[(sizeof(Ts) + sizeof(bytes.v) + ...)];  // Sized<char, int>: 10 bytes
 };
 ```
 
 A declaration at file scope expands a member pack too, in an array length, an initializer list or a `_Static_assert`:
 
 ```c
-Tuple@(char, int) bytes;
+Tuple<char, int> bytes;
 
 char flat[(sizeof(bytes.v) + ... + 0)];      // 5 bytes
 int  widths[] = {sizeof(bytes.v)...};        // {1, 4}
@@ -198,7 +198,7 @@ struct Ptrs { Ts... pointee; };  // narrower: every argument a pointer to pointe
 @specialize(Ts *...)
 struct Head { char kind[2]; };  // every argument a pointer, `T` included
 @template(T, Ts...)
-@specialize(T, Pair@(T, Ts)...)
+@specialize(T, Pair<T, Ts>...)
 struct Links { Ts... rest; }; // a leading variable may repeat
 ```
 
@@ -208,20 +208,20 @@ A pack variable may appear more than once. It then matches only when every use t
 @template(Ts...) struct Pack { Ts... v; };
 @template(Ts...) struct Same { char kind; };
 @template(Ts...)
-@specialize(Pack@(Ts...), Ts...)
+@specialize(Pack<Ts...>, Ts...)
 struct Same { char kind[2]; };
 
-Same@(Pack@(int, char), int, char) a;   // the partial: both uses are (int, char)
-Same@(Pack@(int, char), int, long) b;   // the primary: they differ
+Same<Pack<int, char>, int, char> a;   // the partial: both uses are (int, char)
+Same<Pack<int, char>, int, long> b;   // the primary: they differ
 ```
 
-The body sees the pack variable as a pack: `sizeof...(Ts)`, `Ts...[k]`, `Ts... name` and folds work on the arguments it took. A pattern may also name an instance of a variadic template: `@specialize(Pack@(T, Ts...))`.
+The body sees the pack variable as a pack: `sizeof...(Ts)`, `Ts...[k]`, `Ts... name` and folds work on the arguments it took. A pattern may also name an instance of a variadic template: `@specialize(Pack<T, Ts...>)`.
 
 | Rule | Detail |
 |---|---|
 | Length | Without a pack variable a pattern matches that many arguments, defaults filled in; with one, that many or more. `(T, Ts...)` matches one argument or more |
 | Selection | The most specialised matching partial wins: `(T, U)` over `(T, U, Ts...)` over `(T, Ts...)`, `(int, Ts...)` over `(T, Ts...)`, and `(Ts *...)` over `(Ts...)`. Partials where none is narrower than all the others are an error. An empty pack matches every element pattern, so the narrowest wins |
-| Pack variable | A pack parameter of the `@template`, of the same kind (types or constants) as the pack it takes, written `Ts...` or `<pattern of Ts>...` as the last item of a list; it may stand where the primary has parameters before the pack, required or defaulted, and then takes their arguments too (`(int, Ts...)` for `(T, U = T, Us...)`, `(Ts *...)` for `(T, Ts...)`); a constant pack variable stands only for parameters of its own kind. Used again (`Pack@(Ts...), Ts...`), it stands for one argument list: the same length, and each element the same type or value |
+| Pack variable | A pack parameter of the `@template`, of the same kind (types or constants) as the pack it takes, written `Ts...` or `<pattern of Ts>...` as the last item of a list; it may stand where the primary has parameters before the pack, required or defaulted, and then takes their arguments too (`(int, Ts...)` for `(T, U = T, Us...)`, `(Ts *...)` for `(T, Ts...)`); a constant pack variable stands only for parameters of its own kind. Used again (`Pack<Ts...>, Ts...`), it stands for one argument list: the same length, and each element the same type or value |
 | Element pattern | Type packs only. It names the pack variable, and any other variable in it must also be deduced by a leading item |
 | Errors | `a pack in a pattern is written alone as the last item, 'Ts...'`, `the pattern before '...' names no pack variable`, `cannot expand pack 'Ts' into template 'Pair', which is not variadic`, `a partial specialization must be more specific than the primary template`, `pack variable 'Ts' cannot stand for 'N', a constant parameter` |
 
@@ -242,4 +242,4 @@ An instance is `Name_Arg` for each argument, as for any template[^names].
 |---|---|
 | A pack parameter in the middle of the list, or two packs | Compile error |
 
-[^names]: Two argument lists can mangle to one name, for example `Tuple@(struct a, struct b)` and `Tuple@(struct a_struct_b)`. The instance clash check compares the argument count and each argument, so such a pair is an error (`cannot name the instance`), not a silent merge.
+[^names]: Two argument lists can mangle to one name, for example `Tuple<struct a, struct b>` and `Tuple<struct a_struct_b>`. The instance clash check compares the argument count and each argument, so such a pair is an error (`cannot name the instance`), not a silent merge.

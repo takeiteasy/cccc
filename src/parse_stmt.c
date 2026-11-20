@@ -32,6 +32,7 @@
 bool is_typename_ex(VirtualMachine *vm, Token *tok, bool allow_splice) {
     pthread_once(&typename_map_once, init_typename_map);
 
+    cc_rewrite_angle_inst(vm, tok);
     if (tok != vm->compiler.static_call_tok && static_call_ahead(vm, tok))
         return false;
 

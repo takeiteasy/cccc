@@ -37,15 +37,15 @@ emit_vec2_int();
 int TABLE_SIZE = pow2(8);                  // 256, computed at compile time
 
 int main(void) {
-    Vec2@(int) a = { 3, 4 };
-    Vec2@(int) b = { square(2), 5 };       // square(2) -> (2) * (2)
+    Vec2<int> a = { 3, 4 };
+    Vec2<int> b = { square(2), 5 };                  // square(2) -> (2) * (2)
     printf("%d %d\n", TABLE_SIZE, vec2_dot(a, b));   // 256 32
     return 0;
 }
 
 // Discovered and run by `cccc --testing comptime.c`.
 @test void dot_product(void) {
-    Vec2@(int) a = { 3, 4 }, b = { square(2), 5 };
+    Vec2<int> a = { 3, 4 }, b = { square(2), 5 };
     AssertEq(vec2_dot(a, b), 32);
 }
 
@@ -61,7 +61,7 @@ int main(void) {
 
 ### Templates, derived code and operators
 
-A `@template` is written once and instantiated per type (`Vec2@(int)`). Attributes on it generate functions for every instance, and `[[cccc::operator]]` and `[[cccc::method]]` bind operators and `s.f(x)` calls to functions:
+A `@template` is written once and instantiated per type (`Vec2<int>`). Attributes on it generate functions for every instance, and `[[cccc::operator]]` and `[[cccc::method]]` bind operators and `s.f(x)` calls to functions:
 
 ```c
 #include <stdio.h>
@@ -87,15 +87,15 @@ struct Vec2 {
 }
 
 int main(void) {
-    Vec2@(int) a = Vec2@(int).new(3, 4), b = Vec2@(int).new(1, 2);
-    Vec2@(int) c = a + b;                       // vec2_add_int(a, b)
+    Vec2<int> a = Vec2<int>.new(3, 4), b = Vec2<int>.new(1, 2);
+    Vec2<int> c = a + b;                        // vec2_add_int(a, b)
 
     char buf[64];
     c.to_json(buf, sizeof buf);                 // also callable as Vec2_int_to_json
     puts(buf);                                  // {"x":4,"y":6}
 
     printf("%d %d\n", a.dot(&b), a < c);        // 11 1
-    return c.equals(&(Vec2@(int)){4, 6}) ? 42 : 1;  // == and < come from @equals, @compare
+    return c.equals(&(Vec2<int>){4, 6}) ? 42 : 1;   // == and < come from @equals, @compare
 }
 ```
 

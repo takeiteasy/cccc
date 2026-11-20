@@ -245,6 +245,8 @@ static int scan_params(VirtualMachine *vm, Token *p, Token *close, Template *t,
         int    depth = 0;
         Token *e     = a;
         for (; e->kind != TK_EOF; e = e->next) {
+            if (eq)
+                cc_rewrite_angle_inst(vm, e);
             if (equal(e, "("))
                 depth++;
             else if (equal(e, ")") && depth-- == 0)
@@ -3726,6 +3728,98 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
     return instantiate_template(vm, t, args, n, site);
 }
 
+// Splits the leading `>` off `>>`, `>=` or `>>=` in place, so a nested list
+// closes one level at a time. True when `tok` is a lone `>` afterwards.
+bool cc_split_close_angle(VirtualMachine *vm, Token *tok) {
+    if (tok->kind != TK_PUNCT || tok->len < 1 || tok->loc[0] != '>')
+        return false;
+    if (tok->len > 1) {
+        Token *rest = copy_tok(vm, tok);
+        rest->loc   = tok->loc + 1;
+        rest->len   = tok->len - 1;
+        rest->col_no++;
+        rest->has_space = false;
+        rest->at_bol    = false;
+        rest->next      = tok->next;
+        tok->len        = 1;
+        tok->next       = rest;
+    }
+    return true;
+}
+
+// Rewrites `Name<A, B>` at `tok` to the `__cccc_inst ( Name , A , B )` form
+// that `Name@(A, B)` becomes, when `Name` is a template and `<` follows. Any
+// other `<` stays less-than.
+void cc_rewrite_angle_inst(VirtualMachine *vm, Token *tok) {
+    static char inst[] = "__cccc_inst", lp[] = "(", rp[] = ")", comma[] = ",";
+
+    if (!vm->compiler.saw_templates || tok->kind != TK_IDENT || !tok->next ||
+        !equal(tok->next, "<") || !cc_find_template(vm, tok) ||
+        find_var(vm, tok))
+        return;
+
+    Token *open = tok->next, *close = NULL;
+    int    paren = 0, angle = 1;
+    for (Token *p = open->next; p && p->kind != TK_EOF; p = p->next) {
+        if (tok_is_open(p)) {
+            paren++;
+        } else if (tok_is_close(p)) {
+            if (paren-- == 0)
+                break;
+        } else if (paren) {
+            continue;
+        } else if (equal(p, ";")) {
+            break;
+        } else if (p->kind == TK_IDENT && p->next && equal(p->next, "<") &&
+                   cc_find_template(vm, p) && !find_var(vm, p)) {
+            angle++;
+            p = p->next;
+        } else if (cc_split_close_angle(vm, p) && --angle == 0) {
+            close = p;
+            break;
+        }
+    }
+    if (!close)
+        error_tok(vm, tok,
+                  "expected '>' to close the template argument list for '%.*s'",
+                  tok->len, tok->loc);
+
+    Token *name       = copy_tok(vm, tok);
+    Token *paren_open = copy_tok(vm, open);
+    paren_open->loc   = lp;
+    paren_open->len   = 1;
+    tok->loc          = inst;
+    tok->len          = (int)sizeof(inst) - 1;
+    tok->next         = paren_open;
+    paren_open->next  = name;
+    name->next        = open;
+
+    close->loc        = rp;
+    close->len        = 1;
+    if (open->next == close) {
+        open->loc  = rp;
+        open->len  = 1;
+        open->next = close->next;
+    } else {
+        open->loc = comma;
+        open->len = 1;
+    }
+}
+
+// Rewrites every `Name<...>` in the comma-separated list at `tok`, up to its
+// closing `)`, so scans that split on commas see the parentheses.
+static void rewrite_angle_run(VirtualMachine *vm, Token *tok) {
+    for (int depth = 0; tok->kind != TK_EOF; tok = tok->next) {
+        if (tok_is_open(tok))
+            depth++;
+        else if (tok_is_close(tok)) {
+            if (depth-- == 0)
+                break;
+        } else
+            cc_rewrite_angle_inst(vm, tok);
+    }
+}
+
 // ---- deduction at a call --------------------------------------------------
 
 static Token *pattern_arg_end(Token *a);
@@ -4593,6 +4687,7 @@ static int pattern_tail(VirtualMachine *vm, Template *pt, Template *t, Token *a,
 // closing `)`, which it returns, into `pl`.
 static Token *parse_pattern_args(VirtualMachine *vm, Template *pt, Template *t,
                                  Token *a, Token *site, PatList *pl) {
+    rewrite_angle_run(vm, a);
     int cap = count_inst_args(a) + 1;
     if (cap < t->nparams)
         cap = t->nparams;

@@ -65,12 +65,12 @@ A bare template name converted to a function pointer deduces its arguments from 
 @template(T) T twice(T x) { return x + x; }
 @template(T) T zero(void) { return 0; }
 
-double (*p)(double) = twice;    // twice@(double)
-int (*z)(void) = zero;          // zero@(int): T comes from the return type
+double (*p)(double) = twice;    // twice<double>
+int (*z)(void) = zero;          // zero<int>: T comes from the return type
 int r = call_int(twice, 21);    // int call_int(int (*f)(int), int x): a target too
 ```
 
-The name converts in an initializer, an assignment, a cast, a `return` and a function argument. Anywhere else (`twice + 1`, `void *p = twice;`, a variadic argument) it is an error: `'twice' is a template; instantiate it as 'twice@(args)' or '@inst(args) twice'`. A pointee never gains a qualifier, so `int (*)(int *)` does not name `f(const T *)`. When the name also has `overloadable` functions, one of the target's type wins ([attributes-overloadable.md](attributes-overloadable.md#templates)).
+The name converts in an initializer, an assignment, a cast, a `return` and a function argument. Anywhere else (`twice + 1`, `void *p = twice;`, a variadic argument) it is an error: `'twice' is a template; instantiate it as 'twice<args>' or '@inst(args) twice'`. A pointee never gains a qualifier, so `int (*)(int *)` does not name `f(const T *)`. When the name also has `overloadable` functions, one of the target's type wins ([attributes-overloadable.md](attributes-overloadable.md#templates)).
 
 ## Parameter packs
 
@@ -81,8 +81,8 @@ A function pack, `Ts... xs`, takes one type per argument that the fixed paramete
 @template(T, Ts...) int lead(T a, Ts... rest) { return a * 100 + (rest + ... + 0); }
 @template(Ts...) int tail(Ts... xs, int last) { return last + (xs + ... + 0); }
 
-sum(40, 2L);        // sum@(int, long)
-sum();              // sum@(): an empty pack
+sum(40, 2L);        // sum<int, long>
+sum();              // sum<>: an empty pack
 lead(5, 1, 2);      // T is int, Ts is (int, int)
 tail(1, 2, 3);      // Ts is (int, int); 3 is `last`
 ```
@@ -101,8 +101,8 @@ The return type takes no part in deduction, so it may name the pack: `@template(
 Each argument is typed as for any other parameter (arrays decay, top-level qualifiers drop). `@inst` names the leading template arguments, the first pack elements included, and the call deduces the rest. A named element takes conversions, as a named parameter does.
 
 ```c
-sum(5, 2.0);                // sum@(int, double)
-@inst(double) sum(5, 2);    // sum@(double, int): 5 converts
+sum(5, 2.0);                // sum<int, double>
+@inst(double) sum(5, 2);    // sum<double, int>: 5 converts
 @inst(int) lead(5, 1, 2);   // T is int, Ts is (int, int)
 ```
 

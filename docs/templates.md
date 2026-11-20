@@ -7,8 +7,8 @@ Generic structs, unions, enums, typedefs and functions: write the definition onc
 @template(T) T max(T a, T b) { return a > b ? a : b; }
 
 int main(void) {
-    @inst(int) Vec v = {0};          // struct Vec_int
-    return @inst(int) max(40, 42);   // max_int
+    Vec<int> v = {0};                // struct Vec_int
+    return max<int>(40, 42);         // max_int
 }
 ```
 
@@ -138,23 +138,26 @@ int m = @inst(long) max(5, 3);
 
 ### Spellings
 
-Three spellings name the same instance. Use whichever reads best; they mix freely in one file.
+Four spellings name the same instance. Use whichever reads best; they mix freely in one file.
 
 | Spelling | Use |
 |---|---|
+| `Pair<int, float>` | Angle brackets: the name comes first, so nested arguments read left to right |
 | `@inst(int, float) Pair` | Prefix: mirrors the `@template(A, B)` definition |
-| `Pair@(int, float)` | Postfix: the name comes first, so nested arguments read left to right |
-| `@inst Pair` | All defaults: leaves out the parentheses; `Pair@()` is the postfix form |
+| `Pair@(int, float)` | Parenthesized postfix: never depends on what is declared, so it suits macro arguments and generated tokens |
+| `@inst Pair` | All defaults: leaves out the parentheses; `Pair<>` and `Pair@()` are the postfix forms |
 
 ```c
-Pair@(int, Vec@(char)) p;          // struct Pair_int_struct_Vec_char
-int m = max@(long)(5, 3);          // call: the arguments, then the call parentheses
+Pair<int, Vec<char>> p;            // struct Pair_int_struct_Vec_char
+int m = max<long>(5, 3);           // call: the arguments, then the call parentheses
 @inst Arr a;                       // every parameter defaulted
 ```
 
-Whitespace and line breaks between the tokens are ignored, so `Vec @(int)` and `Vec @ ( int )` are the same instance. `@inst(int)` always takes the name that follows its parentheses: `Vec @inst(int) v` reads `v` as the template name, and the error says to write `Vec@(int)` or `@inst(int) Vec`.
+A `<` starts an argument list only after the name of a template defined earlier in the file and not hidden by a variable of the same name; anything else is less-than (`int Vec = 1; Vec < 2`). A nested list closes one level at a time, so `Vec<Vec<int>>` needs no space. A constant argument that contains `>` goes in parentheses (`Arr<int, (N > 2)>`), and so does a call inside a macro argument, whose commas the preprocessor would split: `AssertEq((f<int, long>(1)), 1L)`.
 
-Writing both argument lists (`@inst(int) Vec@(int)`) or `@inst(int)` with no name after it is an error.
+Whitespace and line breaks between the tokens are ignored, so `Vec @(int)` and `Vec @ ( int )` are the same instance. `@inst(int)` always takes the name that follows its parentheses: `Vec @inst(int) v` reads `v` as the template name, and the error says to write `Vec<int>` or `@inst(int) Vec`.
+
+Writing both argument lists (`@inst(int) Vec<int>`) or `@inst(int)` with no name after it is an error.
 
 The first use of an argument list instantiates the template; later uses share that instance. A struct, union, enum or typedef template names a type, a function template names a function; using one as the other is an error.
 
@@ -177,7 +180,7 @@ __template(T) struct Box { T v; };
 __inst(int) Box b = {1};
 ```
 
-The attribute form takes `cccc::` or no namespace (`[[template(T)]]`, `[[cccc::template(T)]]`, `__attribute__((template(T)))`) and must be the only attribute in its list. The postfix `Name@(int)` has no other spelling.
+The attribute form takes `cccc::` or no namespace (`[[template(T)]]`, `[[cccc::template(T)]]`, `__attribute__((template(T)))`) and must be the only attribute in its list. The postfix spellings `Name<int>` and `Name@(int)` have no attribute or keyword form.
 
 ### Pre-defining and aliasing
 
@@ -250,10 +253,10 @@ A pattern may name an instance of a struct, union or enum template, and an array
 ```c
 @template(A, B) struct Pair { A a; B b; };
 @template(T, U)
-@specialize(Pair@(T, U))
+@specialize(Pair<T, U>)
 struct Vec { T first; U second; };  // any Pair
 @template(T)
-@specialize(Pair@(T, T))
+@specialize(Pair<T, T>)
 struct Vec { T both[2]; };  // a Pair of one type
 
 @template(T, int N)
@@ -263,17 +266,17 @@ struct Box { T items[N]; };  // any array length
 @specialize(T[N], N)
 struct Arr { T v[N]; };  // length and N agree
 
-Vec@(Pair@(int, float)) a;   // the first partial
-Vec@(Pair@(int, int)) b;     // the second: it is the more specialised
-Box@(int[3]) c;              // N is 3
+Vec<Pair<int, float>> a;   // the first partial
+Vec<Pair<int, int>> b;     // the second: it is the more specialised
+Box<int[3]> c;              // N is 3
 ```
 
 | Rule | Detail |
 |---|---|
-| Pattern | A type pattern may use pointers, qualifiers, arrays (`T[4]`, `T[N]`), function types, blocks and template instances (`Pair@(T, U)`) around a variable. A constant position is a value (`4`) or a bare variable (`N`); an array length is a value or a bare variable, not an expression (`T[N + 1]`) |
+| Pattern | A type pattern may use pointers, qualifiers, arrays (`T[4]`, `T[N]`), function types, blocks and template instances (`Pair<T, U>`) around a variable. A constant position is a value (`4`) or a bare variable (`N`); an array length is a value or a bare variable, not an expression (`T[N + 1]`) |
 | Selection | An exact `@specialize` wins; otherwise the most specialised matching partial; otherwise the template. Matching partials where none is narrower than all the others are an error |
 | Constants | A constant variable has an integer, `float`, `double` or pointer type and binds a parameter of that kind (`@template(double D) @specialize(D, D)`, `@template(int *P) @specialize(P, P)`). It matches a value it holds exactly: `float F` takes `0.5`, not `0.1`, so over `double D` it is the narrower partial (`char N` is narrower than `long N` the same way); an object pointer variable takes a pointer to a compatible type, or null. An array length is an integer. Another kind is an error: `'N' has integer type and cannot bind 'D', which has floating type` |
-| Variables | Every variable appears in the pattern; no defaults. A variable that appears twice stands for one type or one value (`T, T`, `N, N`, `T[N], N`), and a pack variable for one argument list (`Pack@(Ts...), Ts...`). A pattern leaves an argument out only when its default names no earlier parameter |
+| Variables | Every variable appears in the pattern; no defaults. A variable that appears twice stands for one type or one value (`T, T`, `N, N`, `T[N], N`), and a pack variable for one argument list (`Pack<Ts...>, Ts...`). A pattern leaves an argument out only when its default names no earlier parameter |
 | Packs | A pattern over a [variadic template](templates-variadic.md#partial-specialization) ends in a pack variable (`@specialize(T *, Ts...)`, `@specialize(Ts *...)`) |
 | Order | After the template, before the first `@inst` the pattern covers |
 | Name | The instance keeps its argument-list name (`Vec_char_ptr`), and its linkage follows the template |
@@ -327,7 +330,7 @@ Instantiation nests up to 64 levels deep.
 
 ## Preprocessed output
 
-`cccc -E` prints the source spellings `@template(T)`, `@specialize(A)` and `Name@(Args)`, each on one line, so the output compiles again: `@inst(int) max(40, 42)` prints as `max@(int)(40, 42)`.
+`cccc -E` prints the source spellings `@template(T)`, `@specialize(A)` and `Name@(Args)`, each on one line, so the output compiles again: `@inst(int) max(40, 42)` prints as `max@(int)(40, 42)`. A `Name<Args>` is left as written.
 
 ## Functions and linkage
 
