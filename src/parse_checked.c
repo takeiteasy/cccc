@@ -5670,6 +5670,88 @@ bool cc_checked_spec_start(VirtualMachine *vm, Token *tok) {
            (equal(next, "[") && equal(next->next, "["));
 }
 
+// The pointer kind of the Checked C spelling `_Ptr<`, `_Array_ptr<` or
+// `_Nt_array_ptr<` at `tok`, else CHECKED_NONE. The keywords are names only
+// when `<` follows.
+CheckedKind cc_checked_ptr_spelling(Token *tok) {
+    if (tok->kind != TK_IDENT || !tok->next || !equal(tok->next, "<"))
+        return CHECKED_NONE;
+    if (equal(tok, "_Ptr"))
+        return CHECKED_SINGLE;
+    if (equal(tok, "_Array_ptr"))
+        return CHECKED_ARRAY;
+    if (equal(tok, "_Nt_array_ptr"))
+        return CHECKED_NTARRAY;
+    return CHECKED_NONE;
+}
+
+// `_Ptr<T>` and its siblings: the checked pointer to `T`.
+Type *cc_checked_ptr_type(VirtualMachine *vm, Token **rest, Token *tok) {
+    CheckedKind kind = cc_checked_ptr_spelling(tok);
+    Token      *name = tok;
+    Type       *base = typename(vm, &tok, tok->next->next);
+    if (!cc_split_close_angle(vm, tok))
+        error_tok(vm, tok, "expected '>' to close '%.*s<'", (int)name->len,
+                  name->loc);
+    *rest            = tok->next;
+    Type *ty         = pointer_to(vm, base);
+    ty->checked_kind = kind;
+    return ty;
+}
+
+// A bounds declaration needs an array or nt-array pointer, and a single
+// pointer takes none.
+void cc_checked_bounds_consistency(VirtualMachine *vm, Token *tok, Type *ty) {
+    if (type_chk(ty)->form == CB_NONE)
+        return;
+    if (ty->checked_kind == CHECKED_NONE)
+        error_tok(vm, tok,
+                  "a bounds declaration (count/byte_count/bounds) "
+                  "requires the pointer to also be declared "
+                  "[[cccc::array]] or [[cccc::ntarray]]");
+    if (ty->checked_kind == CHECKED_SINGLE)
+        error_tok(vm, tok,
+                  "a [[cccc::single]] pointer cannot have a bounds "
+                  "declaration -- it always refers to exactly one "
+                  "object");
+}
+
+// Whether `tok` starts a Checked C bounds declaration: `: count(`,
+// `: byte_count(` or `: bounds(`.
+bool cc_checked_bounds_start(Token *tok) {
+    if (!equal(tok, ":") || tok->next->kind != TK_IDENT ||
+        !equal(tok->next->next, "("))
+        return false;
+    Token *name = tok->next;
+    return equal(name, "count") || equal(name, "byte_count") ||
+           equal(name, "bounds");
+}
+
+// The bounds declaration after a declarator: `p : count(n)`. It binds to the
+// declared pointer, or to a function's returned pointer (`f(int n) :
+// count(n)`). After anything else the `:` is left for the caller, so a
+// bit-field width is untouched.
+Type *cc_checked_bounds_decl(VirtualMachine *vm, Token **rest, Token *tok,
+                             Type *ty) {
+    *rest = tok;
+    if (!cc_checked_bounds_start(tok))
+        return ty;
+    Token *name = tok->next;
+    Type  *ptr  = ty->kind == TY_FUNC ? ty->return_ty : ty;
+    if (ptr->kind != TY_PTR)
+        return ty;
+
+    ptr   = copy_type(vm, ptr);
+    *rest = apply_checked_ptr_attr(vm, name, name->next, ptr,
+                                   arena_strndup(vm, name->loc, name->len));
+    cc_checked_bounds_consistency(vm, name, ptr);
+    if (ty->kind == TY_FUNC) {
+        ty->return_ty = ptr;
+        return ty;
+    }
+    return ptr;
+}
+
 // A region written before the declarators applies to a function definition
 // only.
 void cc_reject_checked_specifier(VirtualMachine *vm, Token *tok, Type *basety,

@@ -519,6 +519,9 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                 } else if (dk == DK_FLOAT16) {
                     ty  = ty_float16;
                     tok = tok->next;
+                } else if (dk == DK_NONE &&
+                           cc_checked_ptr_spelling(tok) != CHECKED_NONE) {
+                    ty = cc_checked_ptr_type(vm, &tok, tok);
                 } else if (dk == DK_NONE && vm->compiler.saw_templates &&
                            equal(tok, "__cccc_inst")) {
                     ty = cc_template_inst_type(vm, &tok, tok);
@@ -1103,23 +1106,11 @@ static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
         if (ptr_attr.cleanup_fn)
             *cleanup_fn = ptr_attr.cleanup_fn;
 
-        // A bounds form (count/byte_count/bounds) only makes sense paired
-        // with a checked kind (array/ntarray); checked here rather than in
-        // apply_checked_ptr_attr() itself so attribute order within the
-        // bracket list doesn't matter (`[[cccc::count(n), cccc::array]]` is
-        // as valid as the more natural `[[cccc::array, cccc::count(n)]]`).
-        if (type_chk(ty)->form != CB_NONE) {
-            if (ty->checked_kind == CHECKED_NONE)
-                error_tok(vm, tok,
-                          "a bounds declaration (count/byte_count/bounds) "
-                          "requires the pointer to also be declared "
-                          "[[cccc::array]] or [[cccc::ntarray]]");
-            if (ty->checked_kind == CHECKED_SINGLE)
-                error_tok(vm, tok,
-                          "a [[cccc::single]] pointer cannot have a bounds "
-                          "declaration -- it always refers to exactly one "
-                          "object");
-        }
+        // Checked here rather than in apply_checked_ptr_attr() itself so
+        // attribute order within the bracket list doesn't matter
+        // (`[[cccc::count(n), cccc::array]]` is as valid as the more natural
+        // `[[cccc::array, cccc::count(n)]]`).
+        cc_checked_bounds_consistency(vm, tok, ty);
 
         // #486: assume/dynamic bounds-cast consistency, checked here for the
         // same order-independence reason as the bounds-form check above.
@@ -1524,6 +1515,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
     }
 
     ty           = declarator_suffix(vm, &tok, *rest, ty);
+    ty           = cc_checked_bounds_decl(vm, &tok, tok, ty);
     ty           = with_cleanup(vm, ty, cleanup_fn);
 
     if (dn)
@@ -2464,6 +2456,11 @@ static bool member_is_method(VirtualMachine *vm, Token *tok, Token **name,
         }
         if (equal(t, "="))
             return false;
+        if (cc_checked_bounds_start(t)) {
+            t    = skip_balanced(t->next->next, "(", ")");
+            prev = NULL;
+            continue;
+        }
         if (is_attribute_start(t)) {
             t    = skip_attribute(t);
             prev = NULL;

@@ -341,6 +341,12 @@ CheckedScope cc_checked_scope_at(VirtualMachine *vm, Token *tok);
 // `_Checked`/`_Unchecked` spelled as an identifier, else CHECKED_SCOPE_UNSET.
 CheckedScope cc_checked_scope_keyword(Token *tok);
 bool cc_checked_spec_start(VirtualMachine *vm, Token *tok);
+CheckedKind cc_checked_ptr_spelling(Token *tok);
+Type *cc_checked_ptr_type(VirtualMachine *vm, Token **rest, Token *tok);
+bool cc_checked_bounds_start(Token *tok);
+Type *cc_checked_bounds_decl(VirtualMachine *vm, Token **rest, Token *tok,
+                             Type *ty);
+void cc_checked_bounds_consistency(VirtualMachine *vm, Token *tok, Type *ty);
 void cc_reject_checked_specifier(VirtualMachine *vm, Token *tok, Type *basety,
                                  VarAttr *attr);
 // For declspec() sites that never start a function definition (parameters,

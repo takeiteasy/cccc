@@ -14,6 +14,26 @@ int  * [[cccc::array, cccc::count(n)]]     a;  // _Array_ptr<int> : count(n)
 char * [[cccc::ntarray, cccc::count(n)]]   s;  // _Nt_array_ptr<char>
 ```
 
+### Checked C spelling
+
+`_Ptr<T>`, `_Array_ptr<T>` and `_Nt_array_ptr<T>` name the same types, and a bounds declaration after the declarator takes `count`, `byte_count` or `bounds`.
+
+```c
+_Ptr<int>             p;
+_Array_ptr<int>       a : count(n);
+_Nt_array_ptr<char>   s : count(n);
+_Array_ptr<_Ptr<int>> t : count(2);       // nested lists close with >>
+```
+
+| Position | Example |
+|---|---|
+| Variable, global or parameter | `_Array_ptr<int> a : count(n)` |
+| Struct member | `_Array_ptr<int> data : count(len);` (a bit-field `int x : 3` is unchanged) |
+| Function result | `_Array_ptr<int> head(_Array_ptr<int> a : count(n), int n) : count(n)` |
+| Several declarators | `IntArr a : count(2), b : count(3);` each keeps its own bound |
+
+The two spellings mix freely, and the rules below apply to both.
+
 | Attribute | Meaning |
 |---|---|
 | `single` | Exactly one object; arithmetic is a compile error; a dereference is checked against `[p, p + sizeof(T))`, which also checks for NULL |
