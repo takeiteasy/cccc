@@ -23,8 +23,8 @@ await() {
 
 # gone FILE...: every pid recorded in the files is dead.
 gone() {
-    for f in "$@"; do
-        kill -0 "$(cat "$f")" 2>/dev/null && return 1
+    for p in $(cat "$@"); do
+        kill -0 "$p" 2>/dev/null && return 1
     done
     return 0
 }
@@ -82,7 +82,7 @@ await '[ -s "$TMP/cc.pids" ] && [ "$(wc -l < "$TMP/cc.pids")" -ge 2 ]' || {
 PIDS="$driver $(cat cc.pids)"
 
 kill -TERM "$driver"
-await 'for p in $(cat "$TMP/cc.pids"); do kill -0 "$p" 2>/dev/null && exit 1; done; exit 0' ||
+await 'gone cc.pids' ||
     fail "a compile survived a signal to the driver"
 wait "$driver" 2>/dev/null
 
@@ -99,7 +99,7 @@ await '[ -s "$TMP/cc.pids" ]' || {
 PIDS="$driver $(cat cc.pids)"
 
 kill -TERM "$driver"
-await 'for p in $(cat "$TMP/cc.pids"); do kill -0 "$p" 2>/dev/null && exit 1; done; exit 0' ||
+await 'gone cc.pids' ||
     fail "the serial compile survived a signal to the driver"
 wait "$driver" 2>/dev/null
 exit 0
