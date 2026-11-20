@@ -2941,7 +2941,7 @@ int cccc_call_guest_callback_ex(VirtualMachine *vm, long long fn_value,
     cccc_msan_unpoison_callback_args(args, nargs);
 
     Pc entry = cc_byte_offset_to_pc(fn_value);
-    if (entry == CCCC_INVALID_PC || entry > vm->text_ptr)
+    if (entry == 0 || entry == CCCC_INVALID_PC || entry > vm->text_ptr)
         return -1;
 
     // The thread is ending: report a clean return so the caller (qsort,
@@ -3091,7 +3091,7 @@ static void cc_run_atexit_entries(VirtualMachine *vm) {
             continue;
         }
         Pc entry = cc_byte_offset_to_pc(fn_value);
-        if (entry == CCCC_INVALID_PC || entry > vm->text_ptr)
+        if (entry == 0 || entry == CCCC_INVALID_PC || entry > vm->text_ptr)
             continue;
         cc_run_at(vm, entry, 0, NULL);
     }

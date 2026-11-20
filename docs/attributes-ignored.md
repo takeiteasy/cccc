@@ -21,7 +21,7 @@ Ignored attributes include (but are not limited to):
 | `no_unique_address` | C23 | Parsed but ignored — VM optimisation deferred |
 | `visibility` | GNU | Recognized by `__has_attribute` (no ELF, so no-op) |
 | `section` | GNU | Recognized by `__has_attribute` (no object-file sections) |
-| `weak` | GNU | Recognized by `__has_attribute` (no linker) |
+| `weak` | GNU | Recognized by `__has_attribute` (no linker); an undefined weak function is an error, not a null address |
 | `weakref` | GNU | |
 | `alias` | GNU | Recognized by `__has_attribute` (no linker) |
 | `target` | GNU | Recognized by `__has_attribute` (no per-function ISA codegen) |

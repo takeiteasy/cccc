@@ -3282,6 +3282,10 @@ static inline int op_CALLI_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int       rs       = (int)(operands & 0xFF);
     long long ret_addr = (long long)vm->pc;
+    if (vm->regs[rs] == 0) {
+        printf("error: call through a null function pointer\n");
+        return -1;
+    }
     if (check_stack_overflow(vm, 1))
         return -1;
     *--vm->sp = ret_addr;
@@ -3418,6 +3422,10 @@ static inline int op_CALLN_fn(VirtualMachine *vm) {
     }
 
     long long ret_addr = (long long)vm->pc;
+    if (target_value == 0) {
+        printf("error: call through a null function pointer\n");
+        return -1;
+    }
     if (check_stack_overflow(vm, 1))
         return -1;
     *--vm->sp = ret_addr;
@@ -3467,6 +3475,10 @@ static inline int op_JMPI_fn(VirtualMachine *vm) {
         return -1;
     }
 
+    if (target_value == 0) {
+        printf("error: indirect jump to a null address\n");
+        return -1;
+    }
     Pc target = cc_byte_offset_to_pc(target_value);
     if (target == CCCC_INVALID_PC || target > vm->text_ptr) {
         printf("error: invalid indirect jump target: %lld\n", target_value);

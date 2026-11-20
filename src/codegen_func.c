@@ -631,9 +631,9 @@ void gen(VirtualMachine *vm, Obj *prog) {
             } else if (stub) {
                 cc_write_i64_at(vm, loc, cc_pc_to_byte_offset(stub));
             }
-            // else: under -c/--compile, deferred to the host C
-            // compiler/linker, same as the call-patch pass above; otherwise
-            // the parser already rejects address-of-undeclared.
+            else if (!vm->compiler.compile_only)
+                error("undefined function: %s", obj_external_name(target));
+            // else: -c/--compile defers to the host linker, as above.
         }
     }
 
@@ -1328,8 +1328,8 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
                     cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
                 else if (stub)
                     cc_write_i64_at(vm, loc, cc_pc_to_byte_offset(stub));
-                // else: REPL disallows -c/deferred-link, so there is no
-                // cross-module reloc path to fall back to here.
+                else
+                    error("undefined function: %s", obj_external_name(target));
             }
         }
 
