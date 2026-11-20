@@ -3857,6 +3857,13 @@ static int busy_spin_wait_checked(volatile int *flag, long long max_spins) {
     return checksum == expected;
 }
 
+// The spin above is bounded by iterations, which takes milliseconds once
+// compiled natively; give a slow host notification thread up to 5s.
+static void await_notified(volatile int *flag) {
+    for (int i = 0; i < 5000 && !*flag; i++)
+        usleep(1000);
+}
+
 // aio_write_retry (#929, widened #961 follow-up) -- macOS caps outstanding
 // aio requests both per-process (kern.aioprocmax, 16 on a stock host) and
 // system-wide (kern.aiomax, 90), and -- critically -- a request keeps its
@@ -3997,6 +4004,7 @@ int test_aio_sigev_thread(void) {
     close(fd);
     unlink(tmpl);
 
+    await_notified(&g_aio_sigev_notified);
     if (!g_aio_sigev_notified)
         return 3;
     if (g_aio_sigev_val != 4242)
@@ -4388,6 +4396,7 @@ int test_aio_fsync_sigev_thread(void) {
     close(fd);
     unlink(tmpl);
 
+    await_notified(&g_aio_fsync_sigev_notified);
     if (!g_aio_fsync_sigev_notified)
         return 7;
     if (g_aio_fsync_sigev_val != 5353)
@@ -4736,6 +4745,7 @@ int test_mqueue_sigev_thread(void) {
     mq_close(q);
     mq_unlink(name);
 
+    await_notified(&g_mq_sigev_notified);
     if (!g_mq_sigev_notified)
         return 5;
     if (g_mq_sigev_val != 4343)
