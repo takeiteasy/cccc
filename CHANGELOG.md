@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-20
+
 - Added: `-Woverride-init` (in `-Wall`) warns when an initializer element assigns a variable that has a member's name, such as `{.a = 1, b = 3}`. The code is valid C, since `b = 3` assigns the local `b` and initializes the next member with the result, but it is almost always a missing `.`. Parenthesize the assignment, `(b = 3)`, to keep it. See [warnings.md](docs/warnings.md).
 - Fixed: taking the address of a function that is declared but never defined reports `undefined function: NAME`, as a direct call does; it used to leave a null pointer whose call printed a stack overflow. Calling a null function pointer reports `call through a null function pointer`. See [native-differences.md](docs/native-differences.md).
 - Added: a block can declare `overloadable` functions, as in Clang. The functions a block declares for a name are the set there and hide the file's set, a plain function, a variable and a function template of that name until the block ends; a function declared in a block and defined later at file scope joins the file's set. An `overloadable` nested function definition is an error. See [attributes-overloadable.md](docs/attributes-overloadable.md#block-scope).
