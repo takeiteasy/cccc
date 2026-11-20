@@ -18,6 +18,7 @@
 };
 @template(T) struct Box {
     T v;
+    // TODO: the bare name `Box` fails here, see #2142
     static struct Box wrap(T v) {
         return (struct Box){v};
     }
