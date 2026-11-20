@@ -685,6 +685,18 @@ static void warn_override_init_member(VirtualMachine *vm, Token *tok,
              (int)mem->name->len, mem->name->loc);
 }
 
+// A positional `{ .a = 1, b = 3 }` is valid C (it assigns the variable `b`
+// and uses the result), but when `b` names a member it is almost certainly a
+// missing `.`. Parenthesizing the assignment silences it.
+static void warn_member_assign(VirtualMachine *vm, Token *tok, Type *ty) {
+    if (tok->kind == TK_IDENT && equal(tok->next, "=") &&
+        get_struct_member(ty, tok))
+        warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
+                 "assignment to '%.*s' in an initializer; did you mean the "
+                 "designator '.%.*s ='?",
+                 tok->len, tok->loc, tok->len, tok->loc);
+}
+
 static void array_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
                                Initializer *init, int i);
 static void initializer2(VirtualMachine *vm, Token **rest, Token *tok,
@@ -992,6 +1004,7 @@ static void struct_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
                 warn_tok(vm, tok, CCCC_WARN_DESIGNATED_INIT,
                          "positional initialization of field in struct "
                          "declared with 'designated_init' attribute");
+            warn_member_assign(vm, tok, init->ty);
             initializer2(vm, &tok, tok, init->children[mem->idx]);
             mem = mem->next;
         } else {
@@ -1027,6 +1040,7 @@ static void struct_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
             warn_tok(vm, tok, CCCC_WARN_DESIGNATED_INIT,
                      "positional initialization of field in struct "
                      "declared with 'designated_init' attribute");
+        warn_member_assign(vm, tok, init->ty);
         initializer2(vm, &tok, tok, init->children[mem->idx]);
     }
     *rest = tok;
@@ -1080,10 +1094,12 @@ static void union_initializer(VirtualMachine *vm, Token **rest, Token *tok,
     }
 
     if (equal(tok, "{")) {
+        warn_member_assign(vm, tok->next, init->ty);
         initializer2(vm, &tok, tok->next, init->children[0]);
         consume(vm, &tok, tok, ",");
         *rest = skip(vm, tok, "}");
     } else {
+        warn_member_assign(vm, tok, init->ty);
         initializer2(vm, rest, tok, init->children[0]);
     }
 }

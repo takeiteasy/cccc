@@ -132,7 +132,7 @@ Group: **A** is in `-Wall`, **E** in `-Wextra`, **D** on by default, blank is st
 | `cast-align` | | A cast raises the pointer target's alignment |
 | `missing-prototypes` | | A non-static function is defined without a prior prototype |
 | `missing-declarations` | | A non-static, non-inline function is defined without any prior declaration |
-| `override-init` | A | A later designator overrides an earlier one (`{.x=1, .x=2}`); also a different union member, and fields through anonymous or named nested members |
+| `override-init` | A | A later designator overrides an earlier one (`{.x=1, .x=2}`); also a different union member, and fields through anonymous or named nested members. Also an assignment to a variable named like a member in place of a designator (`{.a = 1, b = 3}`); write `(b = 3)` to keep it |
 | `excess-init` | A | A brace initializer has more elements than the target holds (array, struct, vector, or an over-long string). Warns once per list. Flexible arrays and VLAs are never flagged |
 | `auto-declarator` | A | `auto *p = &x;` or several `auto` declarators; silent under `--compiler-family=clang` ([types.md](types.md#inferred-declarations)) |
 | `unused-macros` | | A non-system `#define` is never expanded |
