@@ -29,6 +29,6 @@ typedef struct {
 }
 
 int main(void) {
-    Box @(Point) p = {{1, 2}};
+    Box<Point> p = {{1, 2}};
     return biggest(7, 12) + bytes() + p.value.b + 15;
 }

@@ -55,7 +55,7 @@ int use(Point p, Color c, TagAlias t, mylong m, mylong2 m2, IntPtr ip, int i,
 }
 
 int main(void) {
-    Box @(Point) box = {{1, 2}};
+    Box<Point> box          = {{1, 2}};
     int n            = 0;
     return 42 + check() + box.value.a - 1 +
            use((Point){0, 0}, RED, (TagAlias){0}, 0, 0, &n, 0, 0, 0, 0);

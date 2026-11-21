@@ -107,7 +107,7 @@ void test_struct_specialization(void) {
 
 [[cccc::test]]
 void test_every_spelling_selects_it(void) {
-    Vec @(bool) a      = {1, 1};
+    Vec<bool>        a = {1, 1};
     @inst(bool) Vec  b = {2, 2};
     struct Vec_bool c = {3, 3};
     AssertTrue(a.bits == 1 && b.bits == 2 && c.bits == 3);
@@ -133,7 +133,7 @@ void test_union_specialization(void) {
 void test_function_specialization(void) {
     AssertTrue(@inst(bool) pick(false, true));
     AssertTrue(@inst(int) pick(3, 9) == 9);
-    AssertTrue(pick @(bool)(true, false));
+    AssertTrue(pick<bool>(true, false));
 }
 
 [[cccc::test]]

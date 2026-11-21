@@ -26,7 +26,7 @@
 gen();
 
 int main(void) {
-    Cell @(char) c  = {1};
-    Cell @(int *) p = {0};
+    Cell<char>  c = {1};
+    Cell<int *> p = {0};
     return shape() == 8000 + 240 + 1 ? 42 : 1;
 }

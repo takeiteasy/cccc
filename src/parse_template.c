@@ -17,9 +17,10 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// `@template(T, int N...)` and `@inst(Arg...) Name` (also `Name@(Arg...)` and
-// bare `@inst Name`). The preprocessor turns them into the identifier
-// `__cccc_template` and the call-like `__cccc_inst ( Name, Arg... )`. A
+// `@template(T, int N...)` and `@inst(Arg...) Name` (also bare `@inst Name`).
+// The preprocessor turns them into the identifier `__cccc_template` and the
+// call-like `__cccc_inst ( Name, Arg... )`; `Name<Arg...>` becomes the same
+// call in the parser. A
 // template (struct, union, enum, typedef or function) is kept as unparsed
 // tokens; the first `@inst` of an argument list clones them under a mangled
 // name and parses the clone at file scope with each type parameter bound to its
@@ -2484,7 +2485,7 @@ static void spell_type(MangleBuf *mb, Type *ty, Token *site) {
     mb_puts(mb, " *");
 }
 
-// `Pair@(int, double)`: the template and each argument, for a diagnostic that
+// `Pair<int, double>`: the template and each argument, for a diagnostic that
 // tells two instances of one mangled name apart.
 static const char *instance_spelling(VirtualMachine *vm, Template *t,
                                      const TemplateArg *args, int nargs,
@@ -2492,7 +2493,7 @@ static const char *instance_spelling(VirtualMachine *vm, Template *t,
     MangleBuf mb;
     mb_init(&mb, vm);
     mb_puts(&mb, t->name);
-    mb_puts(&mb, "@(");
+    mb_puts(&mb, "<");
     for (int i = 0; i < nargs; i++) {
         int                  pi = i < t->nparams ? i : t->nparams - 1;
         const TemplateParam *p  = &t->params[pi];
@@ -2513,7 +2514,7 @@ static const char *instance_spelling(VirtualMachine *vm, Template *t,
             mb_puts(&mb, "0");
         }
     }
-    mb_puts(&mb, ")");
+    mb_puts(&mb, ">");
     return arena_strndup(vm, mb.p, (int)mb.len);
 }
 
@@ -3767,6 +3768,8 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
         n++;
     }
     *rest = skip(vm, tok, ")");
+    if (t->kind != TMPL_FUNC && equal(*rest, "<"))
+        error_tok(vm, *rest, "a template instance takes its arguments once");
     return instantiate_template(vm, t, args, n, site);
 }
 
@@ -3790,8 +3793,8 @@ bool cc_split_close_angle(VirtualMachine *vm, Token *tok) {
 }
 
 // Rewrites `Name<A, B>` at `tok` to the `__cccc_inst ( Name , A , B )` form
-// that `Name@(A, B)` becomes, when `Name` is a template and `<` follows. Any
-// other `<` stays less-than.
+// that `@inst(A, B) Name` becomes, when `Name` is a template and `<` follows.
+// Any other `<` stays less-than.
 void cc_rewrite_angle_inst(VirtualMachine *vm, Token *tok) {
     static char inst[] = "__cccc_inst", lp[] = "(", rp[] = ")", comma[] = ",";
 
@@ -4424,15 +4427,25 @@ static Template *named_template(VirtualMachine *vm, const char *builtin,
 
 // The instance of template `name` for the argument text `args`, as the
 // comptime builtins InstantiateType() and InstantiateFunction() ask for it.
-// The text is parsed like `@inst(args) name`.
+// The text is parsed as `@inst(args) name`.
 static TemplateInstance *instantiate_text(VirtualMachine *vm,
                                           const char *builtin, const char *name,
                                           const char *args, bool want_func) {
     Token *site = vm->compiler.macro_call_tok;
     named_template(vm, builtin, name, want_func);
-    Token *toks =
-        tokenize_string(vm, "<instantiate>",
-                        arena_format(vm, "%s@(%s)", name, args ? args : ""));
+    int depth = 0;
+    for (Token *t = tokenize_string(vm, "<instantiate>", args ? args : "");
+         t->kind != TK_EOF; t = t->next) {
+        depth += equal(t, "(");
+        if (equal(t, ")") && --depth < 0)
+            error_tok(vm, site ? site : t,
+                      "%s: unexpected ')' in the arguments", builtin);
+    }
+    if (depth)
+        error_tok(vm, site, "%s: unclosed '(' in the arguments", builtin);
+    Token *toks = tokenize_string(
+        vm, "<instantiate>",
+        arena_format(vm, "@inst(%s) %s", args ? args : "", name));
     convert_pp_tokens(vm, toks);
     toks = cc_rewrite_template_markers(vm, toks);
     if (!equal(toks, "__cccc_inst"))
@@ -4854,7 +4867,7 @@ static Token *parse_pattern_args(VirtualMachine *vm, Template *pt, Template *t,
     return a;
 }
 
-// `Name@(Args)` in a pattern: a placeholder type when an argument names a
+// `Name<Args>` in a pattern: a placeholder type when an argument names a
 // variable, else NULL and an ordinary instance.
 static Type *pattern_inst_type(VirtualMachine *vm, Token **rest, Token *tok) {
     Template *pt   = vm->compiler.tmpl_pattern;

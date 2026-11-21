@@ -6,5 +6,5 @@
 int tu_b_pack(void);
 
 int main(void) {
-    return pack_sum @(int, int, int)(30, 1, 4) + tu_b_pack(); // 35 + 7
+    return pack_sum<int, int, int>(30, 1, 4) + tu_b_pack(); // 35 + 7
 }

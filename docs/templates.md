@@ -74,7 +74,7 @@ int    t = @inst(table) first();           // first_table
 | Pointer types | The argument must match the parameter: a function for a function pointer, an object for an object pointer, compatible pointee types. `void *` takes any object |
 | Not accepted | String literals (pass a named `static const char x[]` as `x`), `&a[2]`, `&s.m`, locals, block-scope statics, compound literals, thread-local objects |
 | Constant expressions | A float parameter folds (`_Static_assert(D > 1.0)`, `int a[(int)D]`). A non-null pointer parameter is a valid static initializer (`static int (*f)(int) = F;`) but not an integer constant expression |
-| Name clash | An argument spelled like another (`null` as a function name and as null) is an error that names both instances: `cannot name the instance: 'f_null' is the name of both f@(&null) and f@(0)` |
+| Name clash | An argument spelled like another (`null` as a function name and as null) is an error that names both instances: `cannot name the instance: 'f_null' is the name of both f<&null> and f<0>` |
 
 ## Default arguments
 
@@ -138,14 +138,13 @@ int m = @inst(long) max(5, 3);
 
 ### Spellings
 
-Four spellings name the same instance. Use whichever reads best; they mix freely in one file.
+Three spellings name the same instance, and the keyword spelling in [Marker spellings](#marker-spellings) is a fourth. Use whichever reads best; they mix freely in one file.
 
 | Spelling | Use |
 |---|---|
 | `Pair<int, float>` | Angle brackets: the name comes first, so nested arguments read left to right |
-| `@inst(int, float) Pair` | Prefix: mirrors the `@template(A, B)` definition |
-| `Pair@(int, float)` | Parenthesized postfix: never depends on what is declared, so it suits macro arguments and generated tokens |
-| `@inst Pair` | All defaults: leaves out the parentheses; `Pair<>` and `Pair@()` are the postfix forms |
+| `@inst(int, float) Pair` | Prefix: mirrors the `@template(A, B)` definition, and never depends on what is declared, so it suits macro arguments and generated tokens |
+| `@inst Pair` | All defaults: leaves out the parentheses; `Pair<>` is the angle form |
 
 ```c
 Pair<int, Vec<char>> p;            // struct Pair_int_struct_Vec_char
@@ -155,7 +154,7 @@ int m = max<long>(5, 3);           // call: the arguments, then the call parenth
 
 A `<` starts an argument list only after the name of a template defined earlier in the file and not hidden by a variable of the same name; anything else is less-than (`int Vec = 1; Vec < 2`). A nested list closes one level at a time, so `Vec<Vec<int>>` needs no space. A constant argument that contains `>` goes in parentheses (`Arr<int, (N > 2)>`), and so does a call inside a macro argument, whose commas the preprocessor would split: `AssertEq((f<int, long>(1)), 1L)`.
 
-Whitespace and line breaks between the tokens are ignored, so `Vec @(int)` and `Vec @ ( int )` are the same instance. `@inst(int)` always takes the name that follows its parentheses: `Vec @inst(int) v` reads `v` as the template name, and the error says to write `Vec<int>` or `@inst(int) Vec`.
+Whitespace and line breaks between the tokens are ignored. `@inst(int)` always takes the name that follows its parentheses: `Vec @inst(int) v` reads `v` as the template name, and the error says to write `Vec<int>` or `@inst(int) Vec`.
 
 Writing both argument lists (`@inst(int) Vec<int>`) or `@inst(int)` with no name after it is an error.
 
@@ -180,7 +179,7 @@ __template(T) struct Box { T v; };
 __inst(int) Box b = {1};
 ```
 
-The attribute form takes `cccc::` or no namespace (`[[template(T)]]`, `[[cccc::template(T)]]`, `__attribute__((template(T)))`) and must be the only attribute in its list. The postfix spellings `Name<int>` and `Name@(int)` have no attribute or keyword form.
+The attribute form takes `cccc::` or no namespace (`[[template(T)]]`, `[[cccc::template(T)]]`, `__attribute__((template(T)))`) and must be the only attribute in its list. The angle spelling `Name<int>` has no attribute or keyword form.
 
 ### Pre-defining and aliasing
 
@@ -314,7 +313,7 @@ struct Pair_int_float b;     // the same type
 struct Vec_unsigned_long d;   // the same type
 ```
 
-A checked pointer's bounds (`count(n)`) are not part of the argument, so pointers that differ only in bounds share an instance. A tagged `struct P` and an untagged `typedef struct {...} P` are different instances (`struct_P`, `typedef_P`), and so are two `struct S` declared in different functions.[^blockscope] Arguments that still mangle alike but name different types (`struct a_ptr` and `struct a *`, or `Tuple@(struct a, struct b)` and `Tuple@(struct a_struct_b)`) are an error that names both instances.
+A checked pointer's bounds (`count(n)`) are not part of the argument, so pointers that differ only in bounds share an instance. A tagged `struct P` and an untagged `typedef struct {...} P` are different instances (`struct_P`, `typedef_P`), and so are two `struct S` declared in different functions.[^blockscope] Arguments that still mangle alike but name different types (`struct a_ptr` and `struct a *`, or `Tuple<struct a, struct b>` and `Tuple<struct a_struct_b>`) are an error that names both instances.
 
 ## Inside a template
 
@@ -332,7 +331,7 @@ Instantiation nests up to 64 levels deep.
 
 ## Preprocessed output
 
-`cccc -E` prints the source spellings `@template(T)`, `@specialize(A)` and `Name@(Args)`, each on one line, so the output compiles again: `@inst(int) max(40, 42)` prints as `max@(int)(40, 42)`. A `Name<Args>` is left as written.
+`cccc -E` prints the source spellings `@template(T)`, `@specialize(A)` and `@inst(Args) Name`, each on one line, so the output compiles again. A `Name<Args>` is left as written.
 
 ## Functions and linkage
 

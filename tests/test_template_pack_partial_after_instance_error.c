@@ -3,7 +3,7 @@
 @template(Ts...) struct A {
     Ts... v;
 };
-A @(int, char) a;
+A<int, char> a;
 @template(T, Ts...) @specialize(T, Ts...) struct A {
     int q;
 };

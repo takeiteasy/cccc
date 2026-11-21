@@ -42,9 +42,9 @@ void test_template_takes_pointer_and_struct(void) {
 
 [[cccc::test]]
 void test_explicit_instance_skips_set(void) {
-    AssertEq(f @(int)(1), 10);
+    AssertEq(f<int>(1), 10);
     AssertEq(@inst(int) f(1), 10);
-    AssertEq(f @(double)(1), 10);
+    AssertEq(f<double>(1), 10);
 }
 
 // The template first, then the functions.

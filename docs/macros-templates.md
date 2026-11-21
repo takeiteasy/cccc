@@ -183,7 +183,7 @@ Arguments are matched to parameters in order, and a pack takes the rest. A type 
 
 ### At file scope
 
-A file-scope call (`gen();`) sees the templates of its own input file, including those from the headers it includes. The instances it makes are the ones the file's own code names afterwards, so `Box @(int)` after `gen()` reuses `Box_int`. A call runs before the file's own `@inst` lines, so a generator that uses an instance calls `InstantiateType` itself. `Quote("@inst(...)")` works there too.[^filescope]
+A file-scope call (`gen();`) sees the templates of its own input file, including those from the headers it includes. The instances it makes are the ones the file's own code names afterwards, so `Box<int>` after `gen()` reuses `Box_int`. A call runs before the file's own `@inst` lines, so a generator that uses an instance calls `InstantiateType` itself. `Quote("@inst(...)")` works there too.[^filescope]
 
 ```c
 @template(T) struct Box { T value; };
@@ -195,13 +195,13 @@ A file-scope call (`gen();`) sees the templates of its own input file, including
 }
 gen();
 
-int main(void) { Box @(int) b = {1}; return box_size() + b.value; }
+int main(void) { Box<int> b = {1}; return box_size() + b.value; }
 ```
 
 | Case | Result |
 |---|---|
 | Template argument is a builtin or library type | The instance is shared with the file's own code |
-| Template argument is a type the file declares (`Point`) | The instance is shared with the file's own code, and `Box @(Point)` holds the file's `Point` |
+| Template argument is a type the file declares (`Point`) | The instance is shared with the file's own code, and `Box<Point>` holds the file's `Point` |
 
 Each input file has its own instances. Two inputs that include one template and instantiate it from their calls link into one instance; two different templates of one name that make the same instance name are an error at link time, as without file-scope calls.
 

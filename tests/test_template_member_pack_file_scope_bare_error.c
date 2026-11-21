@@ -4,7 +4,7 @@
 @template(Ts...) struct Tuple {
     Ts... v;
 };
-Tuple @(char, int) g;
+Tuple<char, int> g;
 int n = g.v;
 
 int main(void) {

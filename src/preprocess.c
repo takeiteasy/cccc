@@ -4571,52 +4571,42 @@ static bool try_rewrite_template_attr(VirtualMachine *vm, Token **tok_ptr) {
 }
 
 // Rewrites the template markers in their `@` and keyword spellings
-//   @inst(Args) Name      @inst Name      Name@(Args)     __inst(Args) Name
+//   @inst(Args) Name      @inst Name      __inst(Args) Name
 // into `__cccc_inst ( Name , Args )`, the form the parser handles, and
 // `@template` / `__template` into `__cccc_template`, `@specialize` /
 // `__specialize` into `__cccc_specialize`.
 static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
-    Token *tok       = *tok_ptr;
-    Token *site      = NULL; // token the instantiation is reported at
-    Token *name      = NULL;
-    Token *args_open = NULL; // `(` of the argument list, if any
-    Token *after     = NULL; // first token after the construct
+    Token      *tok       = *tok_ptr;
+    Token      *args_open = NULL; // `(` of the argument list, if any
+    Token      *name      = NULL;
+    Token      *after     = NULL; // first token after the construct
     const char *spell     = "@inst";
 
-    if (tok->kind == TK_IDENT && !(tok->len == 1 && tok->loc[0] == '$') &&
-        tok->next && equal(tok->next, "@") && tok->next->next &&
-        equal(tok->next->next, "(")) {
-        site      = tok;
-        name      = tok;
-        args_open = tok->next->next;
+    bool        at        = equal(tok, "@") && tok->next;
+    Token      *kw        = at ? tok->next : tok;
+    if (kw->kind != TK_IDENT)
+        return false;
+    TemplateMarker kind = template_marker_kind(kw->loc, kw->len, at);
+    if (kind == TM_NONE)
+        return false;
+    // glibc names parameters `__template` (`mkstemp (char *__template)`).
+    if (!at && kind != TM_INST && !(kw->next && equal(kw->next, "(")))
+        return false;
+    spell = arena_format(vm, "%s%.*s", at ? "@" : "", (int)kw->len, kw->loc);
+    if (kind != TM_INST) {
+        *tok_ptr =
+            splice_definition_marker(vm, tok, kw, kind, NULL, NULL, kw->next);
+        return true;
+    }
+    Token *site = kw; // token the instantiation is reported at
+    if (kw->next && equal(kw->next, "(")) {
+        args_open    = kw->next;
+        Token *close = matching_paren(args_open);
+        if (!close)
+            error_tok(vm, tok, "unterminated '%s('", spell);
+        name = close->next;
     } else {
-        bool   at = equal(tok, "@") && tok->next;
-        Token *kw = at ? tok->next : tok;
-        if (kw->kind != TK_IDENT)
-            return false;
-        TemplateMarker kind = template_marker_kind(kw->loc, kw->len, at);
-        if (kind == TM_NONE)
-            return false;
-        // glibc names parameters `__template` (`mkstemp (char *__template)`).
-        if (!at && kind != TM_INST && !(kw->next && equal(kw->next, "(")))
-            return false;
-        spell =
-            arena_format(vm, "%s%.*s", at ? "@" : "", (int)kw->len, kw->loc);
-        if (kind != TM_INST) {
-            *tok_ptr = splice_definition_marker(vm, tok, kw, kind, NULL, NULL,
-                                                kw->next);
-            return true;
-        }
-        site = kw;
-        if (kw->next && equal(kw->next, "(")) {
-            args_open    = kw->next;
-            Token *close = matching_paren(args_open);
-            if (!close)
-                error_tok(vm, tok, "unterminated '%s('", spell);
-            name = close->next;
-        } else {
-            name = kw->next;
-        }
+        name = kw->next;
     }
 
     if (ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)
@@ -4625,19 +4615,10 @@ static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
                   "inside a function",
                   spell);
 
-    Token *close = NULL;
-    if (args_open) {
-        close = matching_paren(args_open);
-        if (!close)
-            error_tok(vm, tok, "unterminated '%s('", spell);
-    }
-    bool postfix = name == tok;
-    if (!postfix && (!name || name->kind != TK_IDENT))
+    Token *close = args_open ? matching_paren(args_open) : NULL;
+    if (!name || name->kind != TK_IDENT)
         error_tok(vm, name ? name : tok, "%s needs a template name", spell);
-    after = postfix ? close->next : (close ? close->next->next : name->next);
-    if (!postfix && after && equal(after, "@") && after->next &&
-        equal(after->next, "("))
-        error_tok(vm, after, "a template instance takes its arguments once");
+    after = close ? close->next->next : name->next;
 
     Token *last;
     Token *new_toks = synth_tokens(vm, tok, "__cccc_inst ( ", &last);

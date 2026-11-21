@@ -24,8 +24,8 @@ cat >a.c <<'EOS'
 gen_a();
 int from_b(void);
 int main(void) {
-    Box @(int) b = {10};
-    return size_a() + from_b() + twice@(int)(b.value);
+    Box<int> b = {10};
+    return size_a() + from_b() + twice<int>(b.value);
 }
 EOS
 cat >b.c <<'EOS'
@@ -38,8 +38,8 @@ cat >b.c <<'EOS'
 }
 gen_b();
 int from_b(void) {
-    Box @(int) c = {1};
-    return size_b() + twice@(int)(c.value) + 12;
+    Box<int> c = {1};
+    return size_b() + twice<int>(c.value) + 12;
 }
 EOS
 expect_exit 42 "$CCCC" a.c b.c
@@ -59,7 +59,7 @@ cat >c.c <<'EOS'
 gen_c();
 int from_d(void);
 int main(void) {
-    Box @(int) b = {10};
+    Box<int> b = {10};
     return size_c() + b.value + from_d();
 }
 EOS
@@ -75,7 +75,7 @@ cat >d.c <<'EOS'
 }
 gen_d();
 int from_d(void) {
-    Box @(int) b = {1, 2};
+    Box<int> b = {1, 2};
     return size_d() + b.value + b.other + 17;
 }
 EOS
@@ -90,13 +90,13 @@ cat >e.c <<'EOS'
 @comptime void gen_e(void) { InstantiateFunction("twice", "int"); }
 gen_e();
 int from_f(void);
-int main(void) { return twice@(int)(1) + from_f(); }
+int main(void) { return twice<int>(1) + from_f(); }
 EOS
 cat >f.c <<'EOS'
 @template(T) T twice(T a) { return a * 2 + 1; }
 @comptime void gen_f(void) { InstantiateFunction("twice", "int"); }
 gen_f();
-int from_f(void) { return twice@(int)(1); }
+int from_f(void) { return twice<int>(1); }
 EOS
 expect_fail "$CCCC" e.c f.c
 grep -q "conflicting definitions of template instance 'twice_int'" err.txt ||

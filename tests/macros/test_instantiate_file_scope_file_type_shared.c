@@ -39,16 +39,16 @@ static int sum(Point *p) {
 }
 
 int main(void) {
-    Box @(Point) bp         = {{10, 20}};
+    Box<Point>         bp                = {{10, 20}};
     Point q                 = bp.value;
-    Box @(struct Tagged) bt = {{4}};
+    Box<struct Tagged> bt                = {{4}};
     struct Tagged t         = bt.value;
-    Box @(Nested) bn        = {{{1, 2}, 3}};
+    Box<Nested>        bn                = {{{1, 2}, 3}};
     Nested n                = bn.value;
     Point  inner            = bn.value.at;
-    Box @(struct Node) bl   = {{7, 0}};
+    Box<struct Node>   bl                = {{7, 0}};
     struct Node l           = bl.value;
-    Box @(enum Color) bc    = {GREEN};
+    Box<enum Color>    bc                = {GREEN};
     enum Color c            = bc.value;
     if (sum(&bp.value) != 30 || q.b != 20 || t.x != 4 || n.z != 3 ||
         inner.b != 2 || l.v != 7 || c != 5)

@@ -2520,11 +2520,15 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
     return true;
 }
 
+static void output_tokens(FILE *f, VirtualMachine *vm, Token *t, Token *stop,
+                          bool one_line, int *at_bol_io);
+
 // The template markers the preprocessor rewrites to its internal spelling,
 // printed as the source forms `@template(T)`, `@specialize(A)` and
-// `Name@(Args)`. An instance is `__cccc_inst ( Name [, Args] )`; its `Name` and
-// `(` are printed here and the loop prints the rest.
-static bool output_template_marker(FILE *f, Token **tok_ptr) {
+// `@inst(Args) Name`. An instance is `__cccc_inst ( Name [, Args] )`; its
+// arguments print through the main loop, so a nested instance prints too.
+static bool output_template_marker(FILE *f, VirtualMachine *vm,
+                                   Token **tok_ptr) {
     Token *t = *tok_ptr;
     if (t->kind != TK_IDENT)
         return false;
@@ -2537,51 +2541,49 @@ static bool output_template_marker(FILE *f, Token **tok_ptr) {
         !t->next->next || t->next->next->kind != TK_IDENT)
         return false;
     Token *name = t->next->next;
-    fprintf(f, "%.*s@(", name->len, name->loc);
-    Token *rest = name->next;
-    *tok_ptr    = rest && equal(rest, ",") ? rest->next : rest;
+    Token *args  = name->next;
+    int    depth = 0;
+    Token *close = args;
+    while (close->kind != TK_EOF && !(depth == 0 && equal(close, ")"))) {
+        depth += equal(close, "(");
+        depth -= equal(close, ")");
+        close  = close->next;
+    }
+    if (equal(args, ",")) {
+        fputs("@inst(", f);
+        int at_bol = 0;
+        output_tokens(f, vm, args->next, close, true, &at_bol);
+        fputc(')', f);
+    } else {
+        fputs("@inst", f);
+    }
+    fprintf(f, " %.*s", name->len, name->loc);
+    *tok_ptr = close->next;
     return true;
 }
 
-// Output preprocessed tokens as source code (for -E flag)
-void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok) {
-    if (!f || !tok)
-        return;
-
-    // Re-emit any libraries queued via #pragma cccc link() using CCCC's own
-    // spelling (#1149, resolved: emit the round-tripping form rather than
-    // "#pragma comment(lib, ...)"). That prior spelling wasn't an alternate
-    // input syntax either -- handle_pragma_body (src/preprocess.c) has no
-    // `comment` branch, so it's silently ignored on input and never reaches
-    // pragma_link_libs. "#pragma cccc link(...)" IS parsed back on input by
-    // the same handler, so re-feeding this -E output to cccc preserves the
-    // library requirement instead of dropping it. This block re-emits the
-    // queue, consumed during preprocessing so it doesn't appear in the token
-    // stream, before the token output.
-    if (vm) {
-        for (int i = 0; i < vm->compiler.pragma_link_libs.len; i++)
-            fprintf(f, "#pragma cccc link(\"%s\")\n",
-                    vm->compiler.pragma_link_libs.data[i]);
-        if (vm->compiler.pragma_link_libs.len > 0)
-            fprintf(f, "\n");
-    }
-
-    int at_bol = 1;
-
-    for (Token *t = tok; t && t->kind != TK_EOF;) {
+// Prints the tokens from `t` up to `stop` (or the EOF), as source. `one_line`
+// keeps them on the line they start on, for the arguments of an `@inst`.
+static void output_tokens(FILE *f, VirtualMachine *vm, Token *t, Token *stop,
+                          bool one_line, int *at_bol_io) {
+    int at_bol = *at_bol_io;
+    for (; t && t != stop && t->kind != TK_EOF;) {
         // Handle line breaks
-        if (at_bol && !t->at_bol) {
+        if (one_line) {
+            at_bol = 0;
+        } else if (at_bol && !t->at_bol) {
             // Continue on same line
         } else if (t->at_bol && !at_bol) {
             fprintf(f, "\n");
         }
-        at_bol = t->at_bol;
+        if (!one_line)
+            at_bol = t->at_bol;
 
         // Handle spacing
         if (t->has_space && !at_bol)
             fprintf(f, " ");
 
-        if (output_attr(f, vm, &t) || output_template_marker(f, &t)) {
+        if (output_attr(f, vm, &t) || output_template_marker(f, vm, &t)) {
             at_bol = 0;
             continue;
         }
@@ -2623,7 +2625,34 @@ void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok) {
         at_bol = 0;
         t      = t->next;
     }
+    *at_bol_io = at_bol;
+}
 
+// Output preprocessed tokens as source code (for -E flag)
+void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok) {
+    if (!f || !tok)
+        return;
+
+    // Re-emit any libraries queued via #pragma cccc link() using CCCC's own
+    // spelling (#1149, resolved: emit the round-tripping form rather than
+    // "#pragma comment(lib, ...)"). That prior spelling wasn't an alternate
+    // input syntax either -- handle_pragma_body (src/preprocess.c) has no
+    // `comment` branch, so it's silently ignored on input and never reaches
+    // pragma_link_libs. "#pragma cccc link(...)" IS parsed back on input by
+    // the same handler, so re-feeding this -E output to cccc preserves the
+    // library requirement instead of dropping it. This block re-emits the
+    // queue, consumed during preprocessing so it doesn't appear in the token
+    // stream, before the token output.
+    if (vm) {
+        for (int i = 0; i < vm->compiler.pragma_link_libs.len; i++)
+            fprintf(f, "#pragma cccc link(\"%s\")\n",
+                    vm->compiler.pragma_link_libs.data[i]);
+        if (vm->compiler.pragma_link_libs.len > 0)
+            fprintf(f, "\n");
+    }
+
+    int at_bol = 1;
+    output_tokens(f, vm, tok, NULL, false, &at_bol);
     fprintf(f, "\n");
 }
 

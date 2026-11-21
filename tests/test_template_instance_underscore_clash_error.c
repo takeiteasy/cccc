@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: 'Tuple_struct_a_struct_b' is the name of both Tuple@\(struct_a, struct_b\) and Tuple@\(struct_a_struct_b\)
+// CCCC_EXPECT_STDERR: 'Tuple_struct_a_struct_b' is the name of both Tuple<struct_a, struct_b> and Tuple<struct_a_struct_b>
 struct a { int x; };
 struct b { int x; };
 struct a_struct_b { int x; };

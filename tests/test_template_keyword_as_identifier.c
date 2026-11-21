@@ -8,5 +8,5 @@ __template(T) T thrice(T a) { return a + a + a; }
 
 int main(void) {
     char s[] = {40, 0};
-    return use(s) + use2(1, 0) + @inst(int) twice(0) + thrice@(int)(0) + 1;
+    return use(s) + use2(1, 0) + @inst(int) twice(0) + thrice<int>(0) + 1;
 }

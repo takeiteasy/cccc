@@ -12,7 +12,7 @@
 
 int ct_answer(void) {
     @inst(int) Box b = {10};
-    return @inst(int) twice(b.value) + twice @(int)(1);
+    return @inst(int) twice(b.value) + twice<int>(1);
 }
 
 int ct_via_name(void) {

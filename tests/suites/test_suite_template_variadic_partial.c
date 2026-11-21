@@ -102,13 +102,13 @@
 @template(T) struct Wrap {
     T x;
 };
-@template(Ts...) @specialize(Pack @(Ts...)) struct Wrap {
+@template(Ts...) @specialize(Pack<Ts...>) struct Wrap {
     char v[2];
 };
-@template(T, Ts...) @specialize(Pack @(T, Ts...)) struct Wrap {
+@template(T, Ts...) @specialize(Pack<T, Ts...>) struct Wrap {
     char v[3 + sizeof...(Ts)];
 };
-@template(Ts...) @specialize(Pack @(int, Ts...)) struct Wrap {
+@template(Ts...) @specialize(Pack<int, Ts...>) struct Wrap {
     char v[10 + sizeof...(Ts)];
 };
 
@@ -116,14 +116,14 @@
     T t;
     U u;
 };
-@template(T, U, Ts...) @specialize(Pair @(Pack @(T, Ts...), U)) struct Wrap {
+@template(T, U, Ts...) @specialize(Pair<Pack<T, Ts...>, U>) struct Wrap {
     char v[20 + sizeof...(Ts)];
 };
 
 @template(T) struct Box {
     T x;
 };
-@template(T, Ts...) @specialize(Box @(Pack @(T, Ts...))) struct Wrap {
+@template(T, Ts...) @specialize(Box<Pack<T, Ts...>>) struct Wrap {
     char v[30];
 };
 
@@ -131,7 +131,7 @@
 @template(T) struct Seq {
     T v;
 };
-@template(T, Ts...) @specialize(Pack @(T, T, Ts...)) struct Seq {
+@template(T, Ts...) @specialize(Pack<T, T, Ts...>) struct Seq {
     T    a, b;
     char rest[sizeof...(Ts) + 1];
 };
@@ -163,7 +163,7 @@
 @template(Ts...) struct Cells {
     char kind[1];
 };
-@template(Ts...) @specialize(Cell @(Ts)...) struct Cells {
+@template(Ts...) @specialize(Cell<Ts>...) struct Cells {
     char kind[2];
     Ts... inner;
 };
@@ -175,7 +175,7 @@
 @template(Ts...) struct Links {
     char kind[1];
 };
-@template(T, Ts...) @specialize(T, Link @(T, Ts)...) struct Links {
+@template(T, Ts...) @specialize(T, Link<T, Ts>...) struct Links {
     char kind[2];
     Ts... rest;
 };
@@ -183,7 +183,7 @@
 @template(Ts...) struct Outer {
     char kind[1];
 };
-@template(Ts...) @specialize(Ptrs @(Ts *...)) struct Outer {
+@template(Ts...) @specialize(Ptrs<Ts *...>) struct Outer {
     char kind[2];
 };
 
@@ -277,10 +277,10 @@ void test_literal_beats_variable(void) {
 [[cccc::test]]
 void test_function_partials(void) {
     int v = 3;
-    AssertEq(total @(int, int)(1, 2), 3);
-    AssertEq(total @(int *, int, int)(&v, 4, 5), 309);
-    AssertEq(total @(char, int, long)('a', 1, 2), 97 + 2000 + 3);
-    AssertEq(total @(char)('b'), 98);
+    AssertEq((total<int, int>(1, 2)), 3);
+    AssertEq((total<int *, int, int>(&v, 4, 5)), 309);
+    AssertEq((total<char, int, long>('a', 1, 2)), 97 + 2000 + 3);
+    AssertEq(total<char>('b'), 98);
 }
 
 [[cccc::test]]
@@ -326,11 +326,11 @@ void test_constant_pack_variable_alone(void) {
 
 [[cccc::test]]
 void test_pattern_over_a_variadic_instance(void) {
-    @inst(Pack @()) Wrap                e;
-    @inst(Pack @(char)) Wrap            one;
-    @inst(Pack @(char, long)) Wrap      two;
-    @inst(Pack @(int)) Wrap             lit;
-    @inst(Pack @(int, char, char)) Wrap lit3;
+    @inst(Pack<>) Wrap                e;
+    @inst(Pack<char>) Wrap            one;
+    @inst(Pack<char, long>) Wrap      two;
+    @inst(Pack<int>) Wrap             lit;
+    @inst(Pack<int, char, char>) Wrap lit3;
     AssertEq(sizeof(e.v), 2);
     AssertEq(sizeof(one.v), 3);
     AssertEq(sizeof(two.v), 4);
@@ -340,9 +340,9 @@ void test_pattern_over_a_variadic_instance(void) {
 
 [[cccc::test]]
 void test_instance_pattern_nested(void) {
-    @inst(Pair @(Pack @(char, int, int), long)) Wrap p;
+    @inst(Pair<Pack<char, int, int>, long>) Wrap p;
     AssertEq(sizeof(p.v), 22);
-    @inst(Box @(Pack @(char, int))) Wrap b;
+    @inst(Box<Pack<char, int>>) Wrap b;
     AssertEq(sizeof(b.v), 30);
 }
 
@@ -358,7 +358,7 @@ void test_instance_names_ignore_the_partial(void) {
 
 [[cccc::test]]
 void test_repeated_variable_before_a_pack_tail(void) {
-    @inst(Pack @(short, short, char)) Seq s;
+    @inst(Pack<short, short, char>) Seq s;
     AssertEq(sizeof(s.rest), 2);
 }
 
@@ -401,21 +401,21 @@ void test_element_pattern_may_carry_qualifiers(void) {
 
 [[cccc::test]]
 void test_element_pattern_names_an_instance(void) {
-    @inst(Cell @(int), Cell @(char)) Cells a;
+    @inst(Cell<int>, Cell<char>) Cells a;
     AssertEq(sizeof(a.kind), 2);
     AssertEq(sizeof(a.inner0), sizeof(int));
     AssertEq(sizeof(a.inner1), sizeof(char));
-    @inst(Cell @(int), char) Cells b;
+    @inst(Cell<int>, char) Cells b;
     AssertEq(sizeof(b.kind), 1);
 }
 
 [[cccc::test]]
 void test_element_pattern_shares_a_leading_variable(void) {
-    @inst(int, Link @(int, char), Link @(int, long)) Links a;
+    @inst(int, Link<int, char>, Link<int, long>) Links a;
     AssertEq(sizeof(a.kind), 2);
     AssertEq(sizeof(a.rest0), sizeof(char));
     AssertEq(sizeof(a.rest1), sizeof(long));
-    @inst(int, Link @(int, char), Link @(short, long)) Links b;
+    @inst(int, Link<int, char>, Link<short, long>) Links b;
     AssertEq(sizeof(b.kind), 1);
     @inst(int) Links c;
     AssertEq(sizeof(c.kind), 2);
@@ -423,9 +423,9 @@ void test_element_pattern_shares_a_leading_variable(void) {
 
 [[cccc::test]]
 void test_element_pattern_in_a_pattern_instance(void) {
-    @inst(Ptrs @(int *, char *)) Outer a;
+    @inst(Ptrs<int *, char *>) Outer a;
     AssertEq(sizeof(a.kind), 2);
-    @inst(Ptrs @(int *, char)) Outer b;
+    @inst(Ptrs<int *, char>) Outer b;
     AssertEq(sizeof(b.kind), 1);
 }
 
@@ -460,17 +460,17 @@ static int vp_a = 3, vp_b = 4;
 
 [[cccc::test]]
 void test_float_pack_variable(void) {
-    AssertEq(fold @(1.0, 2.0, 4.0)(), 108.0);
-    AssertEq(fold @(1.0)(), 100.0);
-    AssertEq(fold @(2.0, 4.0)(), 0.0);
-    AssertEq(fold @()(), 0.0);
+    AssertEq((fold<1.0, 2.0, 4.0>()), 108.0);
+    AssertEq(fold<1.0>(), 100.0);
+    AssertEq((fold<2.0, 4.0>()), 0.0);
+    AssertEq(fold<>(), 0.0);
 }
 
 [[cccc::test]]
 void test_pointer_pack_variable(void) {
-    AssertEq(deref @(&vp_a, &vp_b, &vp_a)(), 27);
-    AssertEq(deref @(&vp_a)(), 0);
-    AssertEq(deref @(&vp_b, &vp_a)(), 0);
+    AssertEq((deref<&vp_a, &vp_b, &vp_a>()), 27);
+    AssertEq(deref<&vp_a>(), 0);
+    AssertEq((deref<&vp_b, &vp_a>()), 0);
 }
 
 // The pack of a dependent primary takes whatever its first argument is, so a
@@ -487,9 +487,9 @@ void test_pointer_pack_variable(void) {
 
 [[cccc::test]]
 void test_dependent_pack_skips_a_partial_of_the_wrong_kind(void) {
-    AssertEq(dep @(int, 1, 2)(), 3);
-    AssertEq(dep @(int)(), 1);
-    AssertEq(dep @(double, 1.0)(), 0);
+    AssertEq((dep<int, 1, 2>()), 3);
+    AssertEq(dep<int>(), 1);
+    AssertEq((dep<double, 1.0>()), 0);
 }
 
 // A pack variable used more than once stands for one argument list.
@@ -502,7 +502,7 @@ void test_dependent_pack_skips_a_partial_of_the_wrong_kind(void) {
 @template(Ts...) struct Twin {
     char kind;
 };
-@template(Ts...) @specialize(Bag @(Ts...), Ts...) struct Twin {
+@template(Ts...) @specialize(Bag<Ts...>, Ts...) struct Twin {
     char kind[2];
 };
 @template(T, Ts...) @specialize(T, Ts...) struct Twin {
@@ -511,11 +511,11 @@ void test_dependent_pack_skips_a_partial_of_the_wrong_kind(void) {
 
 [[cccc::test]]
 void test_repeated_pack_variable_needs_equal_lists(void) {
-    @inst(Bag @(int, char), int, char) Twin       a;
-    @inst(Bag @(int, char), int, long) Twin       b;
-    @inst(Bag @(int, char), int) Twin             c;
-    @inst(Bag @(int, char), int, char, char) Twin d;
-    @inst(Bag @(int, char), char, int) Twin       e;
+    @inst(Bag<int, char>, int, char) Twin       a;
+    @inst(Bag<int, char>, int, long) Twin       b;
+    @inst(Bag<int, char>, int) Twin             c;
+    @inst(Bag<int, char>, int, char, char) Twin d;
+    @inst(Bag<int, char>, char, int) Twin       e;
     AssertEq(sizeof(a.kind), 2);
     AssertEq(sizeof(b.kind), 3);
     AssertEq(sizeof(c.kind), 3);
@@ -525,7 +525,7 @@ void test_repeated_pack_variable_needs_equal_lists(void) {
 
 [[cccc::test]]
 void test_repeated_pack_variable_matches_empty_lists(void) {
-    @inst(Bag @()) Twin a;
+    @inst(Bag<>) Twin   a;
     @inst(int) Twin     b;
     AssertEq(sizeof(a.kind), 2);
     AssertEq(sizeof(b.kind), 3);
@@ -533,8 +533,8 @@ void test_repeated_pack_variable_matches_empty_lists(void) {
 
 [[cccc::test]]
 void test_repeated_pack_variable_compares_qualified_types(void) {
-    @inst(Bag @(int *, const char), int *, const char) Twin a;
-    @inst(Bag @(int *, const char), int *, char) Twin       b;
+    @inst(Bag<int *, const char>, int *, const char) Twin a;
+    @inst(Bag<int *, const char>, int *, char) Twin       b;
     AssertEq(sizeof(a.kind), 2);
     AssertEq(sizeof(b.kind), 3);
 }
@@ -542,19 +542,19 @@ void test_repeated_pack_variable_compares_qualified_types(void) {
 @template(Ts...) struct PtrTwin {
     char kind;
 };
-@template(Ts...) @specialize(Bag @(Ts *...), Ts...) struct PtrTwin {
+@template(Ts...) @specialize(Bag<Ts *...>, Ts...) struct PtrTwin {
     char kind[2];
 };
-@template(Ts...) @specialize(Bag @(Ts...), Ts...) struct PtrTwin {
+@template(Ts...) @specialize(Bag<Ts...>, Ts...) struct PtrTwin {
     char kind[3];
 };
 
 [[cccc::test]]
 void test_repeated_pack_variable_with_an_element_pattern(void) {
-    @inst(Bag @(int *, char *), int, char) PtrTwin     a;
-    @inst(Bag @(int *, char *), int, long) PtrTwin     b;
-    @inst(Bag @(int, char), int, char) PtrTwin         c;
-    @inst(Bag @(int *, char *), int *, char *) PtrTwin d;
+    @inst(Bag<int *, char *>, int, char) PtrTwin     a;
+    @inst(Bag<int *, char *>, int, long) PtrTwin     b;
+    @inst(Bag<int, char>, int, char) PtrTwin         c;
+    @inst(Bag<int *, char *>, int *, char *) PtrTwin d;
     AssertEq(sizeof(a.kind), 2);
     AssertEq(sizeof(b.kind), 1);
     AssertEq(sizeof(c.kind), 3);
@@ -567,16 +567,16 @@ void test_repeated_pack_variable_with_an_element_pattern(void) {
 @template(T, int... Ns) struct Grid {
     char kind;
 };
-@template(int... Ns) @specialize(Row @(Ns...), Ns...) struct Grid {
+@template(int... Ns) @specialize(Row<Ns...>, Ns...) struct Grid {
     char kind[2];
 };
 
 [[cccc::test]]
 void test_repeated_constant_pack_variable(void) {
-    @inst(Row @(1, 2), 1, 2) Grid a;
-    @inst(Row @(1, 2), 1, 3) Grid b;
-    @inst(Row @(1, 2), 1) Grid    c;
-    @inst(Row @()) Grid           d;
+    @inst(Row<1, 2>, 1, 2) Grid a;
+    @inst(Row<1, 2>, 1, 3) Grid b;
+    @inst(Row<1, 2>, 1) Grid    c;
+    @inst(Row<>) Grid           d;
     AssertEq(sizeof(a.kind), 2);
     AssertEq(sizeof(b.kind), 1);
     AssertEq(sizeof(c.kind), 1);
@@ -589,14 +589,14 @@ void test_repeated_constant_pack_variable(void) {
 @template(T, double... Ds) struct FGrid {
     char kind;
 };
-@template(double... Ds) @specialize(FRow @(Ds...), Ds...) struct FGrid {
+@template(double... Ds) @specialize(FRow<Ds...>, Ds...) struct FGrid {
     char kind[2];
 };
 
 [[cccc::test]]
 void test_repeated_float_pack_variable(void) {
-    @inst(FRow @(1.5, 2.5), 1.5, 2.5) FGrid a;
-    @inst(FRow @(1.5, 2.5), 1.5, 2.0) FGrid b;
+    @inst(FRow<1.5, 2.5>, 1.5, 2.5) FGrid a;
+    @inst(FRow<1.5, 2.5>, 1.5, 2.0) FGrid b;
     AssertEq(sizeof(a.kind), 2);
     AssertEq(sizeof(b.kind), 1);
 }
@@ -604,15 +604,15 @@ void test_repeated_float_pack_variable(void) {
 @template(A, B) struct Join {
     char kind;
 };
-@template(Ts...) @specialize(Bag @(Ts...), Bag2 @(Ts...)) struct Join {
+@template(Ts...) @specialize(Bag<Ts...>, Bag2<Ts...>) struct Join {
     char kind[2];
 };
 
 [[cccc::test]]
 void test_pack_variable_shared_by_two_instance_patterns(void) {
-    @inst(Bag @(int, char), Bag2 @(int, char)) Join a;
-    @inst(Bag @(int, char), Bag2 @(int, long)) Join b;
-    @inst(Bag @(int, char), Bag2 @(int)) Join       c;
+    @inst(Bag<int, char>, Bag2<int, char>) Join a;
+    @inst(Bag<int, char>, Bag2<int, long>) Join b;
+    @inst(Bag<int, char>, Bag2<int>) Join       c;
     AssertEq(sizeof(a.kind), 2);
     AssertEq(sizeof(b.kind), 1);
     AssertEq(sizeof(c.kind), 1);

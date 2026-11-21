@@ -9,7 +9,7 @@
 @template(T, Ts...) @specialize(T, int, Ts...) struct A {
     int r;
 };
-A @(int, int) a;
+A<int, int> a;
 int main(void) {
     return 42;
 }

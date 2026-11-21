@@ -206,8 +206,8 @@ void test_float_variable_must_represent_the_value(void) {
 
 [[cccc::test]]
 void test_float_variable_is_readable_in_the_body(void) {
-    AssertEq(fsum @(1.5, 1.5)(), 150.0);
-    AssertEq(fsum @(1.5, 2.5)(), 4.0);
+    AssertEq((fsum<1.5, 1.5>()), 150.0);
+    AssertEq((fsum<1.5, 2.5>()), 4.0);
 }
 
 static int tp_a, tp_b;
@@ -317,12 +317,12 @@ void test_pointer_variable_binds_repeated_object(void) {
 [[cccc::test]]
 void test_pointer_variable_is_readable_in_the_body(void) {
     tp_a = 5;
-    AssertEq(pread @(&tp_a, &tp_a)(), 15);
-    AssertEq(pread @(&tp_a, &tp_b)(), 0);
+    AssertEq((pread<&tp_a, &tp_a>()), 15);
+    AssertEq((pread<&tp_a, &tp_b>()), 0);
 }
 
 [[cccc::test]]
 void test_function_pointer_variable(void) {
-    AssertEq(pcall @(tp_fn, tp_fn)(), 21);
-    AssertEq(pcall @(tp_fn, 0)(), 0);
+    AssertEq((pcall<tp_fn, tp_fn>()), 21);
+    AssertEq((pcall<tp_fn, 0>()), 0);
 }

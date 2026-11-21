@@ -7,7 +7,7 @@
 @template(T) struct Box {
     T x;
 };
-@template(T, Ts...) @specialize(Pair @(T, Ts...)) struct Box {
+@template(T, Ts...) @specialize(Pair<T, Ts...>) struct Box {
     int q;
 };
 int main(void) {

@@ -22,8 +22,8 @@ cat >a.c <<'EOS'
 gen_a();
 int from_b(void);
 int main(void) {
-    Box @(int) b = {10};
-    return size_a() + from_b() + twice@(int)(b.value) + 17;
+    Box<int> b = {10};
+    return size_a() + from_b() + twice<int>(b.value) + 17;
 }
 EOS
 
@@ -37,8 +37,8 @@ cat >b.c <<'EOS'
 }
 gen_b();
 int from_b(void) {
-    Box @(char) c = {1};
-    return size_b() + twice@(long)(c.value) - 2;
+    Box<char> c = {1};
+    return size_b() + twice<long>(c.value) - 2;
 }
 EOS
 
@@ -66,7 +66,7 @@ cat >c.c <<'EOS'
 gen_c();
 int from_d(void);
 int main(void) {
-    Wrap @(Point) w = {{20, 2}};
+    Wrap<Point> w = {{20, 2}};
     Point         p = w.value;
     return p.a + p.b + from_d() + 19;
 }
@@ -79,7 +79,7 @@ cat >d.c <<'EOS'
 }
 gen_d();
 int from_d(void) {
-    Wrap @(Point) w = {{10, 11}};
+    Wrap<Point> w = {{10, 11}};
     return w.value.a + w.value.b - 20;
 }
 EOS

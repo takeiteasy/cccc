@@ -6,10 +6,10 @@
 @template(Ts...) struct W {
     char k;
 };
-@template(Ts...) @specialize(P @(Ts...), Ts...) struct W {
+@template(Ts...) @specialize(P<Ts...>, Ts...) struct W {
     char k[3];
 };
-@template(Us...) @specialize(P @(Us...), Us...) struct W {
+@template(Us...) @specialize(P<Us...>, Us...) struct W {
     char k[4];
 };
 int main(void) {

@@ -274,12 +274,12 @@ void test_enumerator_clashes_with_negative_number(void) {
 
 [[cccc::test(error = "no such member 'nosuch'")]]
 void test_recoverable_error_in_instance_body(void) {
-    bad_member @(int)(1);
+    bad_member<int>(1);
 }
 
 [[cccc::test(error = "failed earlier: no such member 'nosuch'")]]
 void test_failed_instance_reports_first_error(void) {
-    bad_member @(int)(2);
+    bad_member<int>(2);
 }
 
 [[cccc::test(error = "no such member 'nosuch'")]]
@@ -293,7 +293,7 @@ void test_recoverable_error_in_nested_function(void) {
 
 [[cccc::test]]
 void test_codegen_continues_after_failed_instance(void) {
-    AssertEq(good_member @(int)(41), 42);
+    AssertEq(good_member<int>(41), 42);
 }
 
 #pragma cccc suite end
@@ -319,6 +319,6 @@ void test_default_not_constant(void) {
 }
 
 [[cccc::test(error = "'Nope' is not a template")]]
-void test_postfix_unknown_template(void) {
-    Nope @(int) v;
+void test_prefix_unknown_template(void) {
+    @inst(int) Nope v;
 }

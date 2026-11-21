@@ -6,7 +6,7 @@
 @template(Ts...) struct A {
     Ts... v;
 };
-@template(Ts...) @specialize(Pack @(Ts...)...) struct A {
+@template(Ts...) @specialize(Pack<Ts...>...) struct A {
     int q;
 };
 int main(void) {

@@ -81,7 +81,7 @@ void test_empty_instance_does_not_hide_the_template(void) {
 
 [[cccc::test]]
 void test_deduced_instance_is_the_inst_instance(void) {
-    int (*a)(int, long) = sum @(int, long);
+    int (*a)(int, long) = sum<int, long>;
     sum(1, 2L);
     AssertTrue((void *)a == (void *)sum_int_long);
 }

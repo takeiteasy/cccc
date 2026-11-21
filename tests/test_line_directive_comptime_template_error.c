@@ -10,7 +10,7 @@
     return not_declared;
 }
 int use(void) {
-    return worse @(int)(1);
+    return worse<int>(1);
 }
 #pragma cccc comptime end
 

@@ -4,6 +4,6 @@
     T a;
 };
 @template(T) typedef T *Ptr;
-@template(T) @specialize(Ptr @(T)) struct Vec {
+@template(T) @specialize(Ptr<T>) struct Vec {
     T b;
 };

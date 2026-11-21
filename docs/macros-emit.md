@@ -59,7 +59,7 @@ int win_init(void);            // compiled and emitted
 
 An emit block needs an enclosing comptime context, a comptime block may hold several, and nesting a block in one of its own kind is an error. Macros such as `AssertEq` or `Executable` are **not** expanded inside, so use the `__builtin_*` functions directly.
 
-The `@` spellings work as in ordinary code: `@name` attributes, and the [template](templates.md) markers `@template`, `@specialize`, `@inst` and `Name@(...)`. `-c=generated` replays the lines as written.
+The `@` spellings work as in ordinary code: `@name` attributes, and the [template](templates.md) markers `@template`, `@specialize`, `@inst` and `Name<...>`. `-c=generated` replays the lines as written.
 
 ```c
 #pragma cccc emit begin

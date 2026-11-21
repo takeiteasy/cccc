@@ -6,13 +6,13 @@
 @template(Ts...) struct W {
     char k;
 };
-@template(Ts...) @specialize(P @(Ts *...), Ts...) struct W {
+@template(Ts...) @specialize(P<Ts *...>, Ts...) struct W {
     char k[2];
 };
-@template(Ts...) @specialize(P @(Ts...), Ts...) struct W {
+@template(Ts...) @specialize(P<Ts...>, Ts...) struct W {
     char k[3];
 };
 int main(void) {
-    @inst(P @()) W w;
+    @inst(P<>) W w;
     return 42;
 }

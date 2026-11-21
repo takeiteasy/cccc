@@ -590,35 +590,35 @@ void test_default_enum_constant_is_named_by_enumerator(void) {
     AssertEq(shade_of_GREEN_D(), 1);
 }
 
-#define VEC_INT       Vec @(int)
-#define max_long      max @(long)
+#define VEC_INT       Vec<int>
+#define max_long      max<long>
 #define PAIR_OF(A, B) @inst(A, B) Pair
 
 [[cccc::test]]
-void test_postfix_spelling(void) {
-    Vec @(int) v       = {0};
+void test_angle_spelling(void) {
+    Vec<int>        v = {0};
     struct Vec_int *p = &v;
     AssertEq(p->len, (size_t)0);
-    AssertEq(max @(int)(40, 42), 42);
-    AssertEq(sizeof(Pair @(int, long)), sizeof(@inst(int, long) Pair));
-    AssertEq(sizeof(Arr @(int, 4)), 4 * sizeof(int));
+    AssertEq(max<int>(40, 42), 42);
+    AssertEq(sizeof(Pair<int, long>), sizeof(@inst(int, long) Pair));
+    AssertEq(sizeof(Arr<int, 4>), 4 * sizeof(int));
 }
 
 [[cccc::test]]
-void test_postfix_nests(void) {
-    Pair @(int, Vec @(char)) p            = {1, {0}};
+void test_angle_nests(void) {
+    Pair<int, Vec<char>>             p = {1, {0}};
     struct Pair_int_struct_Vec_char *q = &p;
     AssertEq(q->first, 1);
-    @inst(Vec @(char), int) Pair r = {{0}, 2};
+    @inst(Vec<char>, int) Pair r = {{0}, 2};
     AssertEq(r.second, 2);
 }
 
 [[cccc::test]]
-void test_empty_postfix_takes_defaults(void) {
-    Opt @() o          = {5};
+void test_empty_angle_takes_defaults(void) {
+    Opt<>           o = {5};
     struct Opt_int *p = &o;
     AssertEq(p->val, 5);
-    AssertEq(shade_of @()(), 1);
+    AssertEq(shade_of<>(), 1);
 }
 
 [[cccc::test]]

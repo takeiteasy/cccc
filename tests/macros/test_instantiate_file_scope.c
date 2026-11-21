@@ -30,7 +30,7 @@
 gen();
 
 int main(void) {
-    Box @(int) b       = {3};
-    Arr @(char, 6) arr = {{0}};
-    return sizes() + ten() + twice @(int)(b.value) + b.value + sizeof arr + 7;
+    Box<int>     b   = {3};
+    Arr<char, 6> arr = {{0}};
+    return sizes() + ten() + twice<int>(b.value) + b.value + sizeof arr + 7;
 }

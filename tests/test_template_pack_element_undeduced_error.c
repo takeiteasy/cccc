@@ -7,7 +7,7 @@
 @template(Ts...) struct A {
     Ts... v;
 };
-@template(T, Ts...) @specialize(Link @(T, Ts)...) struct A {
+@template(T, Ts...) @specialize(Link<T, Ts>...) struct A {
     int q;
 };
 int main(void) {

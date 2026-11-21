@@ -190,5 +190,5 @@ C++ ties ownership to the type through constructors, destructors and move semant
 
 No classes or inheritance, operator overloading beyond operand-type selection, function overloading except through `overloadable`, references (`T &`), namespaces, default function arguments in the C++ sense (`@default` on a parameter is the nearest, see [derive.md](derive.md)), lambdas (blocks and GNU nested functions are the nearest), `auto` return types, `std` containers, exceptions, RTTI and `virtual`.
 
-[^spelling]: The prefix `@inst(int) max`, the postfix `max<int>` (or `max@(int)`) and the keyword `__inst(int) max` name the same instance; see [templates.md](templates.md#spellings).
+[^spelling]: The prefix `@inst(int) max`, the angle form `max<int>` and the keyword `__inst(int) max` name the same instance; see [templates.md](templates.md#spellings).
 

@@ -16,6 +16,6 @@ typedef struct {
 gen();
 
 int main(void) {
-    Box @(Point) p = {{1, 2}};
+    Box<Point> p = {{1, 2}};
     return seven() + p.value.b + 33;
 }

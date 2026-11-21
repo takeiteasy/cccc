@@ -5,6 +5,6 @@
 };
 
 int main(void) {
-    @inst(int) Vec @(int) v;
+    @inst(int) Vec<int> v;
     return 0;
 }

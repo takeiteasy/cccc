@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Removed: the postfix spelling `Name@(T)`. Write `Name<T>` or `@inst(T) Name`. `cccc -E` prints an instance as `@inst(Args) Name`, and the instance-clash message as `Name<Args>`. `@inst(int) Vec<int>` is an error: an instance takes its arguments once.
+
 - Fixed: a parameter pack in an argument list, `f<Ts...>()`, `Name<T, Ts...>` and `Name<Ts..., T>`, failed with `expected a name after '...'` inside a template body.
 
 - Fixed: a function or typedef template calling itself as `f<T>(...)` in its own body read `<` as less-than (`invalid operands to *`); the template name followed by `<` is no longer renamed to the instance.
@@ -15,7 +17,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 - Added: the Checked C spellings `_Ptr<T>`, `_Array_ptr<T>` and `_Nt_array_ptr<T>`, with a bounds declaration after the declarator, `_Array_ptr<int> a : count(n)` (also `byte_count(e)` and `bounds(lo, hi)`), on variables, parameters, struct members and function results. They name the same types as `[[cccc::single]]`, `[[cccc::array]]` and `[[cccc::ntarray]]` with their bounds attributes.
 
-- Added: `Name<T>` and `f<T>(...)` instantiate a template, as `Name@(T)` does: `Vec<Vec<int>> v;`, `max<int>(1, 2)`, `Box<int>.wrap(3)`, `@specialize(Pair<T, Vec<U>>)`, and a default such as `@template(T, U = Pair<T, int>)`. A `<` starts an argument list only after the name of a template defined earlier and not hidden by a variable; a closing `>>` closes two lists. A constant argument containing `>` goes in parentheses. The docs and README examples use `<>`; `@(` and `@inst` still work.
+- Added: `Name<T>` and `f<T>(...)` instantiate a template: `Vec<Vec<int>> v;`, `max<int>(1, 2)`, `Box<int>.wrap(3)`, `@specialize(Pair<T, Vec<U>>)`, and a default such as `@template(T, U = Pair<T, int>)`. A `<` starts an argument list only after the name of a template defined earlier and not hidden by a variable; a closing `>>` closes two lists. A constant argument containing `>` goes in parentheses. The docs and README examples use `<>`; `@inst` still works.
 
 - Fixed: inside a struct or union template's body the bare template name stands for the instance, as `struct Name` already did: `static Box wrap(T v) { return (Box){v}; }`, `Box *next;`. It used to fail with `expected ','`. A diagnostic on a method written in a struct body now shows that method's line instead of the struct's. See [templates.md](docs/templates.md#inside-a-template).
 

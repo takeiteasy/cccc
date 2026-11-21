@@ -157,11 +157,11 @@ int test_attribute_form(void) {
 
 [[cccc::test(return = 42)]]
 int test_template_instance(void) {
-    Box@(int) b = Box@(int).wrap(9);
+    Box<int> b = Box<int>.wrap(9);
     if (b.v != 9 || b.get() != 9)
         return 1;
-    struct Box_int c = Box@(int).wrap(4);
-    if (Box@(int).get(&c) != 4)
+    struct Box_int c = Box<int>.wrap(4);
+    if (Box<int>.get(&c) != 4)
         return 2;
     return 42;
 }

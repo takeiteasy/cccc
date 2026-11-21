@@ -53,14 +53,14 @@
 struct Plain {
     int v0, v1;
 };
-Tup @(long, long) pair_obj;
+Tup<long, long> pair_obj;
 @template(Ts...) struct MixedBody {
     char b[(sizeof(Ts) + sizeof(pair_obj.v) + ...)];
 };
 static int pair(int a, int b) {
     return a + b;
 }
-@template(Ts...) int mixed(Tup @(long, long) t, Ts... xs) {
+@template(Ts...) int mixed(Tup<long, long> t, Ts... xs) {
     return pair(xs + t.v...);
 }
 
@@ -73,57 +73,57 @@ void test_too_few_arguments(void) {
 
 [[cccc::test(error = "parameter pack 'Ts' must be expanded with '...'")]]
 void test_bare_pack_name(void) {
-    bare @(int)(1);
+    bare<int>(1);
 }
 
 [[cccc::test(error = "pack index 2 is out of range for 2 elements")]]
 void test_index_out_of_range(void) {
-    out_of_range @(int, int)(1, 2);
+    out_of_range<int, int>(1, 2);
 }
 
 [[cccc::test(error = "a pack index must be an integer constant")]]
 void test_index_not_integer(void) {
-    bad_index @(int, int)(1, 2);
+    bad_index<int, int>(1, 2);
 }
 
 [[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
 void test_pattern_without_a_pack(void) {
-    no_pattern @(int)(1);
+    no_pattern<int>(1);
 }
 
 [[cccc::test(error = "of an empty pack needs an initial value")]]
 void test_empty_fold_without_an_identity(void) {
-    empty_fold @()();
+    empty_fold<>();
 }
 
 [[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
 void test_outer_pattern_without_a_free_pack(void) {
-    nested @(int)(1);
+    nested<int>(1);
 }
 
 [[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
 void test_outer_pattern_of_only_a_fold(void) {
-    nested_fold @(int)(1);
+    nested_fold<int>(1);
 }
 
 [[cccc::test(error = "a list item can hold only one pack expansion")]]
 void test_two_expansions_in_one_item(void) {
-    two_per_item @(int)(1);
+    two_per_item<int>(1);
 }
 
 [[cccc::test(error = "only one side of a binary fold")]]
 void test_pack_on_both_sides_of_a_fold(void) {
-    both_sides @(int)(1);
+    both_sides<int>(1);
 }
 
 [[cccc::test(error = "template argument 300 does not fit 'unsigned char'")]]
 void test_constant_pack_element_must_fit(void) {
-    bytes @(1, 300)();
+    bytes<1, 300>();
 }
 
 [[cccc::test(error = "expected an expression, found 'int'")]]
 void test_constant_pack_takes_constants(void) {
-    ints @(int)();
+    ints<int>();
 }
 
 @template(double... Ds) double sum_d(void) {
@@ -138,18 +138,18 @@ void test_constant_pack_takes_constants(void) {
 
 [[cccc::test(error = "NaN is not a valid template argument")]]
 void test_float_pack_rejects_nan(void) {
-    sum_d @(1.0, __builtin_nan(""))();
+    sum_d<1.0, __builtin_nan("")>();
 }
 
 [[cccc::test(error = "cannot have type long double")]]
 void test_long_double_pack_is_rejected(void) {
-    long_d @(1.0L)();
+    long_d<1.0L>();
 }
 
 [[cccc::test(error = "with file-scope or static storage")]]
 void test_pointer_pack_needs_static_storage(void) {
     int local = 0;
-    ptrs @(&local)();
+    ptrs<&local>();
 }
 
 @template(Ts...) struct Amb {
@@ -176,13 +176,13 @@ void test_too_few_arguments_before_defaults(void) {
 
 [[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
 void test_member_pack_dropped_by_a_partial(void) {
-    Tup @(int, char) t = {1};
+    Tup<int, char> t = {1};
     pair(t.v...);
 }
 
 [[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
 void test_member_named_like_a_pack_element(void) {
-    Tup @(long, long) t = {1, 2};
+    Tup<long, long> t      = {1, 2};
     struct Plain p      = {1, 2};
     pair(p.v...);
 }
@@ -190,39 +190,39 @@ void test_member_named_like_a_pack_element(void) {
 [[cccc::test(
     error = "the packs in one pattern have different lengths (2 and 3)")]]
 void test_member_packs_of_different_lengths(void) {
-    Tup @(long, long) a       = {1, 2};
-    Tup @(long, long, long) b = {1, 2, 3};
+    Tup<long, long>       a = {1, 2};
+    Tup<long, long, long> b = {1, 2, 3};
     pair(a.v + b.v...);
 }
 
 [[cccc::test(error = "pack index 2 is out of range for 2 elements")]]
 void test_member_pack_index_out_of_range(void) {
-    Tup @(long, long) a = {1, 2};
+    Tup<long, long> a               = {1, 2};
     int x               = a.v...[2];
 }
 
 [[cccc::test(error = "member pack 'v' must be expanded with '...'")]]
 void test_member_pack_without_dots(void) {
-    Tup @(long, long) a = {1, 2};
+    Tup<long, long> a               = {1, 2};
     int x               = a.v;
 }
 
 [[cccc::test(
     error = "the packs in one pattern have different lengths (3 and 2)")]]
 void test_template_pack_and_member_pack_of_different_lengths(void) {
-    Tup @(long, long) t = {1, 2};
-    mixed @(long, long, long)(t, 1, 2, 3);
+    Tup<long, long> t = {1, 2};
+    mixed<long, long, long>(t, 1, 2, 3);
 }
 
 [[cccc::test(
     error = "the packs in one pattern have different lengths (1 and 2)")]]
 void test_struct_body_packs_of_different_lengths(void) {
-    MixedBody @(char) b;
+    MixedBody<char> b;
 }
 
 [[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
 void test_object_declared_in_the_same_statement(void) {
-    Tup @(long, long) a = {1, 2};
-    for (Tup @(long, long) b = a; pair(b.v...) < 0;) {
+    Tup<long, long> a = {1, 2};
+    for (Tup<long, long> b = a; pair(b.v...) < 0;) {
     }
 }

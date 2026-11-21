@@ -7,10 +7,10 @@
 @template(T) struct Vec {
     T v;
 };
-@template(T) @specialize(Pair @(T, T)) struct Vec {
+@template(T) @specialize(Pair<T, T>) struct Vec {
     T both[2];
 };
-@template(U) @specialize(Pair @(int, U)) struct Vec {
+@template(U) @specialize(Pair<int, U>) struct Vec {
     U u;
 };
-Vec @(Pair @(int, int)) v;
+Vec<Pair<int, int>> v;

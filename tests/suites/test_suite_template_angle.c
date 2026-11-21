@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --testing
-// Suite: Name<T> and f<T>(...) instantiate templates like Name@(T).
+// Suite: Name<T> and f<T>(...) instantiate templates like @inst(T) Name.
 
 #include <stddef.h>
 
@@ -53,12 +53,12 @@ void type_position(void) {
 }
 
 [[cccc::test]]
-void same_instance_as_postfix_spelling(void) {
+void same_instance_as_prefix_spelling(void) {
     Vec<int> a       = {1, 2};
-    Vec @(int) b     = a;
+    @inst(int) Vec b       = a;
     @inst(int) Vec c = b;
     AssertEq(c.y, 2);
-    AssertEq(_Generic(a, Vec @(int): 1, default: 0), 1);
+    AssertEq(_Generic(a, @inst(int) Vec: 1, default: 0), 1);
 }
 
 [[cccc::test]]

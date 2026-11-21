@@ -56,7 +56,7 @@ check quote_inst twice_int
 # An instance reached only through another instance.
 cat >nested.c <<'EOF'
 @template(T) T twice(T a) { return a + a; }
-@template(T) T quad(T a) { return twice @(T)(twice @(T)(a)); }
+@template(T) T quad(T a) { return twice<T>(twice<T>(a)); }
 @comptime void gen(void) {
     Obj *ten = MakeFunction("ten", GetType("int"));
     FunctionSetBody(ten, MakeReturn(Quote("@inst(int) quad(1) + 6")));
@@ -70,10 +70,10 @@ grep -q "^static .* twice_int(.*) {" nested.gen.c || fail "nested: twice_int mis
 # An instance whose parameter type is itself an instance.
 cat >type_param.c <<'EOF'
 @template(T) struct Box { T value; };
-@template(T) T unbox(Box @(T) b) { return b.value; }
+@template(T) T unbox(Box<T> b) { return b.value; }
 @comptime void gen(void) {
     Obj *ten = MakeFunction("ten", GetType("int"));
-    FunctionSetBody(ten, MakeReturn(Quote("({ Box @(int) b = {10}; @inst(int) unbox(b); })")));
+    FunctionSetBody(ten, MakeReturn(Quote("({ @inst(int) Box b = {10}; @inst(int) unbox(b); })")));
 }
 gen();
 int main(void) { return ten() + 32; }
@@ -104,7 +104,7 @@ cat >unused.c <<'EOF'
     FunctionSetBody(ten, MakeReturn(Quote("twice_int(5)")));
 }
 gen();
-int main(void) { return ten() + thrice @(int)(1) + 29; }
+int main(void) { return ten() + thrice<int>(1) + 29; }
 EOF
 MAIN='int main(void) { return ten() + 32; }'
 check unused twice_int

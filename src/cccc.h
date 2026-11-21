@@ -4193,7 +4193,7 @@ typedef struct PatList {
 } PatList;
 
 // In a partial specialization's pattern, a template instance that names a
-// variable (`Pair@(T, U)`): the placeholder type standing for it and its
+// variable (`Pair<T, U>`): the placeholder type standing for it and its
 // argument patterns.
 typedef struct InstPat {
     struct InstPat  *next;
