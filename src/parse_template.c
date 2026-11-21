@@ -1928,10 +1928,11 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
             bool is_tag = p == tag_slot;
             switch (t->kind) {
                 case TMPL_FUNC:
-                    rename = !(member || is_tag) && !inst_arg;
+                    rename = !(member || is_tag) && !inst_arg &&
+                             !equal(p->next, "<");
                     break;
                 case TMPL_TYPEDEF:
-                    rename = !member && !inst_arg;
+                    rename = !member && !inst_arg && !equal(p->next, "<");
                     break;
                 case TMPL_ENUM:
                     rename = is_tag && equal(tag_kw, "enum") && !inst_arg;

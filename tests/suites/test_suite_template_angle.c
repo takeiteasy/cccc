@@ -89,6 +89,16 @@ void function_template_call(void) {
     AssertEq(max<long>(5, 3), 5);
 }
 
+@template(T) T fact(T n) {
+    return n <= 1 ? 1 : n * fact<T>(n - 1);
+}
+
+[[cccc::test]]
+void function_template_calls_itself(void) {
+    AssertEq(fact<int>(5), 120);
+    AssertEq(fact<long>(6), 720L);
+}
+
 [[cccc::test]]
 void explicit_prefix_then_deduction(void) {
     AssertEq((convert<int, long>(7)), 7L);
