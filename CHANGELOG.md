@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a parameter pack in an argument list, `f<Ts...>()`, `Name<T, Ts...>` and `Name<Ts..., T>`, failed with `expected a name after '...'` inside a template body.
+
 - Fixed: a function or typedef template calling itself as `f<T>(...)` in its own body read `<` as less-than (`invalid operands to *`); the template name followed by `<` is no longer renamed to the instance.
 
 - Fixed: an undeclared type name inside a function reports `unknown type name 'Foo'` for `Foo y;`, `Foo *y;`, a `for` initializer and a cast followed by an operand, `(Foo)x`. It used to report `undefined variable 'Foo'` followed by `expected ';'`. `(Foo)-1`, `(Foo)(x)`, `sizeof(Foo)` and `_Alignof(Foo)` can also be expressions, so they still report `undefined variable`.

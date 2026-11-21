@@ -394,3 +394,17 @@ void test_nested_expansion_lengths(void) {
     AssertEq(weighted @(int)(5), 25);
     AssertEq(weighted @(int, int, int)(1, 2, 3), 36);
 }
+
+@template(Ts...) int pack_len(void) {
+    return sizeof...(Ts);
+}
+@template(T, Ts...) int angle_forward(void) {
+    return pack_len<Ts...>() * 100 + pack_len<T, Ts...>() * 10 +
+           sizeof(Tuple<Ts..., T>) / sizeof(int);
+}
+
+[[cccc::test]]
+void test_pack_inside_angle_brackets(void) {
+    int n = angle_forward<int, int, int>();
+    AssertEq(n, 2 * 100 + 3 * 10 + 3);
+}

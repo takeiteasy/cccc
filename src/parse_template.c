@@ -1467,10 +1467,32 @@ static void ex_range(Expander *ex, int lo, int hi, int k) {
     }
 }
 
+// Whether the `<` at `open` starts a list holding a `...`, up to the end of
+// the statement or the enclosing bracket.
+static bool angle_list_has_dots(Token *open) {
+    int depth = 0;
+    for (Token *p = open->next; p->kind != TK_EOF; p = p->next) {
+        if (tok_is_open(p))
+            depth++;
+        else if (tok_is_close(p) && depth-- == 0)
+            break;
+        else if (depth == 0 && equal(p, ";"))
+            break;
+        else if (equal(p, "..."))
+            return true;
+    }
+    return false;
+}
+
 // Splits the chain from `from` up to `to` (NULL: its EOF) into the Expander's
 // token arrays; returns the token it stopped at.
 static Token *ex_setup(Expander *ex, VirtualMachine *vm, Token *from,
                        Token *to) {
+    // The expander pairs only brackets, so `Name<Ts...>` becomes
+    // `__cccc_inst ( Name , Ts... )` first.
+    for (Token *p = from; p != to && p->kind != TK_EOF; p = p->next)
+        if (p->next && equal(p->next, "<") && angle_list_has_dots(p->next))
+            cc_rewrite_angle_inst(vm, p);
     int count = 0;
     for (Token *p = from; p != to && p->kind != TK_EOF; p = p->next)
         count++;
