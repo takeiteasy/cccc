@@ -408,3 +408,49 @@ void test_pack_inside_angle_brackets(void) {
     int n = angle_forward<int, int, int>();
     AssertEq(n, 2 * 100 + 3 * 10 + 3);
 }
+
+@template(T, Ts...) int first_is_int_ptr(void) {
+    return _Generic((T){0}, int *: 1, default: 0);
+}
+@template(Ts...) int ptr_lead(void) {
+    return first_is_int_ptr<Ts *...>();
+}
+@template(Ts...) int ptr_lead_inst(void) {
+    return @inst(Ts * ...) first_is_int_ptr();
+}
+@template(T, Ts...) int ptr_counts(void) {
+    return pack_len<T *, Ts const *...>() * 10 + pack_len<Ts *...>();
+}
+
+[[cccc::test]]
+void test_element_pattern_in_angle_brackets(void) {
+    int a = ptr_lead<int, char>();
+    int b = ptr_lead_inst<int, char>();
+    int c = ptr_lead<char, int>();
+    int d = ptr_counts<int, int, int>();
+    AssertEq(a, 1);
+    AssertEq(b, 1);
+    AssertEq(c, 0);
+    AssertEq(d, 32);
+}
+
+@template(Ts...) int fn_ptr_size(void) {
+    int (*fp)(Ts *...) = 0;
+    return sizeof...(Ts) + (fp == 0);
+}
+
+[[cccc::test]]
+void test_element_pattern_in_unnamed_parameter(void) {
+    int n = fn_ptr_size<int, char>();
+    AssertEq(n, 3);
+}
+
+@template(int... Ns) int product_fold(void) {
+    return (Ns * ...);
+}
+
+[[cccc::test]]
+void test_constant_pack_star_is_a_fold(void) {
+    int n = product_fold<2, 3, 7>();
+    AssertEq(n, 42);
+}

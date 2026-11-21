@@ -77,6 +77,8 @@ A call that names no `@inst` deduces the pack from its arguments, one type per a
 @template(T, Ts...) struct Wrap        { @inst(T, Ts...) Tuple t; };   // forwarding
 ```
 
+An element pattern over a type pack works in an instance argument list and in an unnamed parameter: `pack_len<Ts *...>()`, `@inst(Ts *...) pack_len()`, `int (*fp)(Ts *...)`.
+
 A pattern may hold expansions and folds of its own. Each `...` expands the packs inside its own pattern, and the outer pattern must name a pack outside them.
 
 ```c

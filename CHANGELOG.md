@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: an element pattern over a type pack in an instance argument list, `f<Ts *...>()` and `@inst(Ts *...) f`, or in an unnamed parameter, `int (*fp)(Ts *...)`, was read as a fold over `*` inside a template body (`'(' is not a template`).
+
 - Removed: the postfix spelling `Name@(T)`. Write `Name<T>` or `@inst(T) Name`. `cccc -E` prints an instance as `@inst(Args) Name`, and the instance-clash message as `Name<Args>`. `@inst(int) Vec<int>` is an error: an instance takes its arguments once.
 
 - Fixed: a parameter pack in an argument list, `f<Ts...>()`, `Name<T, Ts...>` and `Name<Ts..., T>`, failed with `expected a name after '...'` inside a template body.

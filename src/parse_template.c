@@ -1036,6 +1036,7 @@ typedef struct {
     bool        member;   // `t.v`: a member pack of an instance, see mpack
     int         n;        // its elements
     const char *key;      // member: the object's spelling and the name
+    bool        types;    // a template type pack: a pattern over it is a type
 } Pack;
 
 // The packs of a function instance, kept for the statements it parses.
@@ -1204,6 +1205,24 @@ static bool ex_has_free_pack(Expander *ex, int from, int to) {
             return true;
         else
             i++;
+    }
+    return false;
+}
+
+// Whether the `(` at `o` opens an instance argument list, which is never a
+// fold.
+static bool ex_inst_list(Expander *ex, int o) {
+    return o > 0 && equal(ex->toks[o - 1], "__cccc_inst");
+}
+
+// Whether `[a, b)` names a type pack outside any bracket: `*` after it
+// declares a pointer, so the pattern is a type and not a fold operand.
+static bool ex_type_pattern(Expander *ex, int a, int b) {
+    for (int i = a; i < b; i++) {
+        if (tok_is_open(ex->toks[i]))
+            i = ex->match[i];
+        else if (ex_pack_at(ex, i) >= 0 && ex->packs[ex_pack_at(ex, i)].types)
+            return true;
     }
     return false;
 }
@@ -1604,7 +1623,8 @@ static void ex_classify(Expander *ex) {
         int       o = ex->encl[d];
         FoldShape f;
         if (o >= 0 && equal(ex->toks[o], "(") && cnt[o] == 1 &&
-            ex_fold_shape(ex, o, d, ex->match[o], &f)) {
+            !ex_inst_list(ex, o) && ex_fold_shape(ex, o, d, ex->match[o], &f) &&
+            !ex_type_pattern(ex, f.a, f.b)) {
             if (ex->defer_mixed && ex_known_member(ex, o, ex->match[o])) {
                 ex->kind[d]      = DOTS_OTHER;
                 ex->defer_end[o] = ex->match[o] + 1;
@@ -1677,7 +1697,9 @@ static Token *expand_packs(VirtualMachine *vm, Template *t, Token *chain, int n,
         t->kind == TMPL_FUNC || t->kind == TMPL_STRUCT || t->kind == TMPL_UNION;
 
     const TemplateParam *pp = &t->params[t->nparams - 1];
-    ex.packs[ex.npacks++]   = (Pack){pp->name->loc, (int)pp->name->len, false};
+    ex.packs[ex.npacks++] =
+        (Pack){pp->name->loc, (int)pp->name->len, false, false, 0,
+               NULL,          !pp->type_start};
 
     // Packs declared by `Pattern... name`.
     for (int d = 1; d + 1 < ex.ntoks; d++) {
