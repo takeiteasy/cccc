@@ -2282,6 +2282,15 @@ static Node *mul(VirtualMachine *vm, Token **rest, Token *tok) {
 }
 
 // cast = "(" type-name ")" cast | unary
+// True for a token that can start an operand but not continue an expression
+// after `)`: unlike `-`, `*`, `&` or `(`, it has no binary reading.
+static bool cast_operand_only(Token *tok) {
+    return tok->kind == TK_IDENT || tok->kind == TK_NUM ||
+           tok->kind == TK_STR || equal(tok, "sizeof") ||
+           equal(tok, "_Alignof") || equal(tok, "alignof") ||
+           equal(tok, "_Generic");
+}
+
 Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
     if (is_compound_literal_head(vm, tok))
         return unary(vm, rest, tok);
@@ -2424,7 +2433,15 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    return unary(vm, rest, tok);
+    // `(Foo)` followed by a token that cannot continue a parenthesised
+    // expression is a cast to an unknown type.
+    Token *saved = vm->compiler.type_name_candidate;
+    if (equal(tok, "(") && tok->next->kind == TK_IDENT &&
+        equal(tok->next->next, ")") && cast_operand_only(tok->next->next->next))
+        vm->compiler.type_name_candidate = tok->next;
+    Node *node                       = unary(vm, rest, tok);
+    vm->compiler.type_name_candidate = saved;
+    return node;
 }
 
 // GNU vector_size lane lvalue helper (tracker #715, used by __builtin_shuffle):

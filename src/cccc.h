@@ -4615,6 +4615,7 @@ typedef struct Compiler {
     PendingMethod      *pending_methods_tail;
     bool                draining_methods;
     Token *static_call_tok; // the `T` of a `T.f(...)` being parsed as a type
+    Token *type_name_candidate; // an identifier shaped like a type name
     bool                draining_member_attrs;
     int  fn_nesting_depth;  // Current function nesting depth (0 = top-level)
     bool in_type_lookahead; // Parsing a declarator only to classify it

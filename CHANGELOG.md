@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: an undeclared type name inside a function reports `unknown type name 'Foo'` for `Foo y;`, `Foo *y;`, a `for` initializer and a cast followed by an operand, `(Foo)x`. It used to report `undefined variable 'Foo'` followed by `expected ';'`. `(Foo)-1`, `(Foo)(x)`, `sizeof(Foo)` and `_Alignof(Foo)` can also be expressions, so they still report `undefined variable`.
+
 - Added: the Checked C spellings `_Ptr<T>`, `_Array_ptr<T>` and `_Nt_array_ptr<T>`, with a bounds declaration after the declarator, `_Array_ptr<int> a : count(n)` (also `byte_count(e)` and `bounds(lo, hi)`), on variables, parameters, struct members and function results. They name the same types as `[[cccc::single]]`, `[[cccc::array]]` and `[[cccc::ntarray]]` with their bounds attributes.
 
 - Added: `Name<T>` and `f<T>(...)` instantiate a template, as `Name@(T)` does: `Vec<Vec<int>> v;`, `max<int>(1, 2)`, `Box<int>.wrap(3)`, `@specialize(Pair<T, Vec<U>>)`, and a default such as `@template(T, U = Pair<T, int>)`. A `<` starts an argument list only after the name of a template defined earlier and not hidden by a variable; a closing `>>` closes two lists. A constant argument containing `>` goes in parentheses. The docs and README examples use `<>`; `@(` and `@inst` still work.

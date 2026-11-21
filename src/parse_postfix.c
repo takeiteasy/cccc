@@ -5445,6 +5445,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                                "'%.*s<args>' or '@inst(args) %.*s'",
                                tok->len, tok->loc, tok->len, tok->loc, tok->len,
                                tok->loc);
+        } else if (tok == vm->compiler.type_name_candidate) {
+            error_tok(vm, tok, "unknown type name '%.*s'", tok->len, tok->loc);
         } else {
             msg = arena_format(vm, "undefined variable '%.*s'", tok->len,
                                tok->loc);

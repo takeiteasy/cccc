@@ -22,6 +22,17 @@
 
 #include "./parse_internal.h"
 
+// `Foo y` or `Foo *y`: an identifier that starts a declaration, not an
+// expression.
+static bool decl_shaped(Token *tok) {
+    if (tok->kind != TK_IDENT)
+        return false;
+    Token *next = tok->next;
+    while (equal(next, "*"))
+        next = next->next;
+    return next->kind == TK_IDENT;
+}
+
 // Returns true if a given token represents a type. `allow_splice` gates the
 // #894 demand-driven comptime splice below: a caller that is only probing
 // whether the *next* token continues a type-specifier list (declspec's loop
@@ -1012,7 +1023,11 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             if (init_has_cleanup)
                 open_cleanup_scope(vm);
         } else {
-            node_ctl_mut(vm, node)->init = expr_stmt(vm, &tok, tok);
+            Token *saved = vm->compiler.type_name_candidate;
+            if (decl_shaped(tok))
+                vm->compiler.type_name_candidate = tok;
+            node_ctl_mut(vm, node)->init     = expr_stmt(vm, &tok, tok);
+            vm->compiler.type_name_candidate = saved;
         }
         vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
         vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
@@ -1375,8 +1390,12 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,
             // (non-declarations) This ensures const variables can be
             // initialized but not assigned later
             vm->compiler.initializing_var = NULL;
+            Token *saved                  = vm->compiler.type_name_candidate;
+            if (decl_shaped(tok))
+                vm->compiler.type_name_candidate = tok;
             cur = cur->next = stmt(vm, &tok, tok);
-            seen_stmt       = true;
+            vm->compiler.type_name_candidate = saved;
+            seen_stmt                        = true;
         }
         add_type(vm, cur);
     }
