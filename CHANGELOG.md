@@ -13,6 +13,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 - Fixed: inside a struct or union template's body the bare template name stands for the instance, as `struct Name` already did: `static Box wrap(T v) { return (Box){v}; }`, `Box *next;`. It used to fail with `expected ','`. A diagnostic on a method written in a struct body now shows that method's line instead of the struct's. See [templates.md](docs/templates.md#inside-a-template).
 
+- Fixed: an undeclared type name in a declaration reports `unknown type name 'Foo'` with the caret on it, for `Foo x;`, `Foo *p;`, a return type, a parameter, a struct member and a `typedef`. It used to report `expected ','`.
+
 ## [0.36.0] - 2026-11-20
 
 - Added: `-Woverride-init` (in `-Wall`) warns when an initializer element assigns a variable that has a member's name, such as `{.a = 1, b = 3}`. The code is valid C, since `b = 3` assigns the local `b` and initializes the next member with the result, but it is almost always a missing `.`. Parenthesize the assignment, `(b = 3)`, to keep it. See [warnings.md](docs/warnings.md).
