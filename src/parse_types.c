@@ -683,6 +683,8 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
         tok = tok->next;
     }
 declspec_done:
+    // TODO: an undeclared type name lands here and later reports "expected
+    // ','"; name the type instead, see #2143
     if (counter == 0 && !vm->compiler.in_type_lookahead)
         warn_tok(vm, start, CCCC_WARN_IMPLICIT_INT,
                  "type specifier missing, defaults to 'int'");

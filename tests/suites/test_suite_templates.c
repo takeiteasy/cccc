@@ -1054,3 +1054,49 @@ static int local_name_nested_blocks(void) {
 void test_same_tag_local_types_are_numbered_in_declaration_order(void) {
     AssertEq(local_name_nested_blocks(), 1 + 3);
 }
+
+@template(T) struct Own {
+    T    v;
+    Own *next;
+    static Own make(T v) {
+        return (Own){v, NULL};
+    }
+    T get(Own *self) {
+        return self->v;
+    }
+    static Own twice(T v) {
+        return Own.make(v + v);
+    }
+    Own operator - (Own a) {
+        return (Own){-a.v, NULL};
+    }
+};
+@specialize(char) struct Own {
+    char tag;
+    static Own make(char v) {
+        return (Own){v};
+    }
+};
+@template(T) union OwnU {
+    T v;
+    static OwnU make(T v) {
+        return (OwnU){.v = v};
+    }
+};
+
+[[cccc::test]]
+void test_bare_template_name_is_the_instance_in_its_body(void) {
+    Own<int> a = Own<int>.make(20);
+    Own<int> b = Own<int>.make(22);
+    a.next     = &b;
+    AssertEq(a.next->get(), 22);
+    AssertEq(a.get() + a.next->v, 42);
+    AssertEq(Own<int>.twice(21).v, 42);
+    AssertEq((-a).v, -20);
+}
+
+[[cccc::test]]
+void test_bare_name_in_specialization_and_union(void) {
+    AssertEq(Own<char>.make('*').tag, 42);
+    AssertEq(OwnU<int>.make(42).v, 42);
+}

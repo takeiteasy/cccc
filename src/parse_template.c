@@ -1883,6 +1883,14 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
 
     Token *prev = NULL, *prev2 = NULL;
     Token *tag_kw = NULL, *tag_slot = NULL;
+    Token *body_open = NULL;
+    bool   in_body   = false;
+    if (t->kind == TMPL_STRUCT || t->kind == TMPL_UNION)
+        for (body_open = t->name_tok;
+             body_open != t->end && body_open->kind != TK_EOF &&
+             !equal(body_open, "{");
+             body_open = body_open->next)
+            ;
     for (Token *p                                              = t->start;
          p != (limit ? limit : t->end) && p->kind != TK_EOF; p = p->next) {
         if (p == t->marker) {
@@ -1895,18 +1903,28 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
             if (p == (limit ? limit : t->end))
                 break;
         }
+        in_body     |= p == body_open;
+        bool rename  = p->kind == TK_IDENT && p->len == (size_t)t->name_len &&
+                       !strncmp(p->loc, t->name, t->name_len);
+        bool member  = prev && (equal(prev, ".") || equal(prev, "->"));
+        bool inst_arg =
+            prev && prev2 && equal(prev, "(") && equal(prev2, "__cccc_inst");
+        // Inside a struct template's body the bare name is the instance.
+        if (rename && in_body && p != tag_slot && !member && !inst_arg &&
+            !equal(p->next, "<")) {
+            Token *kw =
+                synth_token(vm, t->kind == TMPL_UNION ? "union" : "struct");
+            tok_rare_mut(vm, kw)->expansion = frame;
+            tok_rare_mut(vm, kw)->src_site  = p;
+            cur = cur->next = kw;
+        }
         Token *c = cur = cur->next     = copy_tok(vm, p);
         tok_rare_mut(vm, c)->expansion = frame;
         if (equal(p, "struct") || equal(p, "union") || equal(p, "enum")) {
             tag_kw   = p;
             tag_slot = skip_attr_groups(p->next);
         }
-        bool rename = p->kind == TK_IDENT && p->len == (size_t)t->name_len &&
-                      !strncmp(p->loc, t->name, t->name_len);
         if (rename) {
-            bool member = prev && (equal(prev, ".") || equal(prev, "->"));
-            bool inst_arg =
-                prev && prev2 && equal(prev, "(") && equal(prev2, "__cccc_inst");
             bool is_tag = p == tag_slot;
             switch (t->kind) {
                 case TMPL_FUNC:
@@ -1919,7 +1937,8 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
                     rename = is_tag && equal(tag_kw, "enum") && !inst_arg;
                     break;
                 default:
-                    rename = is_tag && !equal(tag_kw, "enum") && !inst_arg;
+                    rename = (is_tag ? !equal(tag_kw, "enum") : in_body) &&
+                             !member && !inst_arg && !equal(p->next, "<");
             }
         }
         if (rename) {

@@ -96,13 +96,13 @@ An rvalue receiver (`make().len()`) passed to a `T *` parameter is copied into a
 
 ### Templates and members
 
-A method or operator written in a struct template's body belongs to every instance; the receiver is `struct Vec2 *`, as the template name stands for the instance. An operator written once as a function template is instantiated from its operands, so `a + b` over a `Vec2<int>` makes `vadd_int`:
+A method or operator written in a struct template's body belongs to every instance; the receiver is `Vec2 *`, as the template name stands for the instance. An operator written once as a function template is instantiated from its operands, so `a + b` over a `Vec2<int>` makes `vadd_int`:
 
 ```c
 @template(T) struct Vec2 {
     T x, y;
-    T dot(const struct Vec2 *self, const struct Vec2 *o) { return self->x * o->x + self->y * o->y; }
-    struct Vec2 operator-(struct Vec2 a) { return (struct Vec2){-a.x, -a.y}; }
+    T dot(const Vec2 *self, const Vec2 *o) { return self->x * o->x + self->y * o->y; }
+    Vec2 operator-(Vec2 a) { return (Vec2){-a.x, -a.y}; }
 };
 @template(T)
 [[cccc::operator(+)]]

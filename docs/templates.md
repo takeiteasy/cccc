@@ -321,10 +321,12 @@ A checked pointer's bounds (`count(n)`) are not part of the argument, so pointer
 Each parameter names its argument type throughout the body, so `T a, b;` with `T = int *` declares two pointers. The template's own name refers to the instance, and a template may instantiate itself or others:
 
 ```c
-@template(T) struct Node { T val; struct Node *next; };
+@template(T) struct Node { T val; Node *next; };
 @template(T) T fact(T n) { return n <= 1 ? 1 : n * @inst(T) fact(n - 1); }
 @template(T) struct Box { @inst(T, int) Pair inner; };
 ```
+
+In a struct or union template's body the bare name (`Node`) and `struct Node` both mean the instance; `Node<U>` names another one. A member, method or variable inside the body cannot be called `Node`.
 
 Instantiation nests up to 64 levels deep.
 

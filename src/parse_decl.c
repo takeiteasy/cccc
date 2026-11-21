@@ -2492,6 +2492,7 @@ static Token *method_decl(VirtualMachine *vm, PendingMethod *m,
     name->filename = m->name->filename;
     name->line_no  = m->name->line_no;
     name->col_no   = m->name->col_no;
+    tok_rare_mut(vm, name)->src_site = m->name;
     cur = cur->next = name;
 
     Token *params   = m->name->next;
