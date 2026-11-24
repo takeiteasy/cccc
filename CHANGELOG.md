@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.37.1] - 2026-11-24
+
+- Fixed: `sizeof(Point(7))` and `(Point(q)).x` report `'Point(...)' is read as a type here; write Point.new(...) to construct` for a type with a `new` method, in place of `expected ')'`. Valid function types such as `sizeof(Point(int))` are unchanged.
+
 ## [0.37.0] - 2026-11-24
 
 - Fixed: an error in a struct or union initializer, `P p = foo(1);` with `foo` undeclared, was reported twice.

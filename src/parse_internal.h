@@ -649,6 +649,8 @@ int cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
                      KeyedArg *keyed, bool required);
 void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name);
+MethodEntry *find_constructor(VirtualMachine *vm, Type *ty, Token *tok,
+                              Token *lparen, Token **name_out);
 const char *overloadable_operator(Token *tok, Token **rest);
 const char *operator_name(const char *sym, bool unary);
 void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);

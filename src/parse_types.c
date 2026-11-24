@@ -1580,8 +1580,30 @@ Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
 }
 
 // type-name = declspec abstract-declarator
+// `T(args)` where a type name is expected reads as the function type `T(...)`;
+// when T has a `new` method and the argument cannot start a parameter, the
+// call was meant.
+static void hint_constructor_call(VirtualMachine *vm, Token *tname, Type *ty,
+                                  Token *tok) {
+    if (vm->compiler.in_type_lookahead || !equal(tok, "(") ||
+        (ty->kind != TY_STRUCT && ty->kind != TY_UNION))
+        return;
+    Token *arg = tok->next;
+    bool   expr_arg =
+        arg->kind == TK_NUM || arg->kind == TK_PP_NUM || arg->kind == TK_STR ||
+        (arg->kind == TK_IDENT && !find_typedef(vm, arg) &&
+         !equal(arg, "__attribute__") && !equal(arg, "__extension__"));
+    if (expr_arg && find_constructor(vm, ty, tname, tok, NULL))
+        error_tok(vm, tname,
+                  "'%.*s(...)' is read as a type here; write %.*s.new(...) to "
+                  "construct",
+                  tname->len, tname->loc, tname->len, tname->loc);
+}
+
 Type *typename(VirtualMachine *vm, Token **rest, Token *tok) {
-    Type *ty = declspec(vm, &tok, tok, NULL);
+    Token *tname = tok;
+    Type  *ty    = declspec(vm, &tok, tok, NULL);
+    hint_constructor_call(vm, tname, ty, tok);
     return abstract_declarator(vm, rest, tok, ty);
 }
 

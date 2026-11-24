@@ -585,15 +585,10 @@ static Node *call_type_method(VirtualMachine *vm, Token **rest, Token *name,
     return funcall(vm, rest, name->next->next, fn, NULL);
 }
 
-// `T(...)` where T names a struct or union: the call `T.new(...)`. `tok` is
-// the `T` the call is spelled at and `lparen` the `(` after it.
-static Node *constructor_call(VirtualMachine *vm, Token **rest, Type *ty,
-                              Token *tok, Token *lparen) {
-    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
-        error_tok(vm, tok,
-                  "'%.*s' is not a struct or union; it has no "
-                  "constructor",
-                  tok->len, tok->loc);
+// The `new` method of struct or union `ty`, looked up through a name token
+// spelled at `tok` and followed by `lparen`; *name_out receives that token.
+MethodEntry *find_constructor(VirtualMachine *vm, Type *ty, Token *tok,
+                              Token *lparen, Token **name_out) {
     while (ty->size < 0 && ty->origin &&
            (ty->origin->kind == TY_STRUCT || ty->origin->kind == TY_UNION))
         ty = ty->origin;
@@ -604,7 +599,22 @@ static Node *constructor_call(VirtualMachine *vm, Token **rest, Type *ty,
     name->len                        = (int)sizeof(new_name) - 1;
     name->next                       = lparen;
     tok_rare_mut(vm, name)->src_site = tok;
-    MethodEntry *m                   = find_method(vm, ty, name);
+    if (name_out)
+        *name_out = name;
+    return find_method(vm, ty, name);
+}
+
+// `T(...)` where T names a struct or union: the call `T.new(...)`. `tok` is
+// the `T` the call is spelled at and `lparen` the `(` after it.
+static Node *constructor_call(VirtualMachine *vm, Token **rest, Type *ty,
+                              Token *tok, Token *lparen) {
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        error_tok(vm, tok,
+                  "'%.*s' is not a struct or union; it has no "
+                  "constructor",
+                  tok->len, tok->loc);
+    Token       *name;
+    MethodEntry *m = find_constructor(vm, ty, tok, lparen, &name);
     if (!m)
         error_tok(vm, tok,
                   "'%.*s' has no constructor; add @ctor or write (%.*s){...}",

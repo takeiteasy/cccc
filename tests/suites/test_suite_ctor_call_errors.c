@@ -26,3 +26,18 @@ void no_ctor_on_template_instance(void) {
 void non_struct_typedef(void) {
     int n = Num(3);
 }
+
+@ctor typedef struct {
+    int x;
+} Made;
+
+[[cccc::test(error = "'Made(...)' is read as a type here; write Made.new")]]
+void sizeof_of_a_call(void) {
+    unsigned n = sizeof(Made(7));
+}
+
+[[cccc::test(error = "'Made(...)' is read as a type here; write Made.new")]]
+void parenthesised_call(void) {
+    int q = 1;
+    int n = (Made(q)).x;
+}

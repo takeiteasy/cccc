@@ -88,3 +88,10 @@ typedef int Num;
 [[cccc::test]] void function_template_call_is_unchanged(void) {
     AssertEq(pick_max<int>(40, 42), 42);
 }
+
+[[cccc::test]] void function_types_named_by_the_type_are_unchanged(void) {
+    AssertTrue(sizeof(Point(int)) > 0);
+    AssertTrue(sizeof(Point (*)(Point, int)) > 0);
+    Point (*fp)(void) = 0;
+    AssertTrue(fp == 0);
+}
