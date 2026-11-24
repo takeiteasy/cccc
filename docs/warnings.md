@@ -90,7 +90,7 @@ Group: **A** is in `-Wall`, **E** in `-Wextra`, **D** on by default, blank is st
 | `sign-conversion`, `float-conversion` | | Implied by `conversion` |
 | `sign-compare` | A E | Signed/unsigned comparison |
 | `pointer-arith` | A E | Suspicious pointer arithmetic |
-| `pedantic` | A | Non-ISO constructs |
+| `pedantic` | A | Non-ISO constructs, including `T(args)` as a constructor call ([derive.md](derive.md#calling-it-as-t)) |
 | `deprecated` | A | Use of a deprecated entity |
 | `cpp` | A | `#warning`, unmatched diagnostic `pop`, unknown `__has_*` operator |
 | `extra-tokens` | A | Extra tokens after a directive |

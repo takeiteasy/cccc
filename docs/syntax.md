@@ -5,13 +5,17 @@ Syntax that standard C does not have. Each section is a summary with a link to t
 | Syntax | What it does | Guide |
 |---|---|---|
 | `@name(args)` | shorthand for `[[cccc::name]]`, `[[name]]` or `__attribute__` | [attributes-syntax.md](attributes-syntax.md) |
+| `Name<T>`, `f<T>(...)` | template instance | [templates.md](templates.md#instantiating) |
 | `T f(T *self) {...}` in a struct body | method, called as `s.f()` | [methods.md](methods.md) |
+| `T.f(args)` | static method, called through the type | [methods.md](methods.md#static-methods) |
+| `T(args)` | constructor call, the same as `T.new(args)` | [derive.md](derive.md#calling-it-as-t) |
 | `T operator+(T a, T b)` in a struct body | operator overload | [operators.md](operators.md) |
 | `a <=> b` | three-way comparison | [operators.md](operators.md) |
 | `^^name` | compile-time `Type *` / `Obj *` for a name | [macros-reflection.md](macros-reflection.md) |
 | `` `return ${x} + 1;` `` | quasi-quote with `${...}` splices | [macros-quoting.md](macros-quoting.md) |
 | `@default(expr)` | member value used by a derived constructor, or the value of an omitted argument | [derive.md](derive.md) |
 | `f(.name = v)` | keyed argument, matched to the parameter by name | [derive.md](derive.md#parameter-defaults) |
+| `_Ptr<T>`, `_Array_ptr<T> a : count(n)` | Checked C pointer types with bounds | [safety-checked-pointers.md](safety-checked-pointers.md) |
 
 `$` is an ordinary identifier character (`int $x;`) except inside quasi-quote templates.
 
@@ -24,6 +28,18 @@ Syntax that standard C does not have. Each section is a summary with a link to t
 Node *answer(void) { return MakeIntLiteral(42); }
 
 struct @packed point { char x; int y; };
+```
+
+## Templates
+
+`Name<Args>` names an instance of a `@template` type and `f<Args>(...)` calls one of a function template. A closing `>>` closes two lists.
+
+```c
+@template(T)
+struct Box { T v; };
+
+Box<Box<int>> b = {{5}};
+int m = max<int>(5, 3);
 ```
 
 ## Methods
@@ -41,6 +57,30 @@ float n = v.len();    // Vec2_len(&v)
 ```
 
 `[[cccc::method(Vec2)]]` on a free function does the same for a struct you do not own.
+
+A `static` function in the body has no receiver and is called through the type:
+
+```c
+typedef struct Vec2 {
+    float x, y;
+    static Vec2 make(float x, float y) { return (Vec2){x, y}; }
+} Vec2;
+
+Vec2 v = Vec2.make(3, 4);    // Vec2_make(3, 4)
+```
+
+## Constructor calls
+
+A typedef name or template instance followed by `(` calls the type's `new` method, which `@ctor` or a static `new` supplies.
+
+```c
+@ctor
+typedef struct Point { int x, y; } Point;
+
+Point p = Point(3, 4);       // Point.new(3, 4)
+```
+
+Where C reads a type first, `Point(x);` is still a declaration; write `Point.new(x)` there. `-Wpedantic` warns about the `T(args)` spelling.
 
 ## Operators
 
@@ -97,3 +137,12 @@ struct Server s = Server_new();
 ```
 
 On a function parameter, `@default(expr)` is the value of an omitted argument, and `.name = value` gives an argument by name (`area(.h = 10)` for `int area(int w @default(80), int h @default(24));`); see [derive.md](derive.md#parameter-defaults).
+
+## Checked C pointers
+
+`_Ptr<T>`, `_Array_ptr<T>` and `_Nt_array_ptr<T>` are the Checked C spellings of the checked-pointer attributes. A bounds declaration follows the declarator.
+
+```c
+_Ptr<int>       p = &x;
+_Array_ptr<int> a : count(n) = buf;
+```

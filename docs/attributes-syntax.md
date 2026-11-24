@@ -33,7 +33,7 @@ Custom comptime attributes run on file-scope declarations (types, typedefs, func
 
 ## Output
 
-`-E` prints each attribute in its home spelling and drops CCCC-only attributes and route markers, so the output is portable C. `-m`, `-c=generated` and `-c=native` print only the attributes the output needs, in GNU spelling[^serializer].
+`-E` prints each attribute in its home spelling and drops CCCC-only attributes and route markers. Other attributes pass through, so Clang-only ones such as `overloadable`, `enable_if` and `pass_object_size` need Clang to compile the output. `-m`, `-c=generated` and `-c=native` lower those attributes (mangled names, hidden size arguments) and print only the attributes the output needs, in GNU spelling[^serializer].
 
 | Home | `-E` prints | Examples |
 |---|---|---|
