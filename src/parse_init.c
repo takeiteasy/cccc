@@ -1153,7 +1153,8 @@ static void initializer2(VirtualMachine *vm, Token **rest, Token *tok,
         // Handle that case first.
         Node *expr = assign(vm, rest, tok);
         add_type(vm, expr);
-        if (expr->ty->kind == TY_STRUCT || expr->kind == ND_MACRO_CALL) {
+        if (expr->ty->kind == TY_STRUCT || expr->ty == ty_error ||
+            expr->kind == ND_MACRO_CALL) {
             init->expr = expr;
             return;
         }
@@ -1173,7 +1174,7 @@ static void initializer2(VirtualMachine *vm, Token **rest, Token *tok,
         // T`. Handle that case first.
         Node *expr = assign(vm, rest, tok);
         add_type(vm, expr);
-        if (expr->ty->kind == TY_UNION) {
+        if (expr->ty->kind == TY_UNION || expr->ty == ty_error) {
             init->expr = expr;
             return;
         }
