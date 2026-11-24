@@ -14,7 +14,7 @@ int has_expect = __has_builtin(__builtin_expect);   // 1
 | `__has_feature`, `__has_extension` | Support for `c99`, `c11`, `c23`, `c_alignas`, `c_alignof`, `c_generic_selections`, `c_static_assert`, and the extensions `attribute_overloadable` and `overloadable_unmarked`. Parsed-but-incomplete features (`_Atomic`, `_Thread_local`) return 0 |
 | `__has_builtin` | 1 only for builtins with compiler semantics |
 | `__has_attribute` | 1 for attributes with compiler semantics, and for GNU attributes that are inert on a bytecode VM but recognised by name, so headers that feature-test them agree with GCC and Clang ([attributes-ignored.md](attributes-ignored.md)). Unknown attributes return 0 |
-| `__has_c_attribute` | The C23 version date (`202311L`) for standard C23 attributes; 1 for CCCC vendor attributes (including the [`<cccc/derive.h>`](derive.md) ones such as `cccc::accessors`, with or without the header); 1 for anything `__has_attribute` knows in the `gnu` or `__gnu__` scope; 1 for the Clang attributes (`overloadable`, `unavailable`) only in the `clang` or `__clang__` scope; else 0 |
+| `__has_c_attribute` | The C23 version date (`202311L`) for standard C23 attributes; 1 for CCCC vendor attributes (including the [`<cccc/derive.h>`](derive.md) ones such as `cccc::accessors`, with or without the header); 1 for a GNU attribute in the `gnu` or `__gnu__` scope; 1 for the Clang attributes (`overloadable`, `unavailable`) in the `clang` or `__clang__` scope; 0 for a name outside its namespaces ([namespaces](attributes-syntax.md#namespaces)) or an unknown name |
 | `__has_cpp_attribute` | Always 0 |
 | `__has_declspec_attribute`, `__has_warning` | Recognised so headers parse, but always 0: there are no `__declspec` attributes and no `-W`-name registry |
 

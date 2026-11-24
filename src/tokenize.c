@@ -2409,14 +2409,26 @@ static AttrOut classify_msvc_attr(const AttrItem *it, const char *name) {
 
 // Each attribute prints in its home namespace whatever it was written in:
 // cccc attributes are dropped (kept as [[cccc::...]] under --emit-cccc), the
-// rest follow --attr-target. An unknown name in a vendor namespace is kept.
-static AttrOut classify_attr(VirtualMachine *vm, const AttrItem *it) {
+// rest follow --attr-target. An unknown name in a vendor namespace, or a known
+// one written in a namespace it lacks, is kept as written.
+static AttrOut classify_attr(VirtualMachine *vm, const AttrItem *it,
+                             bool bracketed) {
     char name[128] = "";
     copy_attr_name(it->name, name, sizeof(name));
 
     CCCCAttrTarget target =
         vm ? vm->compiler.attr_target : CCCC_ATTR_TARGET_AUTO;
     bool emit_cccc = vm && vm->compiler.emit_cccc;
+
+    const AttrDef *known     = lookup_attr(name, strlen(name));
+    if (known && bracketed &&
+        !attr_in_ns(known, it->ns ? it->ns->loc : NULL,
+                    it->ns ? (size_t)it->ns->len : 0)) {
+        bool dropped = attr_ns_is(it->ns, "cccc")
+                           ? !emit_cccc
+                           : target == CCCC_ATTR_TARGET_STRIP;
+        return (AttrOut){dropped ? OUT_DROP : OUT_C23, NULL, it->ns};
+    }
     int  home      = attr_output_home(name, strlen(name));
     bool foreign   = false;
     if (home < 0) {
@@ -2444,10 +2456,9 @@ static AttrOut classify_attr(VirtualMachine *vm, const AttrItem *it) {
                     vm->compiler.c_std >= CCCC_STD_C23);
         if (c23)
             return (AttrOut){OUT_C23, NULL, NULL, NULL};
-        const AttrDef *def = lookup_attr(name, strlen(name));
-        if (def->flags & ATTR_OUT_NO_GNU)
+        if (known->flags & ATTR_OUT_NO_GNU)
             return (AttrOut){OUT_DROP, NULL, NULL, NULL};
-        return (AttrOut){OUT_GNU, NULL, NULL, def->gnu_name};
+        return (AttrOut){OUT_GNU, NULL, NULL, known->gnu_name};
     }
     if (target == CCCC_ATTR_TARGET_C23)
         return (AttrOut){OUT_C23, "gnu::", NULL};
@@ -2485,7 +2496,7 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
         bool     open = false;
         AttrItem it;
         for (Token *cur = payload; next_attr_item(&cur, close, &it);) {
-            AttrOut out = classify_attr(vm, &it);
+            AttrOut out = classify_attr(vm, &it, c23);
             if (k == 0 && out.warn)
                 warn_tok(vm, it.name, CCCC_WARN_UNKNOWN_ATTRIBUTES, "%s",
                          out.warn);

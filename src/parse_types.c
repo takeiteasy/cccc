@@ -3792,9 +3792,29 @@ static Token *apply_attr(VirtualMachine *vm, Token *tok, const AttrSite *site,
     Token         *name_tok = site->name_tok;
     const AttrDef *def      = lookup_attr(name_tok->loc, name_tok->len);
 
-    if (def && def->apply &&
-        (!(def->flags & ATTR_NS_CCCC) || site->cccc_scoped) &&
-        (!(def->flags & ATTR_NS_CLANG) || site->clang_ok)) {
+    // A user @comptime(attribute(...)) handler may take a name the registry
+    // only ignores.
+    if (def && site->c23 &&
+        (def->apply || !find_attribute_macro(vm, name_tok)) &&
+        !attr_in_ns(def, site->ns ? site->ns->loc : NULL,
+                    site->ns ? (size_t)site->ns->len : 0)) {
+        if (!vm->compiler.in_type_lookahead) {
+            int         len = name_tok->len;
+            const char *nm  = name_tok->loc;
+            if (site->ns)
+                warn_tok(vm, attr_tok, CCCC_WARN_UNKNOWN_ATTRIBUTES,
+                         "'%.*s' is not a '%.*s' attribute; write [[%s%.*s]]",
+                         len, nm, site->ns->len, site->ns->loc,
+                         attr_spelling_ns(def), len, nm);
+            else
+                warn_tok(vm, attr_tok, CCCC_WARN_UNKNOWN_ATTRIBUTES,
+                         "'%.*s' is not a standard attribute; write [[%s%.*s]]",
+                         len, nm, attr_spelling_ns(def), len, nm);
+        }
+        return skip_optional_args(tok);
+    }
+
+    if (def && def->apply) {
         AttrSite resolved = *site;
         resolved.def      = def;
         tok               = def->apply(vm, tok, &resolved, ty, attr);
@@ -3813,7 +3833,7 @@ static Token *apply_attr(VirtualMachine *vm, Token *tok, const AttrSite *site,
          def->marker == ATTR_MARK_BUILD_TARGET ||
          def->marker == ATTR_MARK_TEST_SETUP ||
          def->marker == ATTR_MARK_TEST_TEARDOWN) &&
-        site->cccc_scoped)
+        site->ns)
         return skip_optional_args(tok);
 
     if (find_attribute_macro(vm, name_tok)) {
@@ -3858,7 +3878,6 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                              .name_tok       = tok,
                              .shown_tok      = tok,
                              .quiet_if_known = true,
-                             .clang_ok       = true,
                              .allow_ty_align = true};
             tok           = apply_attr(vm, tok->next, &site, ty, attr);
         }
@@ -3901,23 +3920,22 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
 
             AttrSite site = {.attr_tok       = tok,
                              .name_tok       = tok,
+                             .c23            = true,
                              .allow_ty_align = allow_ty_align};
             Token   *ns   = NULL;
             if (equal(tok->next, ":") && equal(tok->next->next, ":") &&
                 (tok->next->next->next->kind == TK_IDENT ||
                  tok->next->next->next->kind == TK_KEYWORD)) {
-                ns               = tok;
-                site.name_tok    = tok->next->next->next;
-                site.cccc_scoped = equal(ns, "cccc");
-                site.clang_ok    = equal(ns, "clang") || equal(ns, "__clang__");
+                ns            = tok;
+                site.ns       = ns;
+                site.name_tok = tok->next->next->next;
             }
-            // An unscoped name is warned about unless it is standard; a
-            // namespaced one resolves by name, so a known GNU name is quiet.
-            site.quiet_if_known = ns && !site.cccc_scoped;
-            site.shown_tok = ns && !site.cccc_scoped && !equal(ns, "gnu") &&
-                                     !equal(ns, "__gnu__")
-                                 ? ns
-                                 : site.name_tok;
+            bool ours           = ns && equal(ns, "cccc");
+            site.quiet_if_known = ns && !ours;
+            site.shown_tok =
+                ns && !ours && !equal(ns, "gnu") && !equal(ns, "__gnu__")
+                    ? ns
+                    : site.name_tok;
             tok = apply_attr(vm, site.name_tok->next, &site, ty, attr);
         }
 

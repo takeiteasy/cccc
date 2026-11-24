@@ -20,10 +20,8 @@ Purity, optimization, sentinel, allocation and designated-init attributes.
 
 | Spellings |
 |---|
-| `__attribute__((pure))`, `__attribute__((__pure__))`, `[[gnu::pure]]`, `[[cccc::pure]]` |
-| `__attribute__((const))`, `__attribute__((__const__))`, `[[gnu::const]]`, `[[cccc::const]]` |
-
-`[[const]]` would collide with the keyword, so the C23 form needs `gnu::`.
+| `__attribute__((pure))`, `__attribute__((__pure__))`, `[[gnu::pure]]` |
+| `__attribute__((const))`, `__attribute__((__const__))`, `[[gnu::const]]` |
 
 ## `optimize`
 

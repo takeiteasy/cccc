@@ -10,7 +10,7 @@ Any GNU `__attribute__` identifier without compiler semantics is consumed: the p
 |-----------|---------|--------|
 | Recognized by `__has_attribute` | `__attribute__((cold))`, `[[gnu::noinline]]` | Accepted silently |
 | Unknown name | `__attribute__((bogus))`, `[[gnu::bogus]]` | `-Wattributes` warning |
-| Unscoped non-standard C23 name | `[[cold]]` | `-Wattributes` warning |
+| Known name in a namespace it lacks | `[[cold]]`, `[[cccc::cold]]` | `-Wunknown-attributes` warning (on by default) naming its spelling ([namespaces](attributes-syntax.md#namespaces)) |
 
 This matches GCC and Clang: a header that checks `__has_attribute(cold)` before using it compiles cleanly under `-Wall -Werror`.
 

@@ -33,14 +33,14 @@ Custom comptime attributes run on file-scope declarations (types, typedefs, func
 
 ## Output
 
-`-E` prints each attribute in its home namespace, whatever namespace it was written in, and drops CCCC-only attributes and route markers, so the output is portable C. `-m`, `-c=generated` and `-c=native` print only the attributes the output needs, in GNU spelling[^serializer].
+`-E` prints each attribute in its home spelling and drops CCCC-only attributes and route markers, so the output is portable C. `-m`, `-c=generated` and `-c=native` print only the attributes the output needs, in GNU spelling[^serializer].
 
 | Home | `-E` prints | Examples |
 |---|---|---|
-| CCCC | Nothing (`[[cccc::name]]` with `--emit-cccc`) | `[[single]]`, `[[gnu::single]]`, `[[cccc::test]]`, a `@comptime(attribute("name"))` name |
+| CCCC | Nothing (`[[cccc::name]]` with `--emit-cccc`) | `[[single]]`, `[[cccc::test]]`, a `@comptime(attribute("name"))` name |
 | Standard C23 | `[[name]]` in C23 mode, else the GNU spelling[^stdgnu] | `[[gnu::nodiscard]]` prints `[[nodiscard]]`; with `--std=c17` it prints `__attribute__((warn_unused_result))` |
-| GNU | `__attribute__((name))` | `[[cccc::packed]]` and `[[clang::cold]]` print `__attribute__((packed))` and `__attribute__((cold))` |
-| Unknown name in a namespace | `[[ns::name]]` as written | `[[acme::foo(1)]]` |
+| GNU | `__attribute__((name))` | `[[gnu::packed]]` prints `__attribute__((packed))` |
+| Unknown name in a namespace, or a known name in a namespace it lacks | `[[ns::name]]` as written; nothing under `cccc::` | `[[acme::foo(1)]]`, `[[acme::packed]]` |
 
 A list that mixes homes prints one group per spelling, `[[...]]` first.
 
@@ -95,20 +95,26 @@ int buf[4] [[__gnu__::__aligned__(16)]];  // same as [[gnu::aligned(16)]]
 
 ### Namespaces
 
-An attribute resolves by its name alone, in any spelling and any namespace, so every row below is the same attribute:
+In `[[ ]]` form each attribute takes only the namespaces it has, as in GCC and Clang:
 
-| Spelling | Example |
-|---|---|
-| Unscoped | `[[aligned(16)]]`, `[[single]]` |
-| `gnu::` / `__gnu__::` | `[[gnu::aligned(16)]]`, `[[gnu::single]]` |
-| `cccc::` | `[[cccc::aligned(16)]]`, `[[cccc::single]]` |
-| Another vendor | `[[clang::aligned(16)]]`, `[[acme::packed]]` |
-| `__attribute__` | `__attribute__((aligned(16)))` |
-| `@` | `@aligned(16)` |
+| Attribute | Namespaces | Example |
+|---|---|---|
+| Standard C23 | none, `gnu::` | `[[nodiscard]]`, `[[gnu::nodiscard]]` |
+| GNU | `gnu::` | `[[gnu::aligned(16)]]` |
+| CCCC | `cccc::`, none | `[[cccc::single]]`, `[[kernel]]` |
+| OpenCL address spaces (`global`, `local`, `constant`, `private`, `generic`) | `cccc::` | `[[cccc::global]]` |
+| Clang (`overloadable`, `unavailable`) | `clang::` | `[[clang::overloadable]]` ([attributes-overloadable.md](attributes-overloadable.md)) |
 
-An unknown name in a namespace is ignored with a `-Wattributes` warning. `__has_c_attribute(ns::name)` reports a known name in any namespace, except that the Clang attributes `overloadable` and `unavailable` count only in `clang::` ([attributes-overloadable.md](attributes-overloadable.md)).
+`__gnu__::` and `__clang__::` equal `gnu::` and `clang::`. `__attribute__((name))` and `@name` need no namespace.
 
-`kernel`, `trusted`, `operator` and `method` need no `cccc::`; the OpenCL address spaces `global`, `local`, `constant`, `private` and `generic` keep it.
+A known name in a namespace it lacks is ignored with a `-Wunknown-attributes` warning, on by default, that names its spelling:
+
+```c
+struct [[cccc::packed]] S { char c; int x; };
+// warning: 'packed' is not a 'cccc' attribute; write [[gnu::packed]] [-Wunknown-attributes]
+```
+
+An unknown name in a namespace is ignored with a `-Wattributes` warning too. `__has_c_attribute(ns::name)` follows the same table: `__has_c_attribute(gnu::packed)` is 1, `__has_c_attribute(packed)` and `__has_c_attribute(cccc::packed)` are 0.
 
 The structural markers `comptime`, `test`, `test_setup`, `test_teardown`, `build`, `build_target`, `template` and `specialize` take `cccc::` or no namespace. In any other namespace they are an error: `[[gnu::test]]` reports `'test' is a cccc attribute; write [[cccc::test]]`.
 

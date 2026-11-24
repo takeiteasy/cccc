@@ -27,9 +27,14 @@
 // `apply` is the parse-time handler; `marker` and `route` name the
 // preprocessor's structural uses. A row with none of them is recognized and
 // ignored.
-#define CCCC_ROW(n, ...)     {n, ATTR_CCCC, true, 1, __VA_ARGS__}
-#define STD_ROW(n, has, ...) {n, ATTR_STD, has, 202311L, __VA_ARGS__}
-#define GNU_ROW(n, ...)      {n, ATTR_GNU, true, 0, __VA_ARGS__}
+#define CCCC_NS          (ATTR_NS_NONE | ATTR_NS_CCCC)
+#define CCCC_ROW(n, ...) {n, ATTR_CCCC, true, 1, CCCC_NS, __VA_ARGS__}
+#define CCCC_SCOPED_ROW(n, ...)                                                \
+    {n, ATTR_CCCC, true, 1, ATTR_NS_CCCC, __VA_ARGS__}
+#define STD_ROW(n, has, ...)                                                   \
+    {n, ATTR_STD, has, 202311L, ATTR_NS_NONE | ATTR_NS_GNU, __VA_ARGS__}
+#define GNU_ROW(n, ...)   {n, ATTR_GNU, true, 0, ATTR_NS_GNU, __VA_ARGS__}
+#define CLANG_ROW(n, ...) {n, ATTR_GNU, true, 0, ATTR_NS_CLANG, __VA_ARGS__}
 
 static const AttrDef attr_table[] = {
     // CCCC-specific (cccc:: scoped); vendor attributes report 1, not a date
@@ -65,12 +70,12 @@ static const AttrDef attr_table[] = {
     CCCC_ROW("static_method", 0, attr_static_method),
     // OpenCL address spaces: the bare names are common identifiers, so they
     // apply only under `cccc::`.
-    CCCC_ROW("global", ATTR_NS_CCCC, attr_addr_space),
-    CCCC_ROW("local", ATTR_NS_CCCC, attr_addr_space),
-    CCCC_ROW("constant", ATTR_NS_CCCC, attr_addr_space),
-    CCCC_ROW("private", ATTR_NS_CCCC, attr_addr_space),
-    CCCC_ROW("generic", ATTR_NS_CCCC, attr_addr_space),
-    {"cccc_visible_lanes", ATTR_CCCC, false, 0, 0, attr_visible_lanes},
+    CCCC_SCOPED_ROW("global", 0, attr_addr_space),
+    CCCC_SCOPED_ROW("local", 0, attr_addr_space),
+    CCCC_SCOPED_ROW("constant", 0, attr_addr_space),
+    CCCC_SCOPED_ROW("private", 0, attr_addr_space),
+    CCCC_SCOPED_ROW("generic", 0, attr_addr_space),
+    {"cccc_visible_lanes", ATTR_CCCC, false, 0, CCCC_NS, 0, attr_visible_lanes},
     // Standard C23 ([[name]]); the date is N3220 section 6.10.10.2's
     STD_ROW("maybe_unused", false, 0, attr_unused, .gnu_name = "unused"),
     STD_ROW("deprecated", true, 0, attr_deprecated, .msvc_name = "deprecated"),
@@ -106,8 +111,8 @@ static const AttrDef attr_table[] = {
     GNU_ROW("constructor", 0, attr_constructor),
     GNU_ROW("destructor", 0, attr_destructor),
     // Clang's: `[[clang::x]]` or `__attribute__((x))`.
-    GNU_ROW("overloadable", ATTR_NS_CLANG, attr_overloadable),
-    GNU_ROW("unavailable", ATTR_NS_CLANG, attr_unavailable),
+    CLANG_ROW("overloadable", 0, attr_overloadable),
+    CLANG_ROW("unavailable", 0, attr_unavailable),
     // Recognized and ignored: there is no linker, per-function ISA, inliner,
     // branch layout, symbol-level DCE, strict-aliasing optimizer or machine
     // mode.
@@ -164,7 +169,7 @@ static const AttrDef *lookup_exact(const char *name, size_t len) {
             !strncmp(attr_table[i].name, name, len))
             return &attr_table[i];
 
-    static const AttrDef derive_def = {"", ATTR_CCCC, true, 1, 0};
+    static const AttrDef derive_def = {"", ATTR_CCCC, true, 1, CCCC_NS, 0};
     if (is_derive_builtin_attr(name, (int)len))
         return &derive_def;
     return NULL;
@@ -181,6 +186,30 @@ const AttrDef *lookup_attr(const char *name, size_t len) {
         name[len - 2] == '_')
         return lookup_exact(name + 2, len - 4);
     return NULL;
+}
+
+static bool ns_is(const char *ns, size_t len, const char *want) {
+    size_t n = strlen(want);
+    return (len == n && !strncmp(ns, want, n)) ||
+           (len == n + 4 && !strncmp(ns, "__", 2) &&
+            !strncmp(ns + 2, want, n) && !strncmp(ns + n + 2, "__", 2));
+}
+
+bool attr_in_ns(const AttrDef *a, const char *ns, size_t len) {
+    unsigned bit = !ns                                   ? ATTR_NS_NONE
+                   : ns_is(ns, len, "gnu")               ? ATTR_NS_GNU
+                   : ns_is(ns, len, "clang")             ? ATTR_NS_CLANG
+                   : len == 4 && !strncmp(ns, "cccc", 4) ? ATTR_NS_CCCC
+                                                         : 0;
+    return a->ns & bit;
+}
+
+const char *attr_spelling_ns(const AttrDef *a) {
+    if (a->ns & ATTR_NS_CCCC)
+        return "cccc::";
+    if (a->ns & ATTR_NS_NONE)
+        return "";
+    return a->ns & ATTR_NS_CLANG ? "clang::" : "gnu::";
 }
 
 bool cc_has_attribute(const char *name, int len) {

@@ -1,5 +1,5 @@
-// CCCC_FLAGS: -Wattributes
-// CCCC_EXPECT_STDERR: unknown attribute 'overloadable' ignored
+// CCCC_EXPECT_STDERR: 'overloadable' is not a standard attribute; write \[\[clang::overloadable\]\]
+// CCCC_EXPECT_STDERR: 'overloadable' is not a 'gnu' attribute; write \[\[clang::overloadable\]\]
 // Only the GNU and `clang::` spellings mark a function overloadable.
 
 [[overloadable]] int plain(int x) {

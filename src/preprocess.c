@@ -2014,10 +2014,7 @@ static bool is_has_builtin_supported(char *name) {
 
 static long is_has_c_attribute_supported(char *name, const char *vendor) {
     const AttrDef *a = lookup_attr(name, strlen(name));
-    if (!a)
-        return 0;
-    if ((a->flags & ATTR_NS_CLANG) &&
-        (!vendor || (strcmp(vendor, "clang") && strcmp(vendor, "__clang__"))))
+    if (!a || !attr_in_ns(a, vendor, vendor ? strlen(vendor) : 0))
         return 0;
     return a->cat == ATTR_GNU ? a->has_attr : a->date;
 }

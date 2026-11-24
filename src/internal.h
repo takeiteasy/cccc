@@ -700,12 +700,16 @@ typedef enum { ATTR_CCCC, ATTR_STD, ATTR_GNU } AttrCategory;
 enum {
     ATTR_OUT_GNU = 1, // a cccc attribute GCC shares: preprocessed output prints
                       // it as GNU
-    ATTR_NS_CCCC = 2, // applies only when written under `cccc::`
     ATTR_KEYWORD_ALIAS = 4, // also spelled `__name` / `__name__` outside [[ ]]
-    ATTR_OUT_NO_GNU = 8,  // a standard attribute with no GNU form: dropped from
-                          // GNU-spelled output
-    ATTR_NS_CLANG   = 16, // `[[ ]]` form applies only under `clang::`; the GNU
-                          // spelling needs no namespace
+    ATTR_OUT_NO_GNU = 8, // a standard attribute with no GNU form: dropped from
+                         // GNU-spelled output
+};
+// The `[[ns::name]]` namespaces a row accepts; `__attribute__` needs none.
+enum {
+    ATTR_NS_NONE  = 1, // unscoped `[[name]]`
+    ATTR_NS_GNU   = 2, // `gnu::` / `__gnu__::`
+    ATTR_NS_CLANG = 4, // `clang::` / `__clang__::`
+    ATTR_NS_CCCC  = 8, // `cccc::`
 };
 // A name the preprocessor consumes structurally instead of the parser.
 typedef enum {
@@ -733,9 +737,9 @@ typedef struct {
     const struct AttrDef *def; // the registry row being applied
     Token *attr_tok;           // first token: the namespace when there is one
     Token *name_tok;           // the attribute name
+    Token *ns;                 // the `[[ns::name]]` namespace, or NULL
     Token *shown_tok;      // where an unknown-attribute warning's name starts
-    bool   cccc_scoped;
-    bool   clang_ok;       // GNU spelling, or written under `clang::`
+    bool   c23;            // `[[ ]]` form, whose namespace must match the row
     bool   quiet_if_known; // a name __has_attribute reports is not warned about
     bool   allow_ty_align; // packed/aligned may change `ty`; see
                            // c23_attribute_list_ex()
@@ -749,6 +753,7 @@ typedef struct AttrDef {
     AttrCategory cat;
     bool         has_attr;
     long         date; // __has_c_attribute value
+    unsigned     ns;   // ATTR_NS_* mask
     unsigned     flags;
     AttrApplyFn *apply; // NULL: not applied by the parser
     AttrMarker   marker;
@@ -768,6 +773,11 @@ AttrApplyFn attr_checked_ptr, attr_checked, attr_unchecked, attr_addr_space,
     attr_unused, attr_deprecated, attr_overloadable, attr_unavailable;
 // The attribute `name` (or its `__name__` spelling), or NULL.
 const AttrDef *lookup_attr(const char *name, size_t len);
+// True when `[[ns::name]]` names `a`; `ns` NULL is the unscoped form.
+bool attr_in_ns(const AttrDef *a, const char *ns, size_t len);
+// The namespace a warning suggests for `a`: "cccc::", "gnu::", "clang::" or
+// "" (standard).
+const char *attr_spelling_ns(const AttrDef *a);
 // True when __has_attribute(name) reports the GNU attribute as recognized.
 bool cc_has_attribute(const char *name, int len);
 // The AttrCategory whose spelling preprocessed output uses, or -1 if unknown.

@@ -9,7 +9,7 @@ struct __attribute__((packed)) S {
     int  x;
 };
 __attribute__((noinline)) int f(void);
-[[gnu::nodiscard, cccc::packed, gnu::cold, acme::foo(1, 2)]] int g(void);
+[[gnu::nodiscard, gnu::packed, gnu::cold, acme::foo(1, 2)]] int g(void);
 int *[[single]] p;
 int main(void) {
     return 42;

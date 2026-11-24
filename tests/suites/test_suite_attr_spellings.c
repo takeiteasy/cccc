@@ -1,6 +1,6 @@
 // CCCC_FLAGS: --testing
-// Suite: one attribute, every spelling: [[x]], [[cccc::x]], [[gnu::x]],
-// [[__gnu__::x]], __attribute__((x)), __attribute__((__x__)), @x.
+// Suite: one attribute, every spelling: [[gnu::x]], [[__gnu__::x]],
+// __attribute__((x)), __attribute__((__x__)), @x.
 
 #include <stdint.h>
 
@@ -15,15 +15,6 @@ struct __attribute__((aligned(16))) AlignAttr {
     char c;
 };
 struct @aligned(16) AlignAt {
-    char c;
-};
-struct [[aligned(16)]] AlignStd {
-    char c;
-};
-struct [[cccc::aligned(16)]] AlignCccc {
-    char c;
-};
-struct [[__aligned__(16)]] AlignStdU {
     char c;
 };
 struct __attribute__((__aligned__(16))) AlignAttrU {
@@ -43,14 +34,6 @@ struct __attribute__((packed)) PackAttr {
     int  i;
 };
 struct @packed PackAt {
-    char c;
-    int  i;
-};
-struct [[packed]] PackStd {
-    char c;
-    int  i;
-};
-struct [[cccc::packed]] PackCccc {
     char c;
     int  i;
 };
@@ -105,9 +88,6 @@ void test_aligned_spellings(void) {
     AssertEq(_Alignof(struct AlignGnuU), 16);
     AssertEq(_Alignof(struct AlignAttr), 16);
     AssertEq(_Alignof(struct AlignAt), 16);
-    AssertEq(_Alignof(struct AlignStd), 16);
-    AssertEq(_Alignof(struct AlignCccc), 16);
-    AssertEq(_Alignof(struct AlignStdU), 16);
     AssertEq(_Alignof(struct AlignAttrU), 16);
 }
 
@@ -117,8 +97,6 @@ void test_packed_spellings(void) {
     AssertEq(sizeof(struct PackGnuU), 5);
     AssertEq(sizeof(struct PackAttr), 5);
     AssertEq(sizeof(struct PackAt), 5);
-    AssertEq(sizeof(struct PackStd), 5);
-    AssertEq(sizeof(struct PackCccc), 5);
     AssertEq(sizeof(struct PackAttrU), 5);
 }
 
@@ -159,7 +137,8 @@ void test_template_marker_defaults(void) {
     AssertEq(sizeof c, 16);
 }
 
-// Introspection: every spelling a registered attribute has reports it.
+// Introspection: every spelling a registered attribute has reports it, and a
+// namespace the attribute lacks does not.
 [[cccc::test]]
 void test_has_attribute_spellings(void) {
     AssertTrue(__has_attribute(aligned));
@@ -169,10 +148,11 @@ void test_has_attribute_spellings(void) {
     AssertTrue(__has_c_attribute(__gnu__::aligned));
     AssertTrue(__has_c_attribute(cccc::single));
     AssertTrue(__has_c_attribute(deprecated));
-    AssertTrue(__has_c_attribute(cccc::aligned));
-    AssertTrue(__has_c_attribute(clang::aligned));
-    AssertTrue(__has_c_attribute(aligned));
-    AssertTrue(__has_c_attribute(gnu::single));
+    AssertTrue(__has_c_attribute(single));
+    AssertFalse(__has_c_attribute(cccc::aligned));
+    AssertFalse(__has_c_attribute(clang::aligned));
+    AssertFalse(__has_c_attribute(aligned));
+    AssertFalse(__has_c_attribute(gnu::single));
     AssertFalse(__has_c_attribute(cccc::no_such_attribute));
 }
 
