@@ -1748,7 +1748,7 @@ static void check_param_bounds_template(VirtualMachine *vm, Node *n,
 
 // The scope file-scope names are declared in: the file's own scope, which sits
 // under the scope its pre-parse calls declared into.
-static void walk_to_file_scope(VirtualMachine *vm) {
+void walk_to_file_scope(VirtualMachine *vm) {
     Scope *file =
         vm->compiler.in_macro_mode ? NULL : vm->compiler.runtime_file_scope;
     while (vm->compiler.scope->next && vm->compiler.scope != file)

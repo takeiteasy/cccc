@@ -319,6 +319,9 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
             // serialize_aliased_ptr_type_decl's own comment.
             if (!serialize_aliased_ptr_type_decl(df, ctx, param, buf))
                 serialize_type_decl(df, ctx, param, buf);
+            // pass_object_size's hidden size argument.
+            if (type_attrs(param)->objsize_kind)
+                fprintf(df, ", unsigned long __a%d", anon++);
         }
     }
 

@@ -125,6 +125,10 @@ typedef struct VarAttr {
     int format_string_index;  // 1-based index of format string arg
     int format_fmt_first_arg; // 1-based index of first variadic arg to check
 
+    FnCond *fn_conds;             // enable_if/diagnose_if
+    uint8_t objsize_kind;         // pass_object_size: OBJSIZE_*
+    uint8_t objsize_type;
+
     // Nonnull argument / return checking
     bool     nonnull_all;
     uint64_t nonnull_mask;
@@ -733,6 +737,26 @@ void cc_check_checked_scope_compound_literal(VirtualMachine *vm, Type *ty,
                                              Token *tok);
 void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty);
 void resolve_type_checked_bounds(VirtualMachine *vm, Type *ty);
+void walk_to_file_scope(VirtualMachine *vm);
+// enable_if, diagnose_if and pass_object_size (src/fn_cond.c).
+FnCond *cc_fn_conds_concat(VirtualMachine *vm, FnCond *a, FnCond *b);
+int cc_fn_hidden_params(Type *fn);
+int cc_fn_enable_if_count(Type *fn);
+bool cc_fn_enable_ifs_extend(Type *a, Type *b);
+bool cc_has_param_placeholder(Node *n);
+void cc_fn_conds_resolve(VirtualMachine *vm, Type *fn);
+void cc_fn_declared(VirtualMachine *vm, Type *fn, Token *name);
+bool cc_fn_objsize_agree(Type *a, Type *b);
+FnCond *cc_fn_failed_enable_if(VirtualMachine *vm, Type *fn, Node **args,
+                               int nargs);
+void cc_fn_check_call(VirtualMachine *vm, Type *fn, Node *args, Token *site,
+                      const char *name);
+void cc_fn_check_reference(VirtualMachine *vm, Obj *fn, Token *tok);
+void cc_fn_objsize_args(VirtualMachine *vm, Type *fn, Node *args, Token *tok);
+Obj *cc_fn_objsize_param(VirtualMachine *vm, Type *param);
+Obj *cc_fn_objsize_hidden(Node *ptr, int64_t type);
+Node *cc_objsize_query(VirtualMachine *vm, Node *ptr, int64_t type,
+                       bool dynamic, Token *start);
 void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty,
                              Token *new_tok);
 void merge_checked_interface_defaults(VirtualMachine *vm, Obj *fn, Type *ty);

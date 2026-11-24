@@ -212,8 +212,11 @@ static void create_param_lvars(VirtualMachine *vm, Type *param) {
         // (function(), src/parse_decl.c).
         cc_check_checked_scope_decl(vm, param, param->param_name, "parameter");
         drop_cleanup_attr(vm, param, NULL, param->param_name);
+        Obj *size     = cc_fn_objsize_param(vm, param);
         Obj *var      = new_lvar_at(vm, param->param_name, param);
         var->is_param = true;
+        if (size)
+            obj_size_mut(vm, var)->objsize_hidden = size;
     }
 }
 
@@ -445,6 +448,8 @@ static bool adopt_hidden_builtin(VirtualMachine *vm, Obj *fn, Type *ty,
 // following an unprototyped `()` declaration then becomes the function's type
 // (C17 6.2.7p3 composite), keeping the attributes the `()` declaration carried.
 static void merge_fn_type_attrs(VirtualMachine *vm, Type *dst, Type *src) {
+    if (type_attrs(src)->fn_conds && !type_attrs(dst)->fn_conds)
+        type_attrs_mut(vm, dst)->fn_conds = type_attrs(src)->fn_conds;
     if (type_attrs(src)->format_style) {
         type_attrs_mut(vm, dst)->format_style = type_attrs(src)->format_style;
         type_attrs_mut(vm, dst)->format_string_index =
@@ -488,6 +493,11 @@ static void check_fn_redecl(VirtualMachine *vm, Obj *fn, Type *old_ty,
     // The respelled prototype of a generated function drops qualifiers.
     bool synthesized =
         name && name->file && !strcmp(name->file->name, "<inline-macro-fwd>");
+    if (old_ty && old_ty->kind == TY_FUNC && !cc_fn_objsize_agree(old_ty, ty))
+        error_tok(vm, name,
+                  "conflicting pass_object_size attributes on the parameters "
+                  "of '%s'",
+                  obj_display_name(fn));
     if (synthesized || !old_ty || old_ty->kind != TY_FUNC ||
         is_error_type(old_ty) ||
         is_compatible_fn_redecl(old_ty, old_def, ty, new_def,
@@ -1250,6 +1260,10 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         // Save the opening '{' position so we can skip past the body if a
         // fatal longjmp fires and leaves tok stranded inside it (#615).
         Token *body_start = tok;
+        // ...and the parser state an error can leave mid-change.
+        Scope *body_scope      = vm->compiler.scope;
+        bool   body_lookahead  = vm->compiler.in_type_lookahead;
+        bool   body_in_fn_cond = vm->compiler.in_fn_cond;
 
         if (setjmp(neg_jmp_buf) == 0) {
             obj_fn_mut(vm, fn)->body = compound_stmt(vm, &tok, tok, &close_brace);
@@ -1273,6 +1287,9 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             // the body. Note: tok = skip(vm, tok, "{") above already consumed
             // the opening '{', so body_start is the first token *inside* the
             // body — start at depth 1.
+            vm->compiler.scope             = body_scope;
+            vm->compiler.in_type_lookahead = body_lookahead;
+            vm->compiler.in_fn_cond        = body_in_fn_cond;
             leave_scope(vm);
             int depth = 1;
             for (Token *t = body_start; t && t->kind != TK_EOF; t = t->next) {

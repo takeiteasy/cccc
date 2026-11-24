@@ -103,7 +103,8 @@ In `[[ ]]` form each attribute takes only the namespaces it has, as in GCC and C
 | GNU | `gnu::` | `[[gnu::aligned(16)]]` |
 | CCCC | `cccc::`, none | `[[cccc::single]]`, `[[kernel]]` |
 | OpenCL address spaces (`global`, `local`, `constant`, `private`, `generic`) | `cccc::` | `[[cccc::global]]` |
-| Clang (`overloadable`, `unavailable`) | `clang::` | `[[clang::overloadable]]` ([attributes-overloadable.md](attributes-overloadable.md)) |
+| Clang (`overloadable`, `unavailable`, `pass_object_size`, `pass_dynamic_object_size`) | `clang::` | `[[clang::overloadable]]` ([attributes-overloadable.md](attributes-overloadable.md)) |
+| Clang `enable_if`, `diagnose_if` | none: `__attribute__` only | `__attribute__((enable_if(n > 0, "")))` ([attributes-overloadable-call-site.md](attributes-overloadable-call-site.md)) |
 
 `__gnu__::` and `__clang__::` equal `gnu::` and `clang::`. `__attribute__((name))` and `@name` need no namespace.
 

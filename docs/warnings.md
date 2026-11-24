@@ -98,7 +98,8 @@ Group: **A** is in `-Wall`, **E** in `-Wextra`, **D** on by default, blank is st
 | `cccc-macro` | A | CCCC comptime macro issues |
 | `comptime-block-leak` | E | A `#pragma cccc comptime begin` block in an included header is left unclosed at EOF and auto-closed |
 | `ignored-features` | A | A construct the VM does not honour: `_Atomic`, ignored attributes, file-scope `asm`, extended `asm` with outputs or `goto` labels (not raised under `-c=native`/`-m`/`-c=generated`, where the asm runs) |
-| `attributes` | A | Unknown attribute names (names `__has_attribute` knows are silent), and misuse such as `sentinel` on a non-variadic function |
+| `attributes` | A | Unknown attribute names (names `__has_attribute` knows are silent), misuse such as `sentinel` on a non-variadic function, and the messages of `warning("msg")` and `diagnose_if` |
+| `user-defined-warnings` | A | Alias of `attributes`, Clang's name for `diagnose_if` warnings ([attributes-overloadable-call-site.md](attributes-overloadable-call-site.md#diagnose_if)) |
 | `unknown-attributes` | D | An `@name` with no registered handler (`@json_skp`). `[[name]]` and `__attribute__((name))` report under `attributes`. Silence with `-Wno-unknown-attributes` |
 | `openmp` | D | An `ordered depend(sink: ...)` that waits on the current or a later iteration, or on one the loop never runs; the sink is ignored ([openmp.md](openmp.md#doacross-loops)). Silence with `-Wno-openmp` |
 | `checked-regions` | D | A [checked-region](safety-checked-regions.md#downgrading-to-warnings) violation. An error by default; `-Wno-error=checked-regions` makes it a warning. `-Wno-checked-regions` does not silence it |

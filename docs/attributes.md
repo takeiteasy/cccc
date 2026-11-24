@@ -22,6 +22,8 @@ Status: **yes** has full semantics, **~** is parsed and mostly informational.
 | `static_method(T[, name])` | CCCC | yes | Static methods called as `T.f(x)` ([methods.md](methods.md#static-methods)) |
 | `operator(sym)` | CCCC | yes | Operator overloading for structs ([operators.md](operators.md)) |
 | `overloadable`, `unavailable` | GNU, `clang::` | yes | Functions overloaded by parameter types ([attributes-overloadable.md](attributes-overloadable.md)) |
+| `enable_if`, `diagnose_if` | GNU | yes | Conditions on a call's arguments ([attributes-overloadable-call-site.md](attributes-overloadable-call-site.md)) |
+| `pass_object_size`, `pass_dynamic_object_size` | GNU, `clang::` | yes | The caller passes each pointer argument's object size ([attributes-overloadable-call-site.md](attributes-overloadable-call-site.md#pass_object_size)) |
 | `cleanup(fn)`, `constructor`, `destructor` | GNU | yes | [attributes-cleanup.md](attributes-cleanup.md) |
 | `sentinel`, `alloc_size`, `designated_init` | GNU | yes | [attributes-gnu.md](attributes-gnu.md) |
 | `pure`, `const`, `malloc` | GNU | ~ | Informational in the VM, forwarded under `-c=native` ([attributes-gnu.md](attributes-gnu.md)) |
@@ -44,6 +46,7 @@ Status: **yes** has full semantics, **~** is parsed and mostly informational.
 | [attributes-cccc.md](attributes-cccc.md) | CCCC-specific `comptime`, `emit` and include forms |
 | [attributes-gnu.md](attributes-gnu.md) | `pure`, `const`, `optimize`, `sentinel`, `alloc_size`, `malloc`, `designated_init` |
 | [attributes-overloadable.md](attributes-overloadable.md) | `overloadable`, `unavailable` |
+| [attributes-overloadable-call-site.md](attributes-overloadable-call-site.md) | `enable_if`, `diagnose_if`, `pass_object_size` |
 | [attributes-cleanup.md](attributes-cleanup.md) | `cleanup`, `constructor`, `destructor` |
 | [attributes-nonnull.md](attributes-nonnull.md) | `nonnull`, `returns_nonnull` |
 | [attributes-bounds.md](attributes-bounds.md) | Pointer bounds, casts, regions |

@@ -2912,7 +2912,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // #830's scope.
                 bool ffi_is_variadic_call =
                     node->func_ty && node->func_ty->is_variadic;
-                int ffi_fixed_param_count = 0;
+                int ffi_fixed_param_count =
+                    node->func_ty ? cc_fn_hidden_params(node->func_ty) : 0;
                 if (ffi_is_variadic_call) {
                     for (Type *p = node->func_ty->params; p; p = p->next)
                         ffi_fixed_param_count++;
@@ -3135,7 +3136,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             bool is_variadic_call = node->func_ty &&
                                     node->func_ty->is_variadic &&
                                     !node->func_ty->is_unprototyped;
-            int  fixed_param_count = 0;
+            int fixed_param_count =
+                node->func_ty ? cc_fn_hidden_params(node->func_ty) : 0;
             if (is_variadic_call) {
                 for (Type *p = node->func_ty->params; p; p = p->next) {
                     fixed_param_count++;

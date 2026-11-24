@@ -69,6 +69,7 @@ static const WarningInfo warning_infos[] = {
     {"comptime-block-leak", CCCC_WARN_COMPTIME_BLOCK_LEAK, false},
     {"ignored-features", CCCC_WARN_IGNORED_FEATURES, false},
     {"attributes", CCCC_WARN_ATTRIBUTES, false},
+    {"user-defined-warnings", CCCC_WARN_ATTRIBUTES, false},
     {"unknown-attributes", CCCC_WARN_UNKNOWN_ATTRIBUTES, false},
     {"nodiscard", CCCC_WARN_NODISCARD, false},
     {"fallthrough", CCCC_WARN_FALLTHROUGH, false},

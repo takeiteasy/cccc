@@ -770,7 +770,8 @@ AttrApplyFn attr_checked_ptr, attr_checked, attr_unchecked, attr_addr_space,
     attr_warning, attr_warn_unused_result, attr_noreturn, attr_nodiscard,
     attr_fallthrough, attr_no_unique_address, attr_pure, attr_kernel,
     attr_trusted, attr_const, attr_gnu_inline, attr_designated_init,
-    attr_unused, attr_deprecated, attr_overloadable, attr_unavailable;
+    attr_unused, attr_deprecated, attr_overloadable, attr_unavailable,
+    attr_pass_object_size, attr_enable_if, attr_diagnose_if;
 // The attribute `name` (or its `__name__` spelling), or NULL.
 const AttrDef *lookup_attr(const char *name, size_t len);
 // True when `[[ns::name]]` names `a`; `ns` NULL is the unscoped form.

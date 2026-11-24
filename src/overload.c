@@ -51,6 +51,7 @@ typedef struct {
     Token          *site;
     const char     *fn_name;
     bool            soft; // report failure by flag instead of an error
+    bool            in_cond; // mangling an enable_if condition
     bool            failed;
     char          **subs;
     int             nsubs, cap_subs;
@@ -63,8 +64,8 @@ static void mangle_fail(Mangler *m, const char *why) {
         m->failed = true;
         return;
     }
-    error_tok(m->vm, m->site,
-              "cannot mangle a parameter type of overloadable '%s': %s",
+    error_tok(m->vm, m->site, "cannot mangle %s of overloadable '%s': %s",
+              m->in_cond ? "an enable_if condition" : "a parameter type",
               m->fn_name, why);
 }
 
@@ -170,8 +171,19 @@ static void enc_params(Mangler *m, Buf *out, Type *fn, int flags) {
         buf_puts(out, "v");
         return;
     }
-    for (Type *p = fn->params; p; p = p->next)
+    for (Type *p = fn->params; p; p = p->next) {
         enc(m, out, p, ENC_STRIP_TOP | (flags & ENC_NOSUBS));
+        const TypeAttrs *pa = type_attrs(p);
+        if (pa->objsize_kind) {
+            char q[40];
+            snprintf(q, sizeof q, "%s%d",
+                     pa->objsize_kind == OBJSIZE_DYNAMIC
+                         ? "U25pass_dynamic_object_size"
+                         : "U17pass_object_size",
+                     pa->objsize_type);
+            buf_puts(out, q);
+        }
+    }
     if (fn->is_variadic && !fn->is_unprototyped)
         buf_puts(out, "z");
 }
@@ -300,6 +312,182 @@ static void enc(Mangler *m, Buf *out, Type *t, int flags) {
     free(key.p);
 }
 
+// An enable_if condition as clang mangles it: the expression as written, with
+// implicit conversions left out and a parameter as `fL0p<cv><n>_`.
+static void enc_expr(Mangler *m, Buf *out, Node *n);
+
+// The earliest source position in `n`.
+static const char *first_loc(Node *n) {
+    const char *loc    = n->tok ? n->tok->loc : NULL;
+    Node       *kids[] = {n->lhs, n->rhs};
+    for (int i = 0; i < 2; i++) {
+        const char *l = kids[i] ? first_loc(kids[i]) : NULL;
+        if (l && (!loc || l < loc))
+            loc = l;
+    }
+    return loc;
+}
+
+static void enc_literal(Mangler *m, Buf *out, Node *n) {
+    char scratch[24], num[32];
+    bool keyword = n->tok->kind == TK_KEYWORD &&
+                   (equal(n->tok, "true") || equal(n->tok, "false"));
+    if (n->tok->kind != TK_NUM && !keyword) {
+        mangle_fail(m, "it names a constant that is not a literal");
+        return;
+    }
+    const char *code = builtin_code(m, n->ty, scratch);
+    if (!code || n->val < 0) {
+        mangle_fail(m, "unsupported literal");
+        return;
+    }
+    snprintf(num, sizeof num, "%lld", (long long)n->val);
+    buf_puts(out, "L");
+    buf_puts(out, code);
+    buf_puts(out, num);
+    buf_puts(out, "E");
+}
+
+static void enc_param_ref(Buf *out, Node *n) {
+    Type *p   = n->var->ty;
+    int   idx = obj_chk(n->var)->checked_self_param_idx;
+    char  s[32];
+    snprintf(s, sizeof s, "fL0p%s%s%s", p->is_restrict ? "r" : "",
+             p->is_volatile ? "V" : "", p->is_const ? "K" : "");
+    buf_puts(out, s);
+    if (idx > 1) {
+        snprintf(s, sizeof s, "%d", idx - 2);
+        buf_puts(out, s);
+    }
+    buf_puts(out, "_");
+}
+
+static void enc_builtin_call(Mangler *m, Buf *out, Node *n) {
+    static const char *names[] = {"__builtin_object_size",
+                                  "__builtin_dynamic_object_size"};
+    char               s[64];
+    if (n->val < 0)
+        buf_puts(out, "clL_Z20__builtin_constant_pE");
+    else {
+        const char *name = names[(n->val & 4) != 0];
+        snprintf(s, sizeof s, "clL_Z%d%sE", (int)strlen(name), name);
+        buf_puts(out, s);
+    }
+    enc_expr(m, out, n->lhs);
+    if (n->val >= 0) {
+        snprintf(s, sizeof s, "Li%dE", (int)(n->val & 3));
+        buf_puts(out, s);
+    }
+    buf_puts(out, "E");
+}
+
+static void enc_expr(Mangler *m, Buf *out, Node *n) {
+    static const struct {
+        NodeKind    kind;
+        const char *code;
+    } binary[] = {
+        {ND_ADD, "pl"},    {ND_SUB, "mi"},    {ND_MUL, "ml"},
+        {ND_DIV, "dv"},    {ND_MOD, "rm"},    {ND_BITAND, "an"},
+        {ND_BITOR, "or"},  {ND_BITXOR, "eo"}, {ND_SHL, "ls"},
+        {ND_SHR, "rs"},    {ND_EQ, "eq"},     {ND_NE, "ne"},
+        {ND_LOGAND, "aa"}, {ND_LOGOR, "oo"},
+    };
+    if (m->failed)
+        return;
+    switch (n->kind) {
+        case ND_CAST:
+            if (!n->is_explicit_cast) {
+                enc_expr(m, out, n->lhs);
+                return;
+            }
+            buf_puts(out, "cv");
+            enc(m, out, n->ty, 0);
+            enc_expr(m, out, n->lhs);
+            return;
+        case ND_NUM:
+            enc_literal(m, out, n);
+            return;
+        case ND_VAR:
+            if (!obj_chk(n->var)->checked_self_param_idx) {
+                mangle_fail(m, "it names something other than a parameter");
+                return;
+            }
+            enc_param_ref(out, n);
+            return;
+        case ND_PARAM_QUERY:
+            enc_builtin_call(m, out, n);
+            return;
+        case ND_NEG:
+        case ND_NOT:
+        case ND_BITNOT:
+            buf_puts(out, n->kind == ND_NEG   ? "ng"
+                          : n->kind == ND_NOT ? "nt"
+                                              : "co");
+            enc_expr(m, out, n->lhs);
+            return;
+        case ND_COND:
+            buf_puts(out, "qu");
+            enc_expr(m, out, node_ctl(n)->cond);
+            enc_expr(m, out, node_ctl(n)->then);
+            enc_expr(m, out, node_ctl(n)->els);
+            return;
+        case ND_LT:
+        case ND_LE: {
+            // `a > b` is built as `b < a`.
+            bool swapped = first_loc(n->rhs) < first_loc(n->lhs);
+            buf_puts(out, n->kind == ND_LT ? (swapped ? "gt" : "lt")
+                                           : (swapped ? "ge" : "le"));
+            enc_expr(m, out, swapped ? n->rhs : n->lhs);
+            enc_expr(m, out, swapped ? n->lhs : n->rhs);
+            return;
+        }
+        default:
+            break;
+    }
+    for (size_t i = 0; i < sizeof binary / sizeof *binary; i++)
+        if (binary[i].kind == n->kind) {
+            if ((n->kind == ND_ADD || n->kind == ND_SUB) &&
+                (n->lhs->ty->kind == TY_PTR || n->rhs->ty->kind == TY_PTR))
+                break;
+            buf_puts(out, binary[i].code);
+            enc_expr(m, out, n->lhs);
+            enc_expr(m, out, n->rhs);
+            return;
+        }
+    // TODO: #2154 globals, folded constants, pointer arithmetic, floating
+    // literals, members and calls have clang manglings too.
+    mangle_fail(m, "unsupported operator");
+}
+
+// clang's `Ua9enable_ifI<args>E` qualifier on the function name.
+static void enc_enable_ifs(Mangler *m, Buf *out, Type *fn) {
+    if (!cc_fn_enable_if_count(fn))
+        return;
+    cc_fn_conds_resolve(m->vm, fn);
+    m->in_cond = true;
+    buf_puts(out, "Ua9enable_ifI");
+    for (FnCond *c = type_attrs(fn)->fn_conds; c; c = c->next) {
+        if (c->kind != FN_COND_ENABLE_IF)
+            continue;
+        Node *e = c->tmpl;
+        while (e && e->kind == ND_CAST && !e->is_explicit_cast)
+            e = e->lhs;
+        if (!e) {
+            mangle_fail(m, "it is not resolved");
+            return;
+        }
+        if (e->kind == ND_NUM)
+            enc_literal(m, out, e);
+        else {
+            buf_puts(out, "X");
+            enc_expr(m, out, e);
+            buf_puts(out, "E");
+        }
+    }
+    buf_puts(out, "E");
+    m->in_cond = false;
+}
+
 static char *mangle_function(VirtualMachine *vm, Token *site, const char *name,
                              int name_len, Type *fn, bool soft) {
     Mangler m   = {.vm = vm, .site = site, .fn_name = name, .soft = soft};
@@ -309,6 +497,7 @@ static char *mangle_function(VirtualMachine *vm, Token *site, const char *name,
     snprintf(len, sizeof len, "%d", name_len);
     buf_puts(&out, len);
     buf_putn(&out, name, name_len);
+    enc_enable_ifs(&m, &out, fn);
     enc_params(&m, &out, fn, 0);
     char *r = m.failed ? NULL : arena_strndup(vm, out.p, out.len);
     free(out.p);
@@ -446,6 +635,8 @@ static void reject_second_unmarked(VirtualMachine *vm, Type *ty, Token *tok,
 OverloadName cc_overload_decl_name(VirtualMachine *vm, Type *ty, Token *tok,
                                    bool defines_body) {
     OverloadName r = {get_ident(vm, tok), tok->len, tok};
+    if (ty && ty->kind == TY_FUNC)
+        cc_fn_declared(vm, ty, tok);
     if (ty && ty->kind == TY_FUNC && !ty->is_overloadable)
         reject_second_unmarked(vm, ty, tok, r.name);
     if (!ty || ty->kind != TY_FUNC || !ty->is_overloadable)
@@ -738,9 +929,10 @@ static Rank conversion_rank(VirtualMachine *vm, Node *arg, Type *from,
 enum { MAX_RANKED_ARGS = 64 };
 
 typedef struct {
-    Rank r[MAX_RANKED_ARGS];
-    bool viable;
-    bool is_template;
+    Rank  r[MAX_RANKED_ARGS];
+    bool  viable;
+    bool  is_template;
+    Type *fn; // a function's type, for its enable_if and pass_object_size
 } Candidate;
 
 static Type *param_named(Type *params, Token *key) {
@@ -963,14 +1155,21 @@ static char *signature_text(VirtualMachine *vm, Obj *fn) {
                         fn->ty->is_variadic);
 }
 
+// `disabled`, when given, holds each candidate's failed enable_if.
 static char *candidate_list(VirtualMachine *vm, const char *name,
-                            const OverloadCand *cands, int n) {
+                            const OverloadCand *cands, int n,
+                            FnCond *const *disabled) {
     Buf out = {0};
     for (int i = 0; i < n; i++) {
         const TemplateCall *t = cands[i].tmpl;
         buf_puts(&out, t ? "\n    candidate template: " : "\n    candidate: ");
         buf_puts(&out, t ? signature_of(vm, name, t->params, t->variadic)
                          : signature_text(vm, cands[i].fn));
+        if (disabled && disabled[i]) {
+            buf_puts(&out, " (disabled: ");
+            buf_puts(&out, disabled[i]->msg);
+            buf_puts(&out, ")");
+        }
     }
     char *s = arena_strndup(vm, out.p ? out.p : "", out.len);
     free(out.p);
@@ -985,7 +1184,7 @@ static char *placeholder_candidates(VirtualMachine *vm, Node *ph) {
     for (int i = 0; i < n; i++)
         cands[i].fn = set->m[i].fn;
     char *name = get_ident(vm, ph->tok);
-    char *s    = candidate_list(vm, name, cands, n);
+    char *s    = candidate_list(vm, name, cands, n, NULL);
     if (placeholder_template(vm, ph))
         s = arena_format(vm, "%s\n    candidate template: %s", s, name);
     free(cands);
@@ -1001,11 +1200,22 @@ static bool same_ranks(const Candidate *a, const Candidate *b, int nargs) {
 }
 
 // Whether `a` wins over `b`: it ranks better, or alike while `b` is a
-// function template and `a` is not.
+// function template and `a` is not, or alike while `a` has the longer
+// enable_if list or, failing that, a pass_object_size parameter.
 static bool wins_over(const Candidate *a, const Candidate *b, int nargs) {
     int cmp = compare_candidates(a, b, nargs);
-    return cmp > 0 || (cmp == 0 && b->is_template && !a->is_template &&
-                       same_ranks(a, b, nargs));
+    if (cmp || !same_ranks(a, b, nargs))
+        return cmp > 0;
+    if (a->is_template || b->is_template)
+        return b->is_template && !a->is_template;
+    if (!a->fn || !b->fn)
+        return false;
+    if (cc_fn_enable_ifs_extend(a->fn, b->fn))
+        return true;
+    if (cc_fn_enable_if_count(a->fn) != cc_fn_enable_if_count(b->fn) ||
+        cc_fn_enable_ifs_extend(b->fn, a->fn))
+        return false;
+    return cc_fn_hidden_params(a->fn) && !cc_fn_hidden_params(b->fn);
 }
 
 // The index of the candidate a call with `npos` positional and the keyed
@@ -1018,6 +1228,7 @@ int cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
     for (KeyedArg *k = keyed; k; k = k->next)
         nargs++;
     Candidate *ranked    = calloc((size_t)n, sizeof *ranked);
+    FnCond   **disabled  = calloc((size_t)n, sizeof *disabled);
     int        best      = -1;
     bool       ambiguous = false;
     int        viable    = 0;
@@ -1028,9 +1239,16 @@ int cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
             ranked[i].is_template = c->tmpl != NULL;
             bool variadic =
                 c->tmpl ? c->tmpl->variadic : c->fn->ty->is_variadic;
-            if (rank_candidate(vm, &ranked[i], c->params, variadic, args, npos,
-                               keyed, pass == 1))
-                viable++;
+            if (!rank_candidate(vm, &ranked[i], c->params, variadic, args, npos,
+                                keyed, pass == 1))
+                continue;
+            // A bound operator or method ranks other than the parameters.
+            if (c->fn && c->params == c->fn->ty->params) {
+                ranked[i].fn = c->fn->ty;
+                disabled[i] = cc_fn_failed_enable_if(vm, c->fn->ty, args, npos);
+                ranked[i].viable = !disabled[i];
+            }
+            viable += ranked[i].viable;
         }
     }
 
@@ -1051,14 +1269,17 @@ int cc_overload_pick(VirtualMachine *vm, Token *site, const char *name,
         ambiguous = true;
     free(ranked);
 
-    if (!viable && !required)
+    if (!viable && !required) {
+        free(disabled);
         return -1;
+    }
     if (!viable)
         error_tok(vm, site, "no matching function for call to '%s'%s", name,
-                  candidate_list(vm, name, cands, n));
+                  candidate_list(vm, name, cands, n, disabled));
     if (ambiguous)
         error_tok(vm, site, "call to '%s' is ambiguous%s", name,
-                  candidate_list(vm, name, cands, n));
+                  candidate_list(vm, name, cands, n, NULL));
+    free(disabled);
     return best;
 }
 
@@ -1133,6 +1354,7 @@ Node *cc_overload_take_address(VirtualMachine *vm, Node *ph, Type *target) {
     if (fn->is_deprecated)
         warn_deprecated_use(vm, ph->tok, obj_display_name(fn),
                             obj_attr(fn)->deprecated_msg);
+    cc_fn_check_reference(vm, fn, ph->tok);
     return new_var_node(vm, fn, ph->tok);
 }
 

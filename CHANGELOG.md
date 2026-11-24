@@ -9,6 +9,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 - Changed: a `[[ns::name]]` attribute applies only in the namespaces it has: standard ones unscoped or under `gnu::`, GNU ones under `gnu::`, cccc ones under `cccc::` or unscoped, and Clang ones under `clang::`. A known name elsewhere, such as `[[cccc::packed]]`, `[[acme::packed]]` or `[[aligned(16)]]`, is ignored with a `-Wunknown-attributes` warning, on by default, that names its spelling (`write [[gnu::packed]]`), and `-E` prints it as written. `__has_c_attribute(ns::name)` follows the same rule, so `__has_c_attribute(packed)` is 0. `__attribute__((name))` and `@name` are unchanged. See [attributes-syntax.md](docs/attributes-syntax.md#namespaces).
 
+- Added: Clang's `enable_if(cond, "msg")`, `diagnose_if(cond, "msg", "error"|"warning")`, `pass_object_size(type)` and `pass_dynamic_object_size(type)`. A condition is evaluated with each call's arguments: a failed `enable_if` takes the function out of the call's candidates, with `candidate disabled: msg` when none is left, and a `diagnose_if` that holds reports its message (warnings under `-Wuser-defined-warnings`, an alias of `-Wattributes`). A `pass_object_size` call passes each annotated argument's object size as a hidden `size_t`, which `__builtin_object_size` reads in the callee, with Clang's calling convention and Itanium names, so code built by Clang links either way. See [attributes-overloadable-call-site.md](docs/attributes-overloadable-call-site.md).
+
+- Fixed: a GNU attribute after a pointer qualifier, `void *const __attribute__((aligned(8))) p`, was `expected ','`.
+
+- Fixed: in a `--testing` file, a fatal error inside a declaration in one `error =` test could leave the next test's declaration-time checks off, so its expected error was not reported.
+
 ## [0.37.1] - 2026-11-24
 
 - Added: `-Wpedantic` warns about `T(args)` and `Name<T>(args)` as a constructor call, and `-Werror=pedantic` rejects it; `T.new(args)` is not diagnosed.

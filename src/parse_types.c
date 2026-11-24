@@ -1160,6 +1160,11 @@ static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
                 ty->is_restrict = true;
             }
             tok = tok->next;
+            // GNU attributes may follow a qualifier too: the macOS SDK writes
+            // `void *const __attribute__((pass_object_size(0))) dst`.
+            tok = attribute_list(vm, tok, ty, cleanup_fn ? &ptr_attr : NULL);
+            if (ptr_attr.cleanup_fn)
+                *cleanup_fn = ptr_attr.cleanup_fn;
         }
     }
     *rest = tok;
@@ -2877,7 +2882,8 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
          !attr->attr_warning_msg && !attr->nonnull_all && !attr->nonnull_mask &&
          !attr->returns_nonnull && !attr->is_constructor &&
          !attr->is_destructor && !attr->is_sentinel && !attr->alloc_size_idx &&
-         !attr->is_malloc && !attr->has_vector_size && !attr->vec_visible))
+         !attr->is_malloc && !attr->has_vector_size && !attr->vec_visible &&
+         !attr->fn_conds && !attr->objsize_kind))
         return ty;
 
     if (attr->has_vector_size)
@@ -2923,6 +2929,17 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
         type_attrs_mut(vm, ty)->attr_error_msg = attr->attr_error_msg;
     if (attr->attr_warning_msg && ty->kind == TY_FUNC)
         type_attrs_mut(vm, ty)->attr_warning_msg = attr->attr_warning_msg;
+    if (attr->fn_conds && ty->kind == TY_FUNC)
+        type_attrs_mut(vm, ty)->fn_conds =
+            cc_fn_conds_concat(vm, type_attrs(ty)->fn_conds, attr->fn_conds);
+    if (attr->objsize_kind) {
+        if (type_attrs(ty)->objsize_kind)
+            error_tok(vm, attr->attribute_tok,
+                      "only one pass_object_size attribute is allowed per "
+                      "parameter");
+        type_attrs_mut(vm, ty)->objsize_kind = attr->objsize_kind;
+        type_attrs_mut(vm, ty)->objsize_type = attr->objsize_type;
+    }
     if (ty->kind == TY_FUNC) {
         if (attr->nonnull_all)
             ty->nonnull_all = true;
@@ -2982,6 +2999,8 @@ static void inherit_semantic_attrs(VirtualMachine *vm, Type *dst, Type *src) {
         type_attrs_mut(vm, dst)->attr_error_msg = sa->attr_error_msg;
     if (sa->attr_warning_msg && !type_attrs(dst)->attr_warning_msg)
         type_attrs_mut(vm, dst)->attr_warning_msg = sa->attr_warning_msg;
+    if (sa->fn_conds && !type_attrs(dst)->fn_conds)
+        type_attrs_mut(vm, dst)->fn_conds = sa->fn_conds;
     if (sa->format_style) {
         TypeAttrs *da            = type_attrs_mut(vm, dst);
         da->format_style         = sa->format_style;
@@ -3647,6 +3666,101 @@ Token *attr_overloadable(VirtualMachine *vm, Token *tok, const AttrSite *site,
     return skip_optional_args(tok);
 }
 
+// enable_if(cond, "msg") / diagnose_if(cond, "msg", "error"|"warning"). The
+// condition is kept as tokens: the parameters it names are out of scope until
+// the declaration is complete (cc_fn_declared).
+static Token *fn_cond_attr(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                           Type *ty, VarAttr *attr, bool diagnose) {
+    FnCond *c = arena_alloc(&vm->compiler.parser_arena, sizeof *c);
+    memset(c, 0, sizeof *c);
+    tok     = skip(vm, tok, "(");
+    c->expr = tok;
+    for (int depth = 0; depth || (!equal(tok, ",") && !equal(tok, ")"));
+         tok       = tok->next) {
+        if (tok->kind == TK_EOF)
+            error_tok(vm, site->name_tok, "unterminated '%s' attribute",
+                      site->def->name);
+        if (equal(tok, "(") || equal(tok, "[") || equal(tok, "{"))
+            depth++;
+        else if (equal(tok, ")") || equal(tok, "]") || equal(tok, "}"))
+            depth--;
+    }
+    if (tok == c->expr)
+        error_tok(vm, tok, "expected a condition");
+    c->end = tok;
+    tok    = skip(vm, tok, ",");
+    if (tok->kind != TK_STR)
+        error_tok(vm, tok, "expected a string literal message");
+    c->msg  = tok_lit(tok)->str;
+    tok     = tok->next;
+    c->kind = FN_COND_ENABLE_IF;
+    if (diagnose) {
+        tok = skip(vm, tok, ",");
+        if (tok->kind == TK_STR && !strcmp(tok_lit(tok)->str, "error"))
+            c->kind = FN_COND_DIAG_ERROR;
+        else if (tok->kind == TK_STR && !strcmp(tok_lit(tok)->str, "warning"))
+            c->kind = FN_COND_DIAG_WARNING;
+        else
+            error_tok(vm, tok,
+                      "diagnose_if's severity must be \"error\" or "
+                      "\"warning\"");
+        tok = tok->next;
+    }
+    tok = skip(vm, tok, ")");
+    if (vm->compiler.in_type_lookahead)
+        return tok;
+    if (attr)
+        attr->fn_conds = cc_fn_conds_concat(vm, attr->fn_conds, c);
+    else if (ty && is_func_type(ty))
+        type_attrs_mut(vm, ty)->fn_conds =
+            cc_fn_conds_concat(vm, type_attrs(ty)->fn_conds, c);
+    vm->compiler.saw_diag_attr = true;
+    return tok;
+}
+
+Token *attr_enable_if(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                      Type *ty, VarAttr *attr) {
+    return fn_cond_attr(vm, tok, site, ty, attr, false);
+}
+
+Token *attr_diagnose_if(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                        Type *ty, VarAttr *attr) {
+    return fn_cond_attr(vm, tok, site, ty, attr, true);
+}
+
+// pass_object_size(type) / pass_dynamic_object_size(type) on a pointer
+// parameter; cc_fn_declared checks where it was written.
+Token *attr_pass_object_size(VirtualMachine *vm, Token *tok,
+                             const AttrSite *site, Type *ty, VarAttr *attr) {
+    tok          = skip(vm, tok, "(");
+    Token  *at   = tok;
+    int64_t type = const_expr(vm, &tok, tok);
+    tok          = skip(vm, tok, ")");
+    uint8_t kind = strcmp(site->def->name, "pass_dynamic_object_size")
+                       ? OBJSIZE_STATIC
+                       : OBJSIZE_DYNAMIC;
+    if (type < 0 || type > 3)
+        error_tok(vm, at, "'%s' type must be between 0 and 3", site->def->name);
+    if (vm->compiler.in_type_lookahead)
+        return tok;
+    // After a `*` the attribute qualifies that pointer, `ty`.
+    uint8_t *have_kind = ty     ? &type_attrs_mut(vm, ty)->objsize_kind
+                         : attr ? &attr->objsize_kind
+                                : NULL;
+    if (!have_kind)
+        return tok;
+    if (*have_kind)
+        error_tok(vm, site->name_tok,
+                  "only one pass_object_size attribute is allowed per "
+                  "parameter");
+    *have_kind = kind;
+    if (ty)
+        type_attrs_mut(vm, ty)->objsize_type = (uint8_t)type;
+    else
+        attr->objsize_type = (uint8_t)type;
+    return tok;
+}
+
 // GNU equivalent of [[nodiscard]].
 Token *attr_warn_unused_result(VirtualMachine *vm, Token *tok,
                                const AttrSite *site, Type *ty, VarAttr *attr) {
@@ -3801,7 +3915,12 @@ static Token *apply_attr(VirtualMachine *vm, Token *tok, const AttrSite *site,
         if (!vm->compiler.in_type_lookahead) {
             int         len = name_tok->len;
             const char *nm  = name_tok->loc;
-            if (site->ns)
+            if (!def->ns)
+                warn_tok(vm, attr_tok, CCCC_WARN_UNKNOWN_ATTRIBUTES,
+                         "'%.*s' has no [[ ]] spelling; write "
+                         "__attribute__((%.*s))",
+                         len, nm, len, nm);
+            else if (site->ns)
                 warn_tok(vm, attr_tok, CCCC_WARN_UNKNOWN_ATTRIBUTES,
                          "'%.*s' is not a '%.*s' attribute; write [[%s%.*s]]",
                          len, nm, site->ns->len, site->ns->loc,

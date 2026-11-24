@@ -35,6 +35,8 @@
     {n, ATTR_STD, has, 202311L, ATTR_NS_NONE | ATTR_NS_GNU, __VA_ARGS__}
 #define GNU_ROW(n, ...)   {n, ATTR_GNU, true, 0, ATTR_NS_GNU, __VA_ARGS__}
 #define CLANG_ROW(n, ...) {n, ATTR_GNU, true, 0, ATTR_NS_CLANG, __VA_ARGS__}
+// Clang's `__attribute__`-only attributes: no `[[ ]]` spelling.
+#define CLANG_GNU_ROW(n, ...) {n, ATTR_GNU, true, 0, 0, __VA_ARGS__}
 
 static const AttrDef attr_table[] = {
     // CCCC-specific (cccc:: scoped); vendor attributes report 1, not a date
@@ -113,6 +115,10 @@ static const AttrDef attr_table[] = {
     // Clang's: `[[clang::x]]` or `__attribute__((x))`.
     CLANG_ROW("overloadable", 0, attr_overloadable),
     CLANG_ROW("unavailable", 0, attr_unavailable),
+    CLANG_ROW("pass_object_size", 0, attr_pass_object_size),
+    CLANG_ROW("pass_dynamic_object_size", 0, attr_pass_object_size),
+    CLANG_GNU_ROW("enable_if", 0, attr_enable_if),
+    CLANG_GNU_ROW("diagnose_if", 0, attr_diagnose_if),
     // Recognized and ignored: there is no linker, per-function ISA, inliner,
     // branch layout, symbol-level DCE, strict-aliasing optimizer or machine
     // mode.

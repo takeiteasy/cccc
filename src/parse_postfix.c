@@ -72,6 +72,189 @@ static Node *reflect_name(VirtualMachine *vm, Token **rest, Token *tok) {
     error_tok(vm, name, "^^%.*s: unknown name", name->len, name->loc);
 }
 
+static Node *static_objsize(VirtualMachine *vm, Node *ptr, long long type_arg,
+                            Token *start) {
+    add_type(vm, ptr);
+
+    // Conservative default: type 0/1 → (size_t)-1, type 2/3 → 0.
+    size_t result = (type_arg & 2) ? 0 : (size_t)-1;
+
+    // Helper: bytes remaining in `info` for this type_arg.
+#define OBJSZ_REMAINING(info)                                                  \
+    ({                                                                         \
+        int _rem = (type_arg & 1) ? (info).sub_size - (info).sub_offset        \
+                                  : (info).base_size - (info).base_offset;     \
+        _rem > 0 ? (size_t)_rem : (size_t)0;                                   \
+    })
+
+    if (ptr->kind == ND_COND) {
+        // Ternary: resolve each branch; combine with max (type 0/1) or
+        // min (type 2/3).  If either branch is unresolvable, keep the
+        // conservative default.
+        ObjSizeInfo ti, ei;
+        if (objsize_resolve_ptr(vm, node_ctl(ptr)->then, &ti) &&
+            objsize_resolve_ptr(vm, node_ctl(ptr)->els, &ei)) {
+            size_t sa = OBJSZ_REMAINING(ti);
+            size_t sb = OBJSZ_REMAINING(ei);
+            result = (type_arg & 2) ? (sa < sb ? sa : sb) : (sa > sb ? sa : sb);
+        }
+    } else {
+        ObjSizeInfo info;
+        Member     *m;
+        Node       *sub_base, *sub_off;
+        if (objsize_resolve_ptr(vm, ptr, &info)) {
+            result = OBJSZ_REMAINING(info);
+        } else if ((type_arg & 1) &&
+                   objsize_resolve_subobject(vm, ptr, &m, &sub_base,
+                                             &sub_off) &&
+                   is_const_expr(vm, sub_off)) {
+            // The member bounds the answer even when its object doesn't.
+            int64_t off = eval(vm, sub_off);
+            if (off >= 0 && off <= m->ty->size)
+                result = (size_t)(m->ty->size - off);
+        }
+    }
+
+#undef OBJSZ_REMAINING
+
+    Node *node = new_node(vm, ND_NUM, start);
+    node->val  = (int64_t)result;
+    node->ty   = ty_ulong;
+
+    // #642: constant malloc-family allocation tracking. A bare pointer
+    // variable (through casts) whose declaration initializer was
+    // recognized as `malloc(const)`/`calloc(const,const)`/etc. gets its
+    // size resolved *after* the whole function is parsed, not here — a
+    // later reassignment or address-of (including across a loop
+    // back-edge) must be able to poison it first. See
+    // resolve_objsize_queries. The node already holds the conservative
+    // fallback, so if it's never upgraded (or this turns out not to be a
+    // whole-function query, e.g. objsize_resolve_ptr already resolved a
+    // more specific path above) behavior is unchanged.
+    //
+    // The query is only registered when it is asked from the *same*
+    // function the pointer was declared in. A query made from inside a
+    // nested function / block on an enclosing-scope pointer would
+    // otherwise be resolved (and its ND_NUM frozen) the instant that
+    // inner function finishes parsing — which happens *before* a later
+    // reassignment in the enclosing scope is even parsed, let alone
+    // poison-scanned. Restricting registration this way means such
+    // cross-scope queries always keep the conservative fallback, which
+    // is exactly what a same-function query would fall back to anyway
+    // once reassigned.
+    if (ptr->kind != ND_COND) {
+        // #697/#700: peel casts *and* constant-offset ND_ADDs (interior
+        // pointers, e.g. `p + 32`, written inline in the builtin's
+        // argument) down to the base tracked var, accumulating the byte
+        // delta. `base` may itself be a derived var (#700's `q = p +
+        // const`), in which case objsize_effective_remaining follows the
+        // chain at resolve time. A non-constant offset (or an
+        // unresolvable/untracked base) simply skips registration,
+        // leaving the conservative fallback already stored in `node`.
+        // This is deliberately *not* done in objsize_resolve_ptr, which
+        // runs at parse time before objsize_unsafe can be poisoned by a
+        // later reassignment -- see resolve_objsize_queries.
+        Obj *base;
+        int  base_offset;
+        if (objsize_peel_offset_chain(vm, ptr, &base, &base_offset) &&
+            base->objsize_has_alloc &&
+            obj_size(base)->objsize_decl_fn == vm->compiler.current_fn) {
+            struct ObjSizeQuery *q = arena_alloc(&vm->compiler.parser_arena,
+                                                 sizeof(struct ObjSizeQuery));
+            q->node                = node;
+            q->var                 = base;
+            q->offset              = base_offset;
+            q->next                = vm->compiler.objsize_queries;
+            vm->compiler.objsize_queries = q;
+        }
+    }
+
+    return node;
+}
+
+static Node *dynamic_objsize(VirtualMachine *vm, Node *ptr, long long type_arg,
+                             Token *start) {
+    add_type(vm, ptr);
+
+    // Static fold: try to resolve at compile time (same as
+    // __builtin_object_size). Ternary (ND_COND) is handled by resolving
+    // both branches and combining.
+#define DYNOSZ_REMAINING(info)                                                 \
+    ({                                                                         \
+        int _rem = (type_arg & 1) ? (info).sub_size - (info).sub_offset        \
+                                  : (info).base_size - (info).base_offset;     \
+        _rem > 0 ? (size_t)_rem : (size_t)0;                                   \
+    })
+
+    {
+        bool   folded      = false;
+        size_t fold_result = 0;
+        if (ptr->kind == ND_COND) {
+            ObjSizeInfo ti, ei;
+            if (objsize_resolve_ptr(vm, node_ctl(ptr)->then, &ti) &&
+                objsize_resolve_ptr(vm, node_ctl(ptr)->els, &ei)) {
+                size_t sa = DYNOSZ_REMAINING(ti);
+                size_t sb = DYNOSZ_REMAINING(ei);
+                fold_result =
+                    (type_arg & 2) ? (sa < sb ? sa : sb) : (sa > sb ? sa : sb);
+                folded = true;
+            }
+        } else {
+            ObjSizeInfo info;
+            if (objsize_resolve_ptr(vm, ptr, &info)) {
+                fold_result = DYNOSZ_REMAINING(info);
+                folded      = true;
+            }
+        }
+        if (folded) {
+            Node *node = new_node(vm, ND_NUM, start);
+            node->val  = (int64_t)fold_result;
+            node->ty   = ty_ulong;
+#undef DYNOSZ_REMAINING
+            return node;
+        }
+    }
+#undef DYNOSZ_REMAINING
+
+    // Runtime path: emit DYNOBJSZ opcode that reads AllocHeader at runtime.
+    Node *node = new_node(vm, ND_DYNOBJ_SIZE, start);
+    node->lhs  = ptr;
+    node->val  = type_arg;
+    node->ty   = ty_ulong;
+    // Codegen evaluates `ptr` as cond + rhs, keeping the offset into the
+    // member.
+    Member *m;
+    Node   *sub_base, *sub_off;
+    if ((type_arg & 1) &&
+        objsize_resolve_subobject(vm, ptr, &m, &sub_base, &sub_off)) {
+        node->member                 = m;
+        node_ctl_mut(vm, node)->cond = sub_base;
+        node->rhs                    = sub_off;
+    }
+    return node;
+}
+
+// __builtin_object_size(ptr, type), or __builtin_dynamic_object_size when
+// `dynamic`. Inside an enable_if/diagnose_if condition a query on a parameter
+// waits for the call's argument; on a pass_object_size parameter it reads the
+// hidden size the caller passed.
+Node *cc_objsize_query(VirtualMachine *vm, Node *ptr, int64_t type,
+                       bool dynamic, Token *start) {
+    add_type(vm, ptr);
+    if (vm->compiler.in_fn_cond && cc_has_param_placeholder(ptr)) {
+        Node *q = new_node(vm, ND_PARAM_QUERY, start);
+        q->lhs  = ptr;
+        q->val  = type | (dynamic ? 4 : 0);
+        q->ty   = ty_ulong;
+        return q;
+    }
+    Obj *hidden = cc_fn_objsize_hidden(ptr, type);
+    if (hidden)
+        return new_var_node(vm, hidden, start);
+    return dynamic ? dynamic_objsize(vm, ptr, type, start)
+                   : static_objsize(vm, ptr, type, start);
+}
+
 // unary = ("+" | "-" | "*" | "&" | "!" | "~") cast
 //       | ("++" | "--") unary
 //       | "&&" ident
@@ -1520,9 +1703,14 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
     // itself is deferred.
     Node *prelude = NULL;
     if (!deferred_splice) {
+        cc_fn_check_call(vm, ty, head_next, fn->tok,
+                         fn->kind == ND_VAR && fn->var
+                             ? obj_display_name(fn->var)
+                             : "function");
         resolve_param_checked_bounds(vm, ty);
         cc_check_checked_call(vm, watch, ty, fn->tok);
         prelude = rewrite_checked_call_args(vm, ty, head_next, tok);
+        cc_fn_objsize_args(vm, ty, head_next, tok);
     }
 
     Node *node           = new_unary(vm, ND_FUNCALL, fn, tok);
@@ -1531,7 +1719,7 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
     node->args           = head_next;
     node->has_splice_arg = deferred_splice;
     if (ty->is_variadic || ty->is_unprototyped) {
-        int fixed = 0;
+        int fixed = cc_fn_hidden_params(ty);
         for (Type *p = ty->params; p; p = p->next)
             fixed++;
         int i = 0;
@@ -4173,104 +4361,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok                = skip(vm, tok, ",");
         long long type_arg = const_expr(vm, &tok, tok);
         *rest              = skip(vm, tok, ")");
-
-        add_type(vm, ptr);
-
-        // Conservative default: type 0/1 → (size_t)-1, type 2/3 → 0.
-        size_t result = (type_arg & 2) ? 0 : (size_t)-1;
-
-        // Helper: bytes remaining in `info` for this type_arg.
-#define OBJSZ_REMAINING(info)                                                  \
-    ({                                                                         \
-        int _rem = (type_arg & 1) ? (info).sub_size - (info).sub_offset        \
-                                  : (info).base_size - (info).base_offset;     \
-        _rem > 0 ? (size_t)_rem : (size_t)0;                                   \
-    })
-
-        if (ptr->kind == ND_COND) {
-            // Ternary: resolve each branch; combine with max (type 0/1) or
-            // min (type 2/3).  If either branch is unresolvable, keep the
-            // conservative default.
-            ObjSizeInfo ti, ei;
-            if (objsize_resolve_ptr(vm, node_ctl(ptr)->then, &ti) &&
-                objsize_resolve_ptr(vm, node_ctl(ptr)->els, &ei)) {
-                size_t sa = OBJSZ_REMAINING(ti);
-                size_t sb = OBJSZ_REMAINING(ei);
-                result =
-                    (type_arg & 2) ? (sa < sb ? sa : sb) : (sa > sb ? sa : sb);
-            }
-        } else {
-            ObjSizeInfo info;
-            Member     *m;
-            Node       *sub_base, *sub_off;
-            if (objsize_resolve_ptr(vm, ptr, &info)) {
-                result = OBJSZ_REMAINING(info);
-            } else if ((type_arg & 1) &&
-                       objsize_resolve_subobject(vm, ptr, &m, &sub_base,
-                                                 &sub_off) &&
-                       is_const_expr(vm, sub_off)) {
-                // The member bounds the answer even when its object doesn't.
-                int64_t off = eval(vm, sub_off);
-                if (off >= 0 && off <= m->ty->size)
-                    result = (size_t)(m->ty->size - off);
-            }
-        }
-
-#undef OBJSZ_REMAINING
-
-        Node *node = new_node(vm, ND_NUM, start);
-        node->val  = (int64_t)result;
-        node->ty   = ty_ulong;
-
-        // #642: constant malloc-family allocation tracking. A bare pointer
-        // variable (through casts) whose declaration initializer was
-        // recognized as `malloc(const)`/`calloc(const,const)`/etc. gets its
-        // size resolved *after* the whole function is parsed, not here — a
-        // later reassignment or address-of (including across a loop
-        // back-edge) must be able to poison it first. See
-        // resolve_objsize_queries. The node already holds the conservative
-        // fallback, so if it's never upgraded (or this turns out not to be a
-        // whole-function query, e.g. objsize_resolve_ptr already resolved a
-        // more specific path above) behavior is unchanged.
-        //
-        // The query is only registered when it is asked from the *same*
-        // function the pointer was declared in. A query made from inside a
-        // nested function / block on an enclosing-scope pointer would
-        // otherwise be resolved (and its ND_NUM frozen) the instant that
-        // inner function finishes parsing — which happens *before* a later
-        // reassignment in the enclosing scope is even parsed, let alone
-        // poison-scanned. Restricting registration this way means such
-        // cross-scope queries always keep the conservative fallback, which
-        // is exactly what a same-function query would fall back to anyway
-        // once reassigned.
-        if (ptr->kind != ND_COND) {
-            // #697/#700: peel casts *and* constant-offset ND_ADDs (interior
-            // pointers, e.g. `p + 32`, written inline in the builtin's
-            // argument) down to the base tracked var, accumulating the byte
-            // delta. `base` may itself be a derived var (#700's `q = p +
-            // const`), in which case objsize_effective_remaining follows the
-            // chain at resolve time. A non-constant offset (or an
-            // unresolvable/untracked base) simply skips registration,
-            // leaving the conservative fallback already stored in `node`.
-            // This is deliberately *not* done in objsize_resolve_ptr, which
-            // runs at parse time before objsize_unsafe can be poisoned by a
-            // later reassignment -- see resolve_objsize_queries.
-            Obj *base;
-            int  base_offset;
-            if (objsize_peel_offset_chain(vm, ptr, &base, &base_offset) &&
-                base->objsize_has_alloc &&
-                obj_size(base)->objsize_decl_fn == vm->compiler.current_fn) {
-                struct ObjSizeQuery *q = arena_alloc(
-                    &vm->compiler.parser_arena, sizeof(struct ObjSizeQuery));
-                q->node                      = node;
-                q->var                       = base;
-                q->offset                    = base_offset;
-                q->next                      = vm->compiler.objsize_queries;
-                vm->compiler.objsize_queries = q;
-            }
-        }
-
-        return node;
+        return cc_objsize_query(vm, ptr, type_arg, false, start);
     }
 
     // __builtin_dynamic_object_size(ptr, type) — runtime object-size query.
@@ -4309,65 +4400,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok                = skip(vm, tok, ",");
         long long type_arg = const_expr(vm, &tok, tok);
         *rest              = skip(vm, tok, ")");
-
-        add_type(vm, ptr);
-
-        // Static fold: try to resolve at compile time (same as
-        // __builtin_object_size). Ternary (ND_COND) is handled by resolving
-        // both branches and combining.
-#define DYNOSZ_REMAINING(info)                                                 \
-    ({                                                                         \
-        int _rem = (type_arg & 1) ? (info).sub_size - (info).sub_offset        \
-                                  : (info).base_size - (info).base_offset;     \
-        _rem > 0 ? (size_t)_rem : (size_t)0;                                   \
-    })
-
-        {
-            bool   folded      = false;
-            size_t fold_result = 0;
-            if (ptr->kind == ND_COND) {
-                ObjSizeInfo ti, ei;
-                if (objsize_resolve_ptr(vm, node_ctl(ptr)->then, &ti) &&
-                    objsize_resolve_ptr(vm, node_ctl(ptr)->els, &ei)) {
-                    size_t sa   = DYNOSZ_REMAINING(ti);
-                    size_t sb   = DYNOSZ_REMAINING(ei);
-                    fold_result = (type_arg & 2) ? (sa < sb ? sa : sb)
-                                                 : (sa > sb ? sa : sb);
-                    folded      = true;
-                }
-            } else {
-                ObjSizeInfo info;
-                if (objsize_resolve_ptr(vm, ptr, &info)) {
-                    fold_result = DYNOSZ_REMAINING(info);
-                    folded      = true;
-                }
-            }
-            if (folded) {
-                Node *node = new_node(vm, ND_NUM, start);
-                node->val  = (int64_t)fold_result;
-                node->ty   = ty_ulong;
-#undef DYNOSZ_REMAINING
-                return node;
-            }
-        }
-#undef DYNOSZ_REMAINING
-
-        // Runtime path: emit DYNOBJSZ opcode that reads AllocHeader at runtime.
-        Node *node = new_node(vm, ND_DYNOBJ_SIZE, start);
-        node->lhs  = ptr;
-        node->val  = type_arg;
-        node->ty   = ty_ulong;
-        // Codegen evaluates `ptr` as cond + rhs, keeping the offset into the
-        // member.
-        Member *m;
-        Node   *sub_base, *sub_off;
-        if ((type_arg & 1) &&
-            objsize_resolve_subobject(vm, ptr, &m, &sub_base, &sub_off)) {
-            node->member = m;
-            node_ctl_mut(vm, node)->cond = sub_base;
-            node->rhs    = sub_off;
-        }
-        return node;
+        return cc_objsize_query(vm, ptr, type_arg, true, start);
     }
 
     // __builtin_huge_val() -> double infinity
@@ -4661,6 +4694,12 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *expr = assign(vm, &tok, tok);
         *rest      = skip(vm, tok, ")");
         add_type(vm, expr);
+        if (vm->compiler.in_fn_cond && cc_has_param_placeholder(expr)) {
+            Node *q = new_unary(vm, ND_PARAM_QUERY, expr, start);
+            q->val  = -1;
+            q->ty   = ty_int;
+            return q;
+        }
         // Casts of a string literal stay constant, as in gcc and clang.
         Node *lit = expr;
         while (lit->kind == ND_CAST)
@@ -5256,6 +5295,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 if (sc->var->is_deprecated)
                     warn_deprecated_use(vm, tok, obj_display_name(sc->var),
                                         obj_attr(sc->var)->deprecated_msg);
+                if (sc->var->is_function && !equal(tok->next, "("))
+                    cc_fn_check_reference(vm, sc->var, tok);
                 // #1242: a $k placeholder whose argument was a QuoteLazy()
                 // fragment materialises here, in expression position --
                 // inside this parse's own live scope chain -- instead of

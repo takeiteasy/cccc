@@ -22,7 +22,6 @@ Ignored attributes include (but are not limited to):
 | `visibility` | GNU | Recognized by `__has_attribute` (no ELF, so no-op) |
 | `section` | GNU | Recognized by `__has_attribute` (no object-file sections) |
 | `weak` | GNU | Silently ignored: a weak symbol links as a strong one, so an undefined weak function or variable is an error rather than a null address, and a strong definition elsewhere does not override a weak one. Tracked by [#2139](https://todo.sr.ht/~takeiteasy/cccc/2139) |
-| `weakref` | GNU | |
 | `alias` | GNU | Recognized by `__has_attribute` (no linker) |
 | `target` | GNU | Recognized by `__has_attribute` (no per-function ISA codegen) |
 | `hot` / `cold` | GNU | Recognized by `__has_attribute` (no branch-temperature layout) |
@@ -32,7 +31,3 @@ Ignored attributes include (but are not limited to):
 | `may_alias` | GNU | Recognized by `__has_attribute` (no strict-aliasing optimizer) |
 | `mode` | GNU | Recognized by `__has_attribute` (no machine-mode type system) |
 | `transparent_union` | GNU | Recognized by `__has_attribute` (no union-arg coercion modeling) |
-| `alloc_align` | GNU | |
-| `format_arg` | GNU | |
-| `unsequenced` | C23 | |
-| `reproducible` | C23 | |

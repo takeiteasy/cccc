@@ -1708,7 +1708,30 @@ typedef struct TypeAttrs {
     int alloc_size_idx2; // second factor (calloc-style product), 0 if 1-arg
     int init_priority; // CCCC_NO_INIT_PRIORITY unless an explicit priority was
                        // given
+    struct FnCond *fn_conds;     // enable_if/diagnose_if, in source order
+    uint8_t        objsize_kind; // a parameter's OBJSIZE_* (pass_object_size)
+    uint8_t        objsize_type; // ...and its __builtin_object_size type, 0-3
 } TypeAttrs;
+
+// pass_object_size / pass_dynamic_object_size on a pointer parameter: the
+// caller passes the argument's object size as a hidden size_t after it.
+enum { OBJSIZE_NONE, OBJSIZE_STATIC, OBJSIZE_DYNAMIC };
+
+typedef enum {
+    FN_COND_ENABLE_IF,
+    FN_COND_DIAG_ERROR,
+    FN_COND_DIAG_WARNING,
+} FnCondKind;
+
+// An enable_if or diagnose_if condition over the function's parameters.
+typedef struct FnCond {
+    struct FnCond *next;
+    FnCondKind     kind;
+    Token         *expr; // first token of the condition
+    Token         *end;  // the `,` after it
+    char          *msg;
+    struct Node   *tmpl; // resolved against parameter placeholders
+} FnCond;
 
 // Array, vector and variable-length-array extras.
 typedef struct TypeArr {
@@ -2073,6 +2096,12 @@ typedef enum {
             // TY_OVERLOAD. An initializer, assignment, cast, call argument or
             // return converts it to the member its target type names; any
             // other use is an error, so it never reaches codegen.
+    ND_PARAM_QUERY =
+        68, // __builtin_constant_p (val = -1) or __builtin_object_size (val =
+            // type, +4 for the dynamic form) of lhs, an expression over
+            // parameter placeholders. Only in an enable_if/diagnose_if
+            // template, which substitutes the call's arguments and answers it
+            // before evaluating, so it never reaches codegen.
 } NodeKind;
 
 // Linked list of locals with __attribute__((cleanup(fn))) in one block scope.
@@ -2688,6 +2717,8 @@ typedef struct ObjSize {
     // initializer's ND_ASSIGN node when one exists (the in-place declaration
     // anchor); NULL otherwise.
     Node *deferred_vla_ptr_init;
+    // A pass_object_size parameter's hidden size parameter.
+    struct Obj *objsize_hidden;
 } ObjSize;
 
 // Global variable initializer data.
@@ -4632,6 +4663,7 @@ typedef struct Compiler {
     bool  saw_diag_attr;   // true once any error/warning attribute is seen in
                            // this TU; gates all deadness computation so normal
                            // compiles pay no extra overhead
+    bool  in_fn_cond;      // resolving an enable_if/diagnose_if condition
     Node *gotos;           // Goto statements in current function
     Node *labels;          // Labels in current function
     struct DeferredUnusedLabel

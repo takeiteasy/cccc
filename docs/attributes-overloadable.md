@@ -209,6 +209,10 @@ A parameter type that has no name to mangle (an anonymous struct) is an error; g
 
 `__attribute__((unavailable))` or `unavailable("message")` makes a call to the function an error, unless the call is in a statically dead branch. An unavailable `(...)` overload turns a call with no better match into that error, which is how `<tgmath.h>` rejects a non-arithmetic argument.
 
+## Call-site attributes
+
+`enable_if`, `diagnose_if` and `pass_object_size` take part in choosing a function and in what a call passes ([attributes-overloadable-call-site.md](attributes-overloadable-call-site.md)).
+
 ## Limitations
 
 | Limit | Behavior | Ticket |
@@ -216,4 +220,4 @@ A parameter type that has no name to mangle (an anonymous struct) is an error; g
 | `char` and `signed char` | One type in CCCC, so they cannot be overloads of each other | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
 | `__int128` and `_BitInt(128)` | One type in CCCC; a 128-bit parameter is an error | [#2089](https://todo.sr.ht/~takeiteasy/cccc/2089) |
 | Ranking | A few rare calls rank differently from Clang | [#2091](https://todo.sr.ht/~takeiteasy/cccc/2091) |
-| `enable_if`, `diagnose_if`, `pass_object_size` | Not recognized | |
+| `enable_if` names | A condition naming a global, a folded constant, pointer arithmetic, a floating literal, a member or a call cannot be mangled; an `overloadable` function with one is an error | [#2154](https://todo.sr.ht/~takeiteasy/cccc/2154) |
