@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-24
+
 - Added: `T(args)` and `Name<T>(args)` call the type's `new` method, so `Point(3, 4)` and `Cell<int>(42)` are `Point.new(3, 4)` and `Cell<int>.new(42)`. `T` is a typedef name or a template instance, and `@ctor` or a static `new` supplies the method; without one the call is an error that suggests `@ctor`. Where C reads a type first, `Point(x);` is still a declaration. See [derive.md](docs/derive.md#calling-it-as-t).
 
 - Fixed: `template 'Name' is a type, not a function` and `is a function, not a type` pointed at an unrelated line for a `Name<T>` spelling; they now report at the template name.
