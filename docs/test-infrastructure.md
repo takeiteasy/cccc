@@ -190,6 +190,12 @@ failure stops the run. The `test` target runs them too; to run only them:
 ./cccc --build build.c --build-target=host_tests
 ```
 
+`test_doc_attr_namespaces.c` checks every `[[ns::name]]` in `docs/`,
+`examples/` and `include/` against the attribute registry's namespaces. A
+deliberate mismatch, such as a warning example, carries `attr-ns: ok` on its
+line; `<!-- attr-ns: ok -->` on the line before a code fence covers the whole
+block.
+
 ## Fuzz replay
 
 ```bash

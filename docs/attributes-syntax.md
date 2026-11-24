@@ -40,7 +40,7 @@ Custom comptime attributes run on file-scope declarations (types, typedefs, func
 | CCCC | Nothing (`[[cccc::name]]` with `--emit-cccc`) | `[[single]]`, `[[cccc::test]]`, a `@comptime(attribute("name"))` name |
 | Standard C23 | `[[name]]` in C23 mode, else the GNU spelling[^stdgnu] | `[[gnu::nodiscard]]` prints `[[nodiscard]]`; with `--std=c17` it prints `__attribute__((warn_unused_result))` |
 | GNU | `__attribute__((name))` | `[[gnu::packed]]` prints `__attribute__((packed))` |
-| Unknown name in a namespace, or a known name in a namespace it lacks | `[[ns::name]]` as written; nothing under `cccc::` | `[[acme::foo(1)]]`, `[[acme::packed]]` |
+| Unknown name in a namespace, or a known name in a namespace it lacks | `[[ns::name]]` as written; nothing under `cccc::` | `[[acme::foo(1)]]`, `[[acme::packed]]` <!-- attr-ns: ok --> |
 
 A list that mixes homes prints one group per spelling, `[[...]]` first.
 
@@ -109,6 +109,7 @@ In `[[ ]]` form each attribute takes only the namespaces it has, as in GCC and C
 
 A known name in a namespace it lacks is ignored with a `-Wunknown-attributes` warning, on by default, that names its spelling:
 
+<!-- attr-ns: ok -->
 ```c
 struct [[cccc::packed]] S { char c; int x; };
 // warning: 'packed' is not a 'cccc' attribute; write [[gnu::packed]] [-Wunknown-attributes]
@@ -116,7 +117,7 @@ struct [[cccc::packed]] S { char c; int x; };
 
 An unknown name in a namespace is ignored with a `-Wattributes` warning too. `__has_c_attribute(ns::name)` follows the same table: `__has_c_attribute(gnu::packed)` is 1, `__has_c_attribute(packed)` and `__has_c_attribute(cccc::packed)` are 0.
 
-The structural markers `comptime`, `test`, `test_setup`, `test_teardown`, `build`, `build_target`, `template` and `specialize` take `cccc::` or no namespace. In any other namespace they are an error: `[[gnu::test]]` reports `'test' is a cccc attribute; write [[cccc::test]]`.
+The structural markers `comptime`, `test`, `test_setup`, `test_teardown`, `build`, `build_target`, `template` and `specialize` take `cccc::` or no namespace. In any other namespace they are an error: `[[gnu::test]]` reports `'test' is a cccc attribute; write [[cccc::test]]`. <!-- attr-ns: ok -->
 
 ### Template marker spellings
 

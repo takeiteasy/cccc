@@ -83,10 +83,11 @@ t = (int) 5
 | `return 7` | Pops the frame and every frame inside it; the caller sees `7`, converted to the return type. `expr` is evaluated in the frame's scope. |
 | `return` | Pops the frame and leaves the return registers as they are |
 | `restart` | Pops the frames inside the selected one and re-enters its function with its original arguments. Needs an explicit `-g`[^snapshot] |
-| `return -n`, `restart -n` | As above, without running `[[cleanup]]` handlers |
+| `return -n`, `restart -n` | As above, without running `cleanup` handlers |
 
-Popping frames runs the `[[cleanup]]` handlers they still owe, innermost frame first and latest declared first, as the frames' own exits would.[^cleanup] A variable owes its handler from the end of its initializer to scope exit; `restart` runs the restarted frame's handlers too. If a handler fails, the command is rejected and the program stays paused.
+Popping frames runs the `cleanup` handlers they still owe, innermost frame first and latest declared first, as the frames' own exits would.[^cleanup] A variable owes its handler from the end of its initializer to scope exit; `restart` runs the restarted frame's handlers too. If a handler fails, the command is rejected and the program stays paused.
 
+<!-- attr-ns: ok -->
 ```
 (cccc-dbg) return -n 0    # pop leaf() without releasing what it holds
 warning: skipped [[cleanup]] handlers in leaf
