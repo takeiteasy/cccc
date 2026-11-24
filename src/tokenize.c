@@ -117,6 +117,7 @@ static const WarningInfo warning_infos[] = {
     {"openmp", CCCC_WARN_OPENMP, false},
     {"checked-regions", CCCC_WARN_CHECKED_REGIONS, false},
     {"checked-calls", CCCC_WARN_CHECKED_CALLS, false},
+    {"target-attributes", CCCC_WARN_TARGET_ATTRIBUTES, false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };
@@ -691,12 +692,13 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
 
     // Use per-token effective state if the preprocessor stamped it; otherwise
     // fall back to the global compiler warning state.
-    uint64_t eff_warnings = (tok && tok_state(tok)->diag_warnings)
-                                ? (tok_state(tok)->diag_warnings & ~(1ULL << 63))
-                                : (vm ? vm->compiler.warnings : 0);
-    uint64_t eff_werror   = (tok && tok_state(tok)->diag_werror)
-                                ? (tok_state(tok)->diag_werror & ~(1ULL << 63))
-                                : (vm ? vm->compiler.warning_errors : 0);
+    bool     stamped      = tok && tok_state(tok)->diag_stamped;
+    uint64_t eff_warnings = stamped ? tok_state(tok)->diag_warnings
+                            : vm    ? vm->compiler.warnings
+                                    : 0;
+    uint64_t eff_werror   = stamped ? tok_state(tok)->diag_werror
+                            : vm    ? vm->compiler.warning_errors
+                                    : 0;
 
     if (!vm || !(eff_warnings & mask))
         return;
@@ -901,19 +903,20 @@ void token_assign(VirtualMachine *vm, Token *dst, const Token *src) {
 // sharing one TokenState across the run of tokens that see the same state.
 void cc_stamp_token_state(VirtualMachine *vm, Token *tok,
                           CheckedScope checked_scope) {
-    uint64_t           warnings = (1ULL << 63) | vm->compiler.warnings;
-    uint64_t           werror   = (1ULL << 63) | vm->compiler.warning_errors;
+    uint64_t          warnings = vm->compiler.warnings;
+    uint64_t          werror   = vm->compiler.warning_errors;
     const TokenState *cur      = vm->compiler.token_state_cur;
     if (!cur || cur->diag_warnings != warnings || cur->diag_werror != werror ||
         cur->pack_align != vm->compiler.pack_cur ||
         cur->checked_scope != checked_scope) {
         TokenState *fresh =
             arena_alloc(&vm->compiler.parser_arena, sizeof(TokenState));
-        fresh->diag_warnings = warnings;
-        fresh->diag_werror   = werror;
-        fresh->pack_align    = vm->compiler.pack_cur;
-        fresh->checked_scope = checked_scope;
-        cur                  = fresh;
+        fresh->diag_warnings         = warnings;
+        fresh->diag_werror           = werror;
+        fresh->diag_stamped          = true;
+        fresh->pack_align            = vm->compiler.pack_cur;
+        fresh->checked_scope         = checked_scope;
+        cur                          = fresh;
         vm->compiler.token_state_cur = cur;
     }
     tok->state = cur;
@@ -2350,6 +2353,7 @@ typedef struct {
     const char *rename; // name replacing the written one
     bool        keep_args; // print the written arguments after `rename`
     const char *warn;      // reported once per attribute when it is dropped
+    bool        target_miss; // dropped: the --output-compiler compiler lacks it
 } AttrOut;
 
 static bool attr_ns_is(Token *ns, const char *name) {
@@ -2412,8 +2416,8 @@ static AttrOut classify_msvc_attr(const AttrItem *it, const char *name) {
 // cccc attributes are dropped (kept as [[cccc::...]] under --emit-cccc), the
 // rest follow --attr-target. An unknown name in a vendor namespace, or a known
 // one written in a namespace it lacks, is kept as written.
-static AttrOut classify_attr(VirtualMachine *vm, const AttrItem *it,
-                             bool bracketed) {
+static AttrOut classify_home_attr(VirtualMachine *vm, const AttrItem *it,
+                                  bool bracketed) {
     char name[128] = "";
     copy_attr_name(it->name, name, sizeof(name));
 
@@ -2461,9 +2465,28 @@ static AttrOut classify_attr(VirtualMachine *vm, const AttrItem *it,
             return (AttrOut){OUT_DROP, NULL, NULL, NULL};
         return (AttrOut){OUT_GNU, NULL, NULL, known->gnu_name};
     }
-    if (target == CCCC_ATTR_TARGET_C23)
-        return (AttrOut){OUT_C23, "gnu::", NULL};
-    return (AttrOut){OUT_GNU, NULL, NULL};
+    if (target != CCCC_ATTR_TARGET_C23 || (known && !known->ns))
+        return (AttrOut){OUT_GNU, NULL, NULL};
+    bool clang_ns =
+        known && (known->ns & ATTR_NS_CLANG) &&
+        !(vm->compiler.output_compiler == CCCC_OUTPUT_COMPILER_GCC &&
+          (known->cc & ATTR_CC_GCC));
+    return (AttrOut){OUT_C23, clang_ns ? "clang::" : "gnu::", NULL};
+}
+
+// classify_home_attr, then a known attribute printed in its home spelling is
+// dropped when the --output-compiler compiler lacks it.
+static AttrOut classify_attr(VirtualMachine *vm, const AttrItem *it,
+                             bool bracketed) {
+    AttrOut out = classify_home_attr(vm, it, bracketed);
+    if (out.kind == OUT_DROP || out.ns || !vm)
+        return out;
+    char name[128] = "";
+    copy_attr_name(it->name, name, sizeof(name));
+    const AttrDef *known = lookup_attr(name, strlen(name));
+    if (known && !attr_on_output_compiler(vm, known))
+        return (AttrOut){.kind = OUT_DROP, .target_miss = true};
+    return out;
 }
 
 static void open_attr_group(FILE *f, AttrOutKind kind) {
@@ -2501,6 +2524,14 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
             if (k == 0 && out.warn)
                 warn_tok(vm, it.name, CCCC_WARN_UNKNOWN_ATTRIBUTES, "%s",
                          out.warn);
+            if (k == 0 && out.target_miss)
+                warn_tok(vm, it.name, CCCC_WARN_TARGET_ATTRIBUTES,
+                         "'%.*s' is not supported by %s and is dropped",
+                         it.name->len, it.name->loc,
+                         vm->compiler.output_compiler ==
+                                 CCCC_OUTPUT_COMPILER_GCC
+                             ? "gcc"
+                             : "clang");
             if (out.kind != order[k])
                 continue;
             if (!open) {

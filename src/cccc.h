@@ -1114,8 +1114,7 @@ typedef enum {
     CCCC_WARN_OPENMP = (1ULL << 27),
     // A checked-region violation. An error unless demoted with
     // -Wno-error=checked-regions or #pragma GCC diagnostic warning; ignoring
-    // it never silences the violation. The mask has no free bits left (bit 63
-    // is the per-token stamp marker).
+    // it never silences the violation.
     CCCC_WARN_CHECKED_REGIONS = (1ULL << 28),
     // A call across the checked/unchecked boundary from a checked region
     // (opt-in)
@@ -1185,10 +1184,6 @@ typedef enum {
                       // serializer's rename passes but can't be renamed (e.g. a
                       // header-exposed enumerator vs. a file-scope identifier,
                       // #1017)
-    // Bits 61 and 62 are the last warning bits: bit 63 is reserved as the
-    // #pragma GCC diagnostic "explicit state" sentinel stamped onto
-    // Token.diag_warnings/diag_werror (see preprocess.c and warn_tok()'s
-    // masking of it in tokenize.c), not a warning category itself.
     CCCC_WARN_EXCESS_INIT =
         (1ULL << 61), // brace initializer supplies more elements than the
                       // fixed-size array/struct/vector holds, or an
@@ -1198,6 +1193,10 @@ typedef enum {
         (1ULL << 62), // `auto`/`__auto_type` with a pointer declarator or
                       // several declarators: accepted, but gcc rejects it;
                       // silent under --compiler-family=clang; part of -Wall
+    // -E --output-compiler: an attribute the named compiler lacks; dropped
+    // from the output. An error unless demoted (on by default).
+    // TODO(#2159): the last free bit; a new category needs a wider mask.
+    CCCC_WARN_TARGET_ATTRIBUTES = (1ULL << 63),
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this
     // group.
@@ -1432,10 +1431,11 @@ typedef struct TokenLit {
 // Immutable once stamped and shared by the tokens of a run
 // (cc_stamp_token_state).
 typedef struct TokenState {
-    // Bit 63 is a sentinel: if set, bits 0-62 are the active warning mask at
-    // the point this token was emitted (overrides vm->compiler.warnings).
-    uint64_t diag_warnings; // effective CCCCWarning mask (bit63 = stamped)
-    uint64_t diag_werror;   // effective warning_errors mask (bit63 = stamped)
+    // When diag_stamped, the warning state at the point this token was
+    // emitted; it overrides vm->compiler.warnings/warning_errors.
+    uint64_t diag_warnings;
+    uint64_t diag_werror;
+    bool     diag_stamped;
     // Effective #pragma pack(N) alignment cap. 0 means "no pack in effect".
     // Read off the `struct`/`union` keyword token by struct_union_decl.
     int pack_align;
@@ -4108,6 +4108,18 @@ typedef enum {
 } CCCCAttrTarget;
 
 /*!
+ @brief The compiler -E output is checked against (--output-compiler).
+ @details Under GCC or CLANG, an attribute that compiler lacks is dropped from
+ -E output with -Wtarget-attributes, and __has_attribute answers as that
+ compiler. ANY checks nothing.
+*/
+typedef enum {
+    CCCC_OUTPUT_COMPILER_ANY,
+    CCCC_OUTPUT_COMPILER_GCC,
+    CCCC_OUTPUT_COMPILER_CLANG,
+} CCCCOutputCompiler;
+
+/*!
  @brief Which host compiler family CCCC's own front end models where gcc and
  clang genuinely disagree.
  @details Currently the only consumers are __builtin_types_compatible_p's
@@ -5106,6 +5118,7 @@ typedef struct Compiler {
     CStdVersion    c_std; // Selected standard version (default: CCCC_STD_C23)
     bool           c_std_gnu;   // True for gnuXX variants (gnu17, gnu11, …)
     CCCCAttrTarget attr_target; // Generated/preprocessed attribute spelling
+    CCCCOutputCompiler output_compiler; // -E attribute check target
     CCCCCompilerFamily compiler_family; // --compiler-family: gcc vs clang
                                         // reading of front-end type-compat
                                         // divergences (never AUTO here --

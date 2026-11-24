@@ -28,15 +28,21 @@
 // preprocessor's structural uses. A row with none of them is recognized and
 // ignored.
 #define CCCC_NS          (ATTR_NS_NONE | ATTR_NS_CCCC)
-#define CCCC_ROW(n, ...) {n, ATTR_CCCC, true, 1, CCCC_NS, __VA_ARGS__}
+#define CCCC_ROW(n, ...) {n, ATTR_CCCC, true, 1, CCCC_NS, 0, __VA_ARGS__}
 #define CCCC_SCOPED_ROW(n, ...)                                                \
-    {n, ATTR_CCCC, true, 1, ATTR_NS_CCCC, __VA_ARGS__}
+    {n, ATTR_CCCC, true, 1, ATTR_NS_CCCC, 0, __VA_ARGS__}
+#define STD_NS (ATTR_NS_NONE | ATTR_NS_GNU)
 #define STD_ROW(n, has, ...)                                                   \
-    {n, ATTR_STD, has, 202311L, ATTR_NS_NONE | ATTR_NS_GNU, __VA_ARGS__}
-#define GNU_ROW(n, ...)   {n, ATTR_GNU, true, 0, ATTR_NS_GNU, __VA_ARGS__}
-#define CLANG_ROW(n, ...) {n, ATTR_GNU, true, 0, ATTR_NS_CLANG, __VA_ARGS__}
+    {n, ATTR_STD, has, 202311L, STD_NS, ATTR_CC_BOTH, __VA_ARGS__}
+#define GNU_ROW(n, ...)                                                        \
+    {n, ATTR_GNU, true, 0, ATTR_NS_GNU, ATTR_CC_BOTH, __VA_ARGS__}
+#define GCC_ROW(n, ...)                                                        \
+    {n, ATTR_GNU, true, 0, ATTR_NS_GNU, ATTR_CC_GCC, __VA_ARGS__}
+#define CLANG_ROW(n, ...)                                                      \
+    {n, ATTR_GNU, true, 0, ATTR_NS_CLANG, ATTR_CC_CLANG, __VA_ARGS__}
 // Clang's `__attribute__`-only attributes: no `[[ ]]` spelling.
-#define CLANG_GNU_ROW(n, ...) {n, ATTR_GNU, true, 0, 0, __VA_ARGS__}
+#define CLANG_GNU_ROW(n, ...)                                                  \
+    {n, ATTR_GNU, true, 0, 0, ATTR_CC_CLANG, __VA_ARGS__}
 
 static const AttrDef attr_table[] = {
     // CCCC-specific (cccc:: scoped); vendor attributes report 1, not a date
@@ -46,7 +52,8 @@ static const AttrDef attr_table[] = {
     CCCC_ROW("shared", 0, NULL, ATTR_MARK_NONE, INCLUDE_ROUTE_SHARED),
     CCCC_ROW("build", 0, NULL, ATTR_MARK_BUILD, INCLUDE_ROUTE_BUILD),
     CCCC_ROW("build_target", 0, NULL, ATTR_MARK_BUILD_TARGET),
-    CCCC_ROW("optimize", ATTR_OUT_GNU, attr_optimize),
+    {"optimize", ATTR_CCCC, true, 1, CCCC_NS, ATTR_CC_GCC, ATTR_OUT_GNU,
+     attr_optimize},
     CCCC_ROW("test", ATTR_KEYWORD_ALIAS, NULL, ATTR_MARK_TEST,
              INCLUDE_ROUTE_TEST),
     CCCC_ROW("test_setup", ATTR_KEYWORD_ALIAS, NULL, ATTR_MARK_TEST_SETUP),
@@ -77,7 +84,8 @@ static const AttrDef attr_table[] = {
     CCCC_SCOPED_ROW("constant", 0, attr_addr_space),
     CCCC_SCOPED_ROW("private", 0, attr_addr_space),
     CCCC_SCOPED_ROW("generic", 0, attr_addr_space),
-    {"cccc_visible_lanes", ATTR_CCCC, false, 0, CCCC_NS, 0, attr_visible_lanes},
+    {"cccc_visible_lanes", ATTR_CCCC, false, 0, CCCC_NS, 0, 0,
+     attr_visible_lanes},
     // Standard C23 ([[name]]); the date is N3220 section 6.10.10.2's
     STD_ROW("maybe_unused", false, 0, attr_unused, .gnu_name = "unused"),
     STD_ROW("deprecated", true, 0, attr_deprecated, .msvc_name = "deprecated"),
@@ -87,8 +95,9 @@ static const AttrDef attr_table[] = {
     // fallthrough also has a GNU `__attribute__` form, so __has_attribute
     // reports it
     STD_ROW("fallthrough", true, 0, attr_fallthrough),
-    STD_ROW("no_unique_address", false, ATTR_OUT_NO_GNU,
-            attr_no_unique_address),
+    // Neither gcc nor clang has it in C.
+    {"no_unique_address", ATTR_STD, false, 202311L, STD_NS, 0, ATTR_OUT_NO_GNU,
+     attr_no_unique_address},
     // GNU (`__attribute__((name))`)
     GNU_ROW("aligned", 0, attr_aligned, .msvc_name = "align"),
     GNU_ROW("packed", 0, attr_packed),
@@ -108,13 +117,15 @@ static const AttrDef attr_table[] = {
     GNU_ROW("alloc_size", 0, attr_alloc_size),
     GNU_ROW("malloc", 0, attr_malloc, .msvc_name = "restrict"),
     GNU_ROW("vector_size", 0, attr_vector_size),
-    GNU_ROW("designated_init", 0, attr_designated_init),
+    GCC_ROW("designated_init", 0, attr_designated_init),
     GNU_ROW("gnu_inline", 0, attr_gnu_inline),
     GNU_ROW("constructor", 0, attr_constructor),
     GNU_ROW("destructor", 0, attr_destructor),
     // Clang's: `[[clang::x]]` or `__attribute__((x))`.
     CLANG_ROW("overloadable", 0, attr_overloadable),
-    CLANG_ROW("unavailable", 0, attr_unavailable),
+    // gcc has it too, as `__attribute__` and `[[gnu::unavailable]]`.
+    {"unavailable", ATTR_GNU, true, 0, ATTR_NS_CLANG, ATTR_CC_BOTH, 0,
+     attr_unavailable},
     CLANG_ROW("pass_object_size", 0, attr_pass_object_size),
     CLANG_ROW("pass_dynamic_object_size", 0, attr_pass_object_size),
     CLANG_GNU_ROW("enable_if", 0, attr_enable_if),
@@ -175,7 +186,7 @@ static const AttrDef *lookup_exact(const char *name, size_t len) {
             !strncmp(attr_table[i].name, name, len))
             return &attr_table[i];
 
-    static const AttrDef derive_def = {"", ATTR_CCCC, true, 1, CCCC_NS, 0};
+    static const AttrDef derive_def = {"", ATTR_CCCC, true, 1, CCCC_NS, 0, 0};
     if (is_derive_builtin_attr(name, (int)len))
         return &derive_def;
     return NULL;
@@ -232,4 +243,17 @@ int attr_output_home(const char *name, size_t len) {
     if (!a)
         return -1;
     return (a->flags & ATTR_OUT_GNU) ? ATTR_GNU : (int)a->cat;
+}
+
+bool attr_on_output_compiler(const VirtualMachine *vm, const AttrDef *a) {
+    if (a->cat == ATTR_CCCC && !(a->flags & ATTR_OUT_GNU))
+        return true;
+    switch (vm->compiler.output_compiler) {
+        case CCCC_OUTPUT_COMPILER_GCC:
+            return a->cc & ATTR_CC_GCC;
+        case CCCC_OUTPUT_COMPILER_CLANG:
+            return a->cc & ATTR_CC_CLANG;
+        default:
+            return true;
+    }
 }

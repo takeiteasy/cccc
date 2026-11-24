@@ -649,6 +649,9 @@ static void usage(const char *argv0, int exit_code) {
            "content ([[cccc::emit]])\n");
     printf("\t   --attr-target=TARGET  Attribute spelling in -E output: "
            "auto, c23, gnu, msvc, strip\n");
+    printf("\t   --output-compiler=CC  Check -E attributes against a compiler: "
+           "any (default),\n"
+           "\t                         gcc, clang\n");
     printf("\t   --compiler-family=FAM  Host family CCCC's front end models "
            "where gcc/clang\n"
            "\t                         disagree (__builtin_types_compatible_p, "
@@ -1610,6 +1613,7 @@ int main(int argc, const char *argv[]) {
     size_t url_max_size    = 0;       // --url-max-size (0 = use default)
 #endif
     CCCCAttrTarget     attr_target = CCCC_ATTR_TARGET_AUTO; // --attr-target
+    CCCCOutputCompiler output_compiler = CCCC_OUTPUT_COMPILER_ANY;
     CCCCCompilerFamily compiler_family =
         CCCC_COMPILER_FAMILY_GCC;                           // --compiler-family
     int      x86_isa               = 0; // -mavx / -mavx2 / -mavx512f (1/2/3)
@@ -1625,9 +1629,10 @@ int main(int argc, const char *argv[]) {
                           //   the system compiler.)
     int      max_errors         = 20; // --max-errors (default: 20)
     int      warnings_as_errors = 0;  // -Werror / --Werror
-    uint64_t warnings       = CCCC_WARN_UNKNOWN_ATTRIBUTES | CCCC_WARN_OPENMP |
-                              CCCC_WARN_CHECKED_REGIONS;
-    uint64_t warning_errors = CCCC_WARN_CHECKED_REGIONS;
+    uint64_t warnings = CCCC_WARN_UNKNOWN_ATTRIBUTES | CCCC_WARN_OPENMP |
+                        CCCC_WARN_CHECKED_REGIONS | CCCC_WARN_TARGET_ATTRIBUTES;
+    uint64_t warning_errors =
+        CCCC_WARN_CHECKED_REGIONS | CCCC_WARN_TARGET_ATTRIBUTES;
     uint64_t warning_no_errors  = 0;
     uint64_t warning_sticky_errors =
         0; // bits pinned by -Werror=<name>; resist -Wno-error=<name>
@@ -1712,10 +1717,14 @@ int main(int argc, const char *argv[]) {
 
     const struct option *long_options = cccc_long_options;
     const char         **orig_argv = argv; // watch restarts re-read the config
-    bool                 attr_target_on_cmdline = false;
-    for (int i = 1; i < argc && strcmp(argv[i], "--"); i++)
+    bool                 attr_target_on_cmdline     = false;
+    bool                 output_compiler_on_cmdline = false;
+    for (int i = 1; i < argc && strcmp(argv[i], "--"); i++) {
         if (!strncmp(argv[i], "--attr-target", 13))
             attr_target_on_cmdline = true;
+        if (!strncmp(argv[i], "--output-compiler", 17))
+            output_compiler_on_cmdline = true;
+    }
     argv                           = cccc_config_expand(&argc, argv);
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -2264,6 +2273,21 @@ int main(int argc, const char *argv[]) {
                 break;
             case 1068: // --allow-comptime-pp-bleed
                 allow_comptime_pp_bleed = 1;
+                break;
+            case 1153: // --output-compiler=any|gcc|clang
+                if (strcmp(optarg, "any") == 0) {
+                    output_compiler = CCCC_OUTPUT_COMPILER_ANY;
+                } else if (strcmp(optarg, "gcc") == 0) {
+                    output_compiler = CCCC_OUTPUT_COMPILER_GCC;
+                } else if (strcmp(optarg, "clang") == 0) {
+                    output_compiler = CCCC_OUTPUT_COMPILER_CLANG;
+                } else {
+                    fprintf(stderr,
+                            "error: invalid --output-compiler '%s' "
+                            "(use 'any', 'gcc', or 'clang')\n",
+                            optarg);
+                    usage(argv[0], 1);
+                }
                 break;
             case 1069: // --attr-target=auto|c23|gnu|msvc|strip
                 if (strcmp(optarg, "auto") == 0) {
@@ -2913,6 +2937,18 @@ int main(int argc, const char *argv[]) {
     // Only the command line: a project .cccc.toml may set it for -E use.
     if (attr_target_on_cmdline && !preprocess_only)
         fprintf(stderr, "warning: --attr-target only affects -E output\n");
+    if (output_compiler_on_cmdline && !preprocess_only)
+        fprintf(stderr, "warning: --output-compiler only affects -E output\n");
+    if (output_compiler != CCCC_OUTPUT_COMPILER_ANY &&
+        attr_target == CCCC_ATTR_TARGET_MSVC) {
+        fprintf(stderr,
+                "error: --output-compiler=%s conflicts with "
+                "--attr-target=msvc\n",
+                output_compiler == CCCC_OUTPUT_COMPILER_GCC ? "gcc" : "clang");
+        return 1;
+    }
+    vm.compiler.output_compiler =
+        preprocess_only ? output_compiler : CCCC_OUTPUT_COMPILER_ANY;
     // Resolve --compiler-family=auto now, before any parsing -- the
     // front-end type-compat helpers (src/type.c) and __CCCC_COMPILER_FAMILY__
     // both need a settled value, never AUTO. `auto` probes CCCC_NATIVE_CC's

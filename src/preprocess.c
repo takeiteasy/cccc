@@ -2012,9 +2012,11 @@ static bool is_has_builtin_supported(char *name) {
     return false;
 }
 
-static long is_has_c_attribute_supported(char *name, const char *vendor) {
+static long is_has_c_attribute_supported(VirtualMachine *vm, char *name,
+                                         const char *vendor) {
     const AttrDef *a = lookup_attr(name, strlen(name));
-    if (!a || !attr_in_ns(a, vendor, vendor ? strlen(vendor) : 0))
+    if (!a || !attr_in_ns(a, vendor, vendor ? strlen(vendor) : 0) ||
+        !attr_on_output_compiler(vm, a))
         return 0;
     return a->cat == ATTR_GNU ? a->has_attr : a->date;
 }
@@ -2043,12 +2045,14 @@ static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok,
 
     if (!strcmp(kind, "__has_feature") || !strcmp(kind, "__has_extension"))
         return is_has_feature_supported(vm, name);
-    if (!strcmp(kind, "__has_attribute"))
-        return cc_has_attribute(name, (int)strlen(name));
+    if (!strcmp(kind, "__has_attribute")) {
+        const AttrDef *a = lookup_attr(name, strlen(name));
+        return a && a->has_attr && attr_on_output_compiler(vm, a);
+    }
     if (!strcmp(kind, "__has_builtin"))
         return is_has_builtin_supported(name);
     if (!strcmp(kind, "__has_c_attribute"))
-        return is_has_c_attribute_supported(name, vendor);
+        return is_has_c_attribute_supported(vm, name, vendor);
     if (!strcmp(kind, "__has_declspec_attribute"))
         // #1323: CCCC is not MSVC/clang-cl and supports no __declspec
         // attributes -- always 0, but recognised so real SDK headers using

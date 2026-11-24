@@ -1,0 +1,60 @@
+# -E --output-compiler: the dump compiles under the named compiler with no
+# attribute warnings, and cccc's __has_attribute under each target agrees
+# with the real compiler for every GNU registry row.
+REGISTRY=$(cd "$(dirname "$0")/../../src" && pwd)/attr_registry.c
+. "$(dirname "$0")/lib.sh"
+
+cat >in.c <<'EOS'
+__attribute__((overloadable)) int f(int);
+int h(int n) __attribute__((enable_if(n > 0, "p")));
+void s(void *const p __attribute__((pass_object_size(0))));
+__attribute__((optimize("O2"), cold)) void k(void);
+__attribute__((unavailable)) void u(void);
+struct __attribute__((packed, designated_init)) S { char c; int i; };
+[[nodiscard]] int g(void);
+EOS
+
+# GNU rows plus optimize, the one CCCC row -E keeps. Standard rows are left
+# out: gcc's __has_attribute also reports [[ ]]-only names, clang's does not.
+grep -oE '(GNU_ROW|GCC_ROW|CLANG_ROW|CLANG_GNU_ROW)\("[a-z_]+"|\{"(optimize|unavailable)"' \
+    "$REGISTRY" | sed -E 's/.*"([a-z_]+)"/\1/' >names.txt
+[ -s names.txt ] || fail "no registry rows in $REGISTRY"
+while read -r n; do
+    printf '#if __has_attribute(%s)\n%s 1\n#else\n%s 0\n#endif\n' "$n" "$n" "$n"
+done <names.txt >has.c
+
+check() {
+    target=$1
+    cc=$2
+    flags=$3
+    for at in auto c23; do
+        "$CCCC" -E --attr-target=$at --output-compiler=$target \
+            -Wno-target-attributes in.c >out_$at.c ||
+            fail "-E --output-compiler=$target failed"
+        expect_exit 0 "$cc" -std=c2x -fsyntax-only $flags out_$at.c
+        [ -s err.txt ] && { cat err.txt >&2; fail "$target warned on $at output"; }
+    done
+    # The mask matches gcc 12+ (unavailable) and clang 14+ (error, warning).
+    major=$("$cc" -dM -E - </dev/null |
+        sed -n "s/^#define __${4}__ //p")
+    if [ "${major:-0}" -lt "$5" ]; then
+        echo "skip: $target $major predates the registry mask"
+        return
+    fi
+    "$CCCC" -E -P --output-compiler=$target has.c | grep . >cccc.txt
+    "$cc" -E -P -x c has.c | grep . >real.txt
+    [ "$(wc -l <real.txt)" -eq "$(wc -l <names.txt)" ] || fail "short probe"
+    diff real.txt cccc.txt >&2 || fail "__has_attribute differs from $target"
+}
+
+checked=0
+if clang=$(find_family clang clang cc); then
+    check clang "$clang" "-Werror=ignored-attributes -Werror=unknown-attributes" \
+        clang_major 14
+    checked=1
+fi
+if gcc=$(find_family gcc gcc-16 gcc-15 gcc-14 gcc /opt/homebrew/bin/gcc-16); then
+    check gcc "$gcc" "-Werror=attributes" GNUC 12
+    checked=1
+fi
+[ "$checked" = 1 ] || echo "skip: no gcc or clang found"

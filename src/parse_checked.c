@@ -5821,11 +5821,11 @@ static bool is_checked_ptr_target(Type *ty) {
 // -Wno-checked-regions, or any pass that clears the masks, leaves it an error.
 static bool checked_region_demoted(VirtualMachine *vm, Token *tok) {
     uint64_t mask     = CCCC_WARN_CHECKED_REGIONS;
-    uint64_t warnings = tok && tok_state(tok)->diag_warnings
-                            ? tok_state(tok)->diag_warnings & ~(1ULL << 63)
-                            : vm->compiler.warnings;
-    uint64_t werror = tok && tok_state(tok)->diag_werror ? tok_state(tok)->diag_werror & ~(1ULL << 63)
-                                              : vm->compiler.warning_errors;
+    bool     stamped  = tok && tok_state(tok)->diag_stamped;
+    uint64_t warnings =
+        stamped ? tok_state(tok)->diag_warnings : vm->compiler.warnings;
+    uint64_t werror =
+        stamped ? tok_state(tok)->diag_werror : vm->compiler.warning_errors;
     if (!(warnings & mask) || (werror & mask))
         return false;
     return !(vm->warnings_as_errors &&

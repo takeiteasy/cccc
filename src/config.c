@@ -202,6 +202,7 @@ static const struct {
     {"kernel-max-group-size", CFG_FREE},
     {"openmp", CFG_FREE},
     {"attr-target", CFG_FREE},
+    {"output-compiler", CFG_FREE},
     {"no-debug-on-crash", CFG_FREE},
     {"build-jobs", CFG_FREE},
     {"build-keep-going", CFG_FREE},

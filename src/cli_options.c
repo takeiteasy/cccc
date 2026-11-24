@@ -116,6 +116,7 @@ const struct option cccc_long_options[] = {
     {"openmp", no_argument, 0, 1127},
     {"emit-only", no_argument, 0, 1067},
     {"attr-target", required_argument, 0, 1069},
+    {"output-compiler", required_argument, 0, 1153},
     {"no-debug-on-crash", no_argument, 0, 1071},
     {"build", no_argument, 0, 'b'},
     {"build-entry", required_argument, 0, 1074},

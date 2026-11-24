@@ -711,6 +711,14 @@ enum {
     ATTR_NS_CLANG = 4, // `clang::` / `__clang__::`
     ATTR_NS_CCCC  = 8, // `cccc::`
 };
+// The compilers whose `-E` output accepts a row (--output-compiler), from each
+// compiler's own __has_attribute. CCCC-home rows are dropped from the output
+// and carry none, except an ATTR_OUT_GNU row.
+enum {
+    ATTR_CC_GCC   = 1,
+    ATTR_CC_CLANG = 2,
+    ATTR_CC_BOTH  = ATTR_CC_GCC | ATTR_CC_CLANG,
+};
 // A name the preprocessor consumes structurally instead of the parser.
 typedef enum {
     ATTR_MARK_NONE,
@@ -754,6 +762,7 @@ typedef struct AttrDef {
     bool         has_attr;
     long         date; // __has_c_attribute value
     unsigned     ns;   // ATTR_NS_* mask
+    unsigned     cc;   // ATTR_CC_* mask
     unsigned     flags;
     AttrApplyFn *apply; // NULL: not applied by the parser
     AttrMarker   marker;
@@ -781,6 +790,9 @@ bool attr_in_ns(const AttrDef *a, const char *ns, size_t len);
 const char *attr_spelling_ns(const AttrDef *a);
 // True when __has_attribute(name) reports the GNU attribute as recognized.
 bool cc_has_attribute(const char *name, int len);
+// False when --output-compiler names a compiler whose `-E` output lacks `a`;
+// CCCC-home rows, which `-E` drops, are always true.
+bool attr_on_output_compiler(const VirtualMachine *vm, const AttrDef *a);
 // The AttrCategory whose spelling preprocessed output uses, or -1 if unknown.
 int attr_output_home(const char *name, size_t len);
 

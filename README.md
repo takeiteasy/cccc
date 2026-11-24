@@ -349,6 +349,8 @@ Options:
 	-m/--dump-expanded       Output macro-expanded source code (for gcc compatibility)
 	   --emit-only           With -c=generated: only emit explicitly tagged content ([[cccc::emit]])
 	   --attr-target=TARGET  Attribute spelling in -E output: auto, c23, gnu, msvc, strip
+	   --output-compiler=CC  Check -E attributes against a compiler: any (default),
+	                         gcc, clang
 	   --compiler-family=FAM  Host family CCCC's front end models where gcc/clang
 	                         disagree (__builtin_types_compatible_p, -Wauto-declarator):
 	                         gcc (default), clang, auto (probe CCCC_NATIVE_CC)
