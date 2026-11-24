@@ -619,6 +619,10 @@ static Node *constructor_call(VirtualMachine *vm, Token **rest, Type *ty,
         error_tok(vm, tok,
                   "'%.*s' has no constructor; add @ctor or write (%.*s){...}",
                   tok->len, tok->loc, tok->len, tok->loc);
+    warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
+             "'%.*s(...)' as a constructor call is a CCCC extension; write "
+             "%.*s.new(...)",
+             tok->len, tok->loc, tok->len, tok->loc);
     return call_type_method(vm, rest, name, m, true);
 }
 

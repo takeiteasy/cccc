@@ -211,6 +211,7 @@ Cell<int> c = Cell<int>(42);
 | Typedef of a non-struct | `'Num' is not a struct or union; it has no constructor` |
 | `new` is not static | `'new' is not a static method, so it cannot construct` |
 | Where C reads a type first | `Point(x);` and `Point(*fp)(void);` stay declarations; write `Point.new(x)` |
+| `-Wpedantic` | `T(...)` as a constructor call warns `'Point(...)' as a constructor call is a CCCC extension`; `-Werror=pedantic` rejects it. `Point.new(...)` does not warn |
 | A type name is expected | `sizeof(Point(7))` and `(Point(q)).x` report `'Point(...)' is read as a type here; write Point.new(...) to construct` |
 
 `@default(expr)` on a member removes its parameter and makes `T_new` assign

@@ -9,6 +9,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [0.37.1] - 2026-11-24
 
+- Added: `-Wpedantic` warns about `T(args)` and `Name<T>(args)` as a constructor call, and `-Werror=pedantic` rejects it; `T.new(args)` is not diagnosed.
+
 - Fixed: `sizeof(Point(7))` and `(Point(q)).x` report `'Point(...)' is read as a type here; write Point.new(...) to construct` for a type with a `new` method, in place of `expected ')'`. Valid function types such as `sizeof(Point(int))` are unchanged.
 
 ## [0.37.0] - 2026-11-24
