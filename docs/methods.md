@@ -85,6 +85,7 @@ float n = Vec2.len(&a);     // Vec2_len(&a): any method, arguments passed as wri
 | Rule | Behavior |
 |---|---|
 | `T` | a typedef name, `struct S`, `union U` or a template instance (`Box<int>.wrap(7)`) |
+| `T(args)` | in an expression, a typedef name or template instance followed by `(` is `T.new(args)`; see [derive.md](derive.md#calling-it-as-t) |
 | `static` in the body | marks the method even when its first parameter is `T *`; `static inline` is still `static inline` |
 | `T.f` | calls the function bound to (`T`, `f`), static or not; the arguments are not changed |
 | `v.f()` / `p->f()` | an error for a static method |

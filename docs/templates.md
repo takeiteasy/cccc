@@ -359,6 +359,8 @@ struct Cell { T a; T b; };
 _Bool same = Cell_int_equals(&x, &y);
 ```
 
+With `@ctor`, an instance is constructed as `Cell<int>(1, 2)`, the same call as `Cell<int>.new(1, 2)` ([derive.md](derive.md#calling-it-as-t)).
+
 ## Limits
 
 | Not supported | Result |

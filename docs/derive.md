@@ -196,6 +196,22 @@ struct Point { int x; int y; };
 An optional string literal prefix names it `<prefix>_<T>_new`, as for `@to_json`:
 `@ctor("app") struct Point {...};` publishes `app_Point_new`.
 
+### Calling it as `T(...)`
+
+In an expression, a typedef name or a template instance followed by `(` calls the type's `new` method: `Point(3, 4)` is `Point.new(3, 4)` and `Cell<int>(42)` is `Cell<int>.new(42)`. A user-written static `new` is called the same way.
+
+```c
+Point p = Point(3, 4);
+Cell<int> c = Cell<int>(42);
+```
+
+| Case | Result |
+|---|---|
+| No `new` method | `'Point' has no constructor; add @ctor or write (Point){...}` |
+| Typedef of a non-struct | `'Num' is not a struct or union; it has no constructor` |
+| `new` is not static | `'new' is not a static method, so it cannot construct` |
+| Where C reads a type first | `Point(x);` and `Point(*fp)(void);` stay declarations; write `Point.new(x)` |
+
 `@default(expr)` on a member removes its parameter and makes `T_new` assign
 `expr` instead; `@ctor_skip` removes it and leaves it zero. A struct whose
 members are all defaulted or skipped gets `T_new()` with no parameters.
@@ -341,7 +357,7 @@ a.to_json(buf, sizeof buf);      // Point_to_json(&a, buf, sizeof buf)
 | Attribute | Method | Call |
 |---|---|---|
 | `@getters`, `@setters` | `get_<field>`, `set_<field>` | `p.get_x()`, `p.set_x(5)` |
-| `@ctor` | `new` (static) | `Point.new(3, 4)` |
+| `@ctor` | `new` (static) | `Point.new(3, 4)`, or `Point(3, 4)` |
 | `@deserialize` | `deserialize` (static) | `Point.deserialize(buf)` |
 | `@deserialize` | `deserialize_into`, `deserialize_read` | `p.deserialize_into(buf, len)` |
 | `@serialize` | `serialize`, `serialize_size` | `p.serialize(buf)` |

@@ -148,7 +148,7 @@ C++ generates copy, move and destructor members implicitly, and `= default` requ
 
 | | C++ | CCCC |
 |---|---|---|
-| Constructor | Member function run on definition | `@ctor` makes `T_new(...)`, called explicitly; `T x;` runs nothing |
+| Constructor | Member function run on definition | `@ctor` makes `T_new(...)`, called as `T(...)` or `T.new(...)`; `T x;` runs nothing |
 | Default member values | In-class initialisers | `T m = expr;` or `@default(expr)`: the value `T_new` gives the member |
 | Equality | `bool operator==(...) const = default;` | `@equals`: `T_equals`, and `==` and `!=` are bound |
 | Ordering | `auto operator<=>(...) = default;` | `@compare`: `T_compare`, and `<=>`, `<`... are bound; `@compare_order(N)` and `@compare_desc` shape it |

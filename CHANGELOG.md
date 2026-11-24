@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `T(args)` and `Name<T>(args)` call the type's `new` method, so `Point(3, 4)` and `Cell<int>(42)` are `Point.new(3, 4)` and `Cell<int>.new(42)`. `T` is a typedef name or a template instance, and `@ctor` or a static `new` supplies the method; without one the call is an error that suggests `@ctor`. Where C reads a type first, `Point(x);` is still a declaration. See [derive.md](docs/derive.md#calling-it-as-t).
+
+- Fixed: `template 'Name' is a type, not a function` and `is a function, not a type` pointed at an unrelated line for a `Name<T>` spelling; they now report at the template name.
+
 - Fixed: an element pattern over a type pack in an instance argument list, `f<Ts *...>()` and `@inst(Ts *...) f`, or in an unnamed parameter, `int (*fp)(Ts *...)`, was read as a fold over `*` inside a template body (`'(' is not a template`).
 
 - Removed: the postfix spelling `Name@(T)`. Write `Name<T>` or `@inst(T) Name`. `cccc -E` prints an instance as `@inst(Args) Name`, and the instance-clash message as `Name<Args>`. `@inst(int) Vec<int>` is an error: an instance takes its arguments once.

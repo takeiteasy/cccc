@@ -3860,6 +3860,8 @@ void cc_rewrite_angle_inst(VirtualMachine *vm, Token *tok) {
     tok->next         = paren_open;
     paren_open->next  = name;
     name->next        = open;
+    tok_rare_mut(vm, tok)->src_site        = name;
+    tok_rare_mut(vm, paren_open)->src_site = name;
 
     close->loc        = rp;
     close->len        = 1;

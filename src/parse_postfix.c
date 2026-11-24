@@ -543,6 +543,9 @@ bool static_call_ahead(VirtualMachine *vm, Token *tok) {
     return equal(dot, ".") && dot->next->kind == TK_IDENT;
 }
 
+static Node *call_type_method(VirtualMachine *vm, Token **rest, Token *name,
+                              MethodEntry *m, bool ctor);
+
 // `T.f(...)` for the type ending at `dot`: the call fn(...) with no receiver
 // added, so an instance method takes its receiver as the first argument.
 static Node *type_method_call(VirtualMachine *vm, Token **rest, Type *ty,
@@ -557,21 +560,56 @@ static Node *type_method_call(VirtualMachine *vm, Token **rest, Type *ty,
     if (!m)
         error_tok(vm, name, "no method '%.*s' for this type", name->len,
                   name->loc);
+    return call_type_method(vm, rest, name, m, false);
+}
+
+static Node *call_type_method(VirtualMachine *vm, Token **rest, Token *name,
+                              MethodEntry *m, bool ctor) {
     if (!equal(name->next, "("))
         error_tok(vm, name, "'%.*s' is a method; call it as T.%.*s(...)",
                   name->len, name->loc, name->len, name->loc);
+    Node     *args  = NULL;
+    KeyedArg *keyed = NULL;
+    Token    *close = NULL;
     if (m->next) {
-        Node     *args  = NULL;
-        KeyedArg *keyed = NULL;
-        Token    *close = parse_call_args(vm, name->next, &args, &keyed);
-        m               = pick_method(vm, name, m, false, args, keyed);
-        mark_function_referenced(vm, m->fn);
-        return funcall_parsed(vm, rest, close, new_var_node(vm, m->fn, name),
-                              args, keyed);
+        close = parse_call_args(vm, name->next, &args, &keyed);
+        m     = pick_method(vm, name, m, false, args, keyed);
     }
+    if (ctor && !m->is_static)
+        error_tok(vm, name,
+                  "'new' is not a static method, so it cannot construct");
     mark_function_referenced(vm, m->fn);
-    return funcall(vm, rest, name->next->next, new_var_node(vm, m->fn, name),
-                   NULL);
+    Node *fn = new_var_node(vm, m->fn, name);
+    if (close)
+        return funcall_parsed(vm, rest, close, fn, args, keyed);
+    return funcall(vm, rest, name->next->next, fn, NULL);
+}
+
+// `T(...)` where T names a struct or union: the call `T.new(...)`. `tok` is
+// the `T` the call is spelled at and `lparen` the `(` after it.
+static Node *constructor_call(VirtualMachine *vm, Token **rest, Type *ty,
+                              Token *tok, Token *lparen) {
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        error_tok(vm, tok,
+                  "'%.*s' is not a struct or union; it has no "
+                  "constructor",
+                  tok->len, tok->loc);
+    while (ty->size < 0 && ty->origin &&
+           (ty->origin->kind == TY_STRUCT || ty->origin->kind == TY_UNION))
+        ty = ty->origin;
+    static char new_name[] = "new";
+    Token      *name = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    token_assign(vm, name, tok);
+    name->loc                        = new_name;
+    name->len                        = (int)sizeof(new_name) - 1;
+    name->next                       = lparen;
+    tok_rare_mut(vm, name)->src_site = tok;
+    MethodEntry *m                   = find_method(vm, ty, name);
+    if (!m)
+        error_tok(vm, tok,
+                  "'%.*s' has no constructor; add @ctor or write (%.*s){...}",
+                  tok->len, tok->loc, tok->len, tok->loc);
+    return call_type_method(vm, rest, name, m, true);
 }
 
 static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
@@ -5040,9 +5078,13 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         if (deduced)
             return deduced_call(vm, rest, after, deduced, expl, nexplicit, tok);
         TemplateInstance *inst = cc_parse_template_inst(vm, rest, tok);
-        if (inst->tmpl->kind != TMPL_FUNC)
+        if (inst->tmpl->kind != TMPL_FUNC) {
+            if (equal(*rest, "("))
+                return constructor_call(vm, rest, inst->ty, tok->next->next,
+                                        *rest);
             error_tok(vm, tok, "template '%s' is a type, not a function",
                       inst->tmpl->name);
+        }
         if ((*rest)->kind == TK_IDENT)
             error_tok(vm, tok, "template '%s' is a function, not a type",
                       inst->tmpl->name);
@@ -5272,6 +5314,12 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 }
                 return num;
             }
+        }
+
+        if (equal(tok->next, "(")) {
+            Type *ctor_ty = find_typedef(vm, tok);
+            if (ctor_ty)
+                return constructor_call(vm, rest, ctor_ty, tok, tok->next);
         }
 
         // A function template named by a bare call: its arguments are deduced.
