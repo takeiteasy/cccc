@@ -704,7 +704,8 @@ enum {
     ATTR_OUT_NO_GNU = 8, // a standard attribute with no GNU form: dropped from
                          // GNU-spelled output
 };
-// The `[[ns::name]]` namespaces a row accepts; `__attribute__` needs none.
+// The `[[ns::name]]` namespaces a row accepts (`ns | ns_gcc | ns_clang`);
+// `__attribute__` needs none.
 enum {
     ATTR_NS_NONE  = 1, // unscoped `[[name]]`
     ATTR_NS_GNU   = 2, // `gnu::` / `__gnu__::`
@@ -761,8 +762,10 @@ typedef struct AttrDef {
     AttrCategory cat;
     bool         has_attr;
     long         date; // __has_c_attribute value
-    unsigned     ns;   // ATTR_NS_* mask
-    unsigned     cc;   // ATTR_CC_* mask
+    unsigned     ns;        // ATTR_NS_* cccc accepts that neither compiler does
+    unsigned     ns_gcc;    // ATTR_NS_* gcc's __has_c_attribute accepts
+    unsigned     ns_clang;  // ATTR_NS_* clang's __has_c_attribute accepts
+    unsigned     cc;        // ATTR_CC_* mask
     unsigned     flags;
     AttrApplyFn *apply; // NULL: not applied by the parser
     AttrMarker   marker;
@@ -783,8 +786,18 @@ AttrApplyFn attr_checked_ptr, attr_checked, attr_unchecked, attr_addr_space,
     attr_pass_object_size, attr_enable_if, attr_diagnose_if;
 // The attribute `name` (or its `__name__` spelling), or NULL.
 const AttrDef *lookup_attr(const char *name, size_t len);
-// True when `[[ns::name]]` names `a`; `ns` NULL is the unscoped form.
+// True when `[[ns::name]]` names `a` in some compiler; `ns` NULL is the
+// unscoped form.
 bool attr_in_ns(const AttrDef *a, const char *ns, size_t len);
+// As attr_in_ns, but under --output-compiler only that compiler's namespaces
+// (and cccc's own) count.
+bool attr_in_ns_for(const VirtualMachine *vm, const AttrDef *a, const char *ns,
+                    size_t len);
+// True when `a` has a `[[ ]]` spelling in some namespace.
+bool attr_has_c23_spelling(const AttrDef *a);
+// The namespace `-E` prints a non-CCCC `a` in: "gnu::", "clang::", or NULL
+// when it has no `[[ ]]` form.
+const char *attr_output_ns(const VirtualMachine *vm, const AttrDef *a);
 // The namespace a warning suggests for `a`: "cccc::", "gnu::", "clang::" or
 // "" (standard).
 const char *attr_spelling_ns(const AttrDef *a);

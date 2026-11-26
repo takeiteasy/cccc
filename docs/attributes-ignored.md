@@ -25,7 +25,7 @@ Ignored attributes include (but are not limited to):
 | `alias` | GNU | Recognized by `__has_attribute` (no linker) |
 | `target` | GNU | Recognized by `__has_attribute` (no per-function ISA codegen) |
 | `hot` / `cold` | GNU | Recognized by `__has_attribute` (no branch-temperature layout) |
-| `always_inline` / `flatten` / `noinline` | GNU | Recognized by `__has_attribute` (no inliner in the JIT) |
+| `always_inline` / `flatten` / `noinline` | GNU | Recognized by `__has_attribute` (no inliner in the JIT); `always_inline` and `noinline` also take `[[clang::...]]` |
 | `gnu_inline` | GNU | On an `extern inline` definition: inline-only, compiled only when called. A later non-inline definition in the same file, or a real definition in another file, takes precedence. `-c=native` gives a called one a weak out-of-line copy |
 | `used` | GNU | Recognized by `__has_attribute` (no symbol-level DCE) |
 | `may_alias` | GNU | Recognized by `__has_attribute` (no strict-aliasing optimizer) |

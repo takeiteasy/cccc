@@ -2015,10 +2015,11 @@ static bool is_has_builtin_supported(char *name) {
 static long is_has_c_attribute_supported(VirtualMachine *vm, char *name,
                                          const char *vendor) {
     const AttrDef *a = lookup_attr(name, strlen(name));
-    if (!a || !attr_in_ns(a, vendor, vendor ? strlen(vendor) : 0) ||
+    if (!a || !attr_in_ns_for(vm, a, vendor, vendor ? strlen(vendor) : 0) ||
         !attr_on_output_compiler(vm, a))
         return 0;
-    return a->cat == ATTR_GNU ? a->has_attr : a->date;
+    return a->cat == ATTR_GNU || (vendor && a->cat == ATTR_STD) ? a->has_attr
+                                                                : a->date;
 }
 
 static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok,

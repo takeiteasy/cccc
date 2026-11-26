@@ -38,7 +38,7 @@ Custom comptime attributes run on file-scope declarations (types, typedefs, func
 | Home | `-E` prints | Examples |
 |---|---|---|
 | CCCC | Nothing (`[[cccc::name]]` with `--emit-cccc`) | `[[single]]`, `[[cccc::test]]`, a `@comptime(attribute("name"))` name |
-| Standard C23 | `[[name]]` in C23 mode, else the GNU spelling[^stdgnu] | `[[gnu::nodiscard]]` prints `[[nodiscard]]`; with `--std=c17` it prints `__attribute__((warn_unused_result))` |
+| Standard C23 | `[[name]]` in C23 mode, else the GNU spelling[^stdgnu] | `[[nodiscard]]` prints `[[nodiscard]]`; with `--std=c17` it prints `__attribute__((warn_unused_result))` |
 | GNU | `__attribute__((name))` | `[[gnu::packed]]` prints `__attribute__((packed))` |
 | Unknown name in a namespace, or a known name in a namespace it lacks | `[[ns::name]]` as written; nothing under `cccc::` | `[[acme::foo(1)]]`, `[[acme::packed]]` <!-- attr-ns: ok --> |
 
@@ -74,7 +74,7 @@ cccc -E --output-compiler=gcc overloads.c
 | `no_unique_address` | No | No |
 | Every other attribute cccc knows, including `unavailable` | Yes | Yes |
 
-Under `--attr-target=c23 --output-compiler=gcc`, `unavailable` prints as `[[gnu::unavailable]]`, since gcc has no `clang::` namespace. <!-- attr-ns: ok -->
+Under `--attr-target=c23`, `unavailable` prints as `[[clang::unavailable]]`, or `[[gnu::unavailable]]` with `--output-compiler=gcc`, since gcc has no `clang::` namespace. <!-- attr-ns: ok -->
 
 [^stdgnu]: A standard attribute takes its GNU name when it has one: `nodiscard` (its message is dropped) becomes `warn_unused_result` and `maybe_unused` becomes `unused`. `no_unique_address` has no GNU form and is dropped. `deprecated`, `noreturn` and `fallthrough` keep their names.
 [^msvc]: `aligned(N)` prints as `align(N)`, `malloc` as `restrict`, and `deprecated`, `noreturn` and `noinline` keep their names; each is its own `__declspec(...)`, written where the attribute stood. `packed` has no `__declspec` form: it is dropped with a `-Wunknown-attributes` warning, so a packed struct needs `#pragma pack` in the output. A name cccc does not know is kept as written.
@@ -126,11 +126,15 @@ In `[[ ]]` form each attribute takes only the namespaces it has, as in GCC and C
 
 | Attribute | Namespaces | Example |
 |---|---|---|
-| Standard C23 | none, `gnu::` | `[[nodiscard]]`, `[[gnu::nodiscard]]` |
+| Standard C23 | none | `[[nodiscard]]`, `[[maybe_unused]]` |
+| Standard C23 with a GNU twin (`deprecated`, `noreturn`, `fallthrough`) | none, `gnu::` | `[[deprecated]]`, `[[gnu::deprecated]]` |
 | GNU | `gnu::` | `[[gnu::aligned(16)]]` |
+| `always_inline`, `noinline` | `gnu::`, `clang::` | `[[clang::noinline]]` |
+| `unavailable` | `gnu::` in gcc, `clang::` in clang | `[[gnu::unavailable]]`, `[[clang::unavailable]]` |
+| `optimize` | `cccc::`, none, `gnu::` | `[[gnu::optimize("O2")]]` |
 | CCCC | `cccc::`, none | `[[cccc::single]]`, `[[kernel]]` |
 | OpenCL address spaces (`global`, `local`, `constant`, `private`, `generic`) | `cccc::` | `[[cccc::global]]` |
-| Clang (`overloadable`, `unavailable`, `pass_object_size`, `pass_dynamic_object_size`) | `clang::` | `[[clang::overloadable]]` ([attributes-overloadable.md](attributes-overloadable.md)) |
+| Clang (`overloadable`, `pass_object_size`, `pass_dynamic_object_size`) | `clang::` | `[[clang::overloadable]]` ([attributes-overloadable.md](attributes-overloadable.md)) |
 | Clang `enable_if`, `diagnose_if` | none: `__attribute__` only | `__attribute__((enable_if(n > 0, "")))` ([attributes-overloadable-call-site.md](attributes-overloadable-call-site.md)) |
 
 `__gnu__::` and `__clang__::` equal `gnu::` and `clang::`. `__attribute__((name))` and `@name` need no namespace.
@@ -143,7 +147,7 @@ struct [[cccc::packed]] S { char c; int x; };
 // warning: 'packed' is not a 'cccc' attribute; write [[gnu::packed]] [-Wunknown-attributes]
 ```
 
-An unknown name in a namespace is ignored with a `-Wattributes` warning too. `__has_c_attribute(ns::name)` follows the same table: `__has_c_attribute(gnu::packed)` is 1, `__has_c_attribute(packed)` and `__has_c_attribute(cccc::packed)` are 0.
+An unknown name in a namespace is ignored with a `-Wattributes` warning too. `__has_c_attribute(ns::name)` follows the same table: `__has_c_attribute(gnu::packed)` is 1, `__has_c_attribute(packed)` and `__has_c_attribute(cccc::packed)` are 0. With `--output-compiler` set, only that compiler's namespaces count: `__has_c_attribute(gnu::unavailable)` is 1 under `gcc` and 0 under `clang`.
 
 The structural markers `comptime`, `test`, `test_setup`, `test_teardown`, `build`, `build_target`, `template` and `specialize` take `cccc::` or no namespace. In any other namespace they are an error: `[[gnu::test]]` reports `'test' is a cccc attribute; write [[cccc::test]]`. <!-- attr-ns: ok -->
 

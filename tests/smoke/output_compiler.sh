@@ -34,6 +34,11 @@ check() {
         expect_exit 0 "$cc" -std=c2x -fsyntax-only $flags out_$at.c
         [ -s err.txt ] && { cat err.txt >&2; fail "$target warned on $at output"; }
     done
+    # cccc reads its own output back without an attribute warning.
+    { cat out_c23.c; echo 'int main(void) { return 42; }'; } >back.c
+    expect_exit 42 "$CCCC" back.c
+    grep -q 'Wunknown-attributes\|Wattributes' err.txt &&
+        { cat err.txt >&2; fail "cccc warned reading back $target output"; }
     # The mask matches gcc 12+ (unavailable) and clang 14+ (error, warning).
     major=$("$cc" -dM -E - </dev/null |
         sed -n "s/^#define __${4}__ //p")
@@ -45,6 +50,18 @@ check() {
     "$cc" -E -P -x c has.c | grep . >real.txt
     [ "$(wc -l <real.txt)" -eq "$(wc -l <names.txt)" ] || fail "short probe"
     diff real.txt cccc.txt >&2 || fail "__has_attribute differs from $target"
+
+    # [[ ]] namespaces: every GNU and standard row, in each namespace.
+    for ns in gnu clang; do
+        while read -r n; do
+            printf '#if __has_c_attribute(%s::%s)\n%s::%s 1\n#else\n%s::%s 0\n#endif\n' \
+                $ns "$n" $ns "$n" $ns "$n"
+        done <names.txt
+    done >hasns.c
+    "$CCCC" -E -P --output-compiler=$target hasns.c | grep . >cccc_ns.txt
+    "$cc" -std=c2x -E -P -x c hasns.c | grep . >real_ns.txt
+    diff real_ns.txt cccc_ns.txt >&2 ||
+        fail "__has_c_attribute(ns::name) differs from $target"
 }
 
 checked=0

@@ -3915,7 +3915,7 @@ static Token *apply_attr(VirtualMachine *vm, Token *tok, const AttrSite *site,
         if (!vm->compiler.in_type_lookahead) {
             int         len = name_tok->len;
             const char *nm  = name_tok->loc;
-            if (!def->ns)
+            if (!attr_has_c23_spelling(def))
                 warn_tok(vm, attr_tok, CCCC_WARN_UNKNOWN_ATTRIBUTES,
                          "'%.*s' has no [[ ]] spelling; write "
                          "__attribute__((%.*s))",

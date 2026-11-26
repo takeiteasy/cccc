@@ -2465,13 +2465,10 @@ static AttrOut classify_home_attr(VirtualMachine *vm, const AttrItem *it,
             return (AttrOut){OUT_DROP, NULL, NULL, NULL};
         return (AttrOut){OUT_GNU, NULL, NULL, known->gnu_name};
     }
-    if (target != CCCC_ATTR_TARGET_C23 || (known && !known->ns))
+    const char *ns_prefix = known ? attr_output_ns(vm, known) : "gnu::";
+    if (target != CCCC_ATTR_TARGET_C23 || !ns_prefix)
         return (AttrOut){OUT_GNU, NULL, NULL};
-    bool clang_ns =
-        known && (known->ns & ATTR_NS_CLANG) &&
-        !(vm->compiler.output_compiler == CCCC_OUTPUT_COMPILER_GCC &&
-          (known->cc & ATTR_CC_GCC));
-    return (AttrOut){OUT_C23, clang_ns ? "clang::" : "gnu::", NULL};
+    return (AttrOut){OUT_C23, ns_prefix, NULL};
 }
 
 // classify_home_attr, then a known attribute printed in its home spelling is
