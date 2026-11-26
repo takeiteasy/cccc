@@ -194,12 +194,14 @@ it, `N` counts lanes and an ext vector takes component selectors in C:
 ```c
 typedef float f4 __attribute__((ext_vector_type(4)));
 typedef float f2 __attribute__((ext_vector_type(2)));
+typedef int int4 __attribute__((ext_vector_type(4)));
 
 f4 v = {1, 2, 3, 4};
 f4 r = v.wzyx;          // (4, 3, 2, 1)
 f2 h = v.hi;            // (3, 4)
 v.xy = h;               // several lanes, with =
 f4 s = v + 1;           // a scalar splats to every lane
+int4 gt = v > 1;          // -1 where true, else 0 (int4: int ext_vector_type(4))
 f4 t = (f4)(2.0f);      // (2, 2, 2, 2)
 ```
 

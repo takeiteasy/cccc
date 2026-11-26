@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: comparing a vector with a scalar (`v > 2`, `2 == v`) splats the scalar and gives the -1/0 mask, as gcc and clang do; it used to be rejected.
+
 - Added: clang's `ext_vector_type(N)`, `neon_vector_type(N)` and `neon_polyvector_type(N)` vectors. An ext vector takes `.xyzw`, `.rgba`, `.sN`, `.lo`, `.hi`, `.even` and `.odd` component selectors in C, reads and assigns several lanes at once, and splats a scalar operand; `__has_attribute` is 1 for all three, and they stay clang-only under `-E --output-compiler`. `matrix_type`, `address_space` and `noderef` are still ignored. See [attributes-kernel.md](docs/attributes-kernel.md#ext-vectors).
 
 - Fixed: a scalar added to, or splatted into, a vector of another element type converts first, so `float4 + 1` adds 1 and `int4 + 2.9f` adds 2; it used to leave the vector unchanged. `-c=native` output for an explicit `(float4)x` splat builds with gcc and clang.

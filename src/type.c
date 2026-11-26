@@ -1500,6 +1500,13 @@ static bool lower_float16_operands(VirtualMachine *vm, Node *node) {
     return false;
 }
 
+// A scalar compared with a vector is splatted to the vector's type.
+static void splat_scalar_operand(VirtualMachine *vm, Node *node) {
+    bool lv = is_vector(node->lhs->ty), rv = is_vector(node->rhs->ty);
+    if (lv != rv && is_numeric(lv ? node->rhs->ty : node->lhs->ty))
+        usual_arith_conv(vm, &node->lhs, &node->rhs);
+}
+
 void add_type(VirtualMachine *vm, Node *node) {
     if (!node || (node->ty && node->kind != ND_COMPLEX))
         return;
@@ -1672,8 +1679,8 @@ void add_type(VirtualMachine *vm, Node *node) {
             // yields a per-lane all-ones(-1)/all-zero mask in a same-width
             // SIGNED integer vector (GCC semantics, verified against real
             // gcc/clang), not a scalar int.
-            // TODO: a scalar operand is not splatted as gcc/clang do; #2170
             if (is_vector(node->lhs->ty) || is_vector(node->rhs->ty)) {
+                splat_scalar_operand(vm, node);
                 if (!is_vector(node->lhs->ty) || !is_vector(node->rhs->ty) ||
                     !is_compatible(node->lhs->ty, node->rhs->ty))
                     error_tok(vm, node->tok,
@@ -1692,6 +1699,7 @@ void add_type(VirtualMachine *vm, Node *node) {
                     vm, node->tok,
                     "ordered comparison of complex values is not supported");
             if (is_vector(node->lhs->ty) || is_vector(node->rhs->ty)) {
+                splat_scalar_operand(vm, node);
                 if (!is_vector(node->lhs->ty) || !is_vector(node->rhs->ty) ||
                     !is_compatible(node->lhs->ty, node->rhs->ty))
                     error_tok(vm, node->tok,
