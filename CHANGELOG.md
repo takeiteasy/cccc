@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `-E --output-compiler=gcc` reports `ext_vector_type`, `matrix_type`, `neon_vector_type`, `neon_polyvector_type`, `riscv_rvv_vector_bits`, `address_space` and `noderef`, which only clang has. cccc still ignores them with an `unknown attribute` warning.
+
 - Added: gcc's and clang's statement assumption, `[[gnu::assume(e)]];`, `[[clang::assume(e)]];` and `__attribute__((assume(e)));`. The expression is type-checked and not evaluated. `__attribute__((assume(e)))` was an error. The bare and `[[cccc::assume]]` spellings stay the bounds cast, `-E` prints the vendor spellings as written, and `assume` anywhere but an empty statement is ignored with a `-Wunknown-attributes` warning. See [attributes.md](docs/attributes.md).
 
 - Added: `--output-compiler=gcc|clang|any` checks `-E` output against a compiler. An attribute, builtin, nested function or block that compiler lacks, such as `overloadable` under gcc, `__builtin_shuffle` under clang or a block under gcc, is a `-Wtarget-compiler` error, on by default; `-Wno-error=target-compiler` makes it a warning and `-Wno-target-compiler` silences it. `__has_attribute`, `__has_c_attribute` and `__has_builtin` answer as that compiler, and `__has_builtin` knows `__builtin_shuffle`, `__builtin_convertvector` and the decimal `inf`/`nan` builtins. See [output-compiler.md](docs/output-compiler.md).

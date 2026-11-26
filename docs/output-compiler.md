@@ -31,8 +31,11 @@ An attribute the compiler lacks is dropped from the output. CCCC attributes, whi
 |---|---|---|
 | `overloadable`, `enable_if`, `diagnose_if`, `pass_object_size`, `pass_dynamic_object_size` | No | Yes |
 | `optimize`, `designated_init` | Yes | No |
+| `ext_vector_type`, `matrix_type`, `neon_vector_type`, `neon_polyvector_type`, `riscv_rvv_vector_bits`, `address_space`, `noderef` | No | Yes |
 | `no_unique_address` | No | No |
 | Every other attribute cccc knows, including `unavailable` | Yes | Yes |
+
+cccc ignores the clang-only vector and address-space attributes with an `unknown attribute` warning, and `__has_attribute` is 0 for them, but `-E` still reports them under `gcc` and prints them under `clang`.
 
 `__has_attribute` and `__has_c_attribute` answer as the named compiler does, so `#if __has_attribute(overloadable)` takes its `#else` branch under `gcc`. Under `--attr-target=c23`, `unavailable` prints as `[[clang::unavailable]]`, or `[[gnu::unavailable]]` with `--output-compiler=gcc`, since gcc has no `clang::` namespace. <!-- attr-ns: ok -->
 

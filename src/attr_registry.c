@@ -53,6 +53,10 @@
 // Clang's `__attribute__`-only attributes: no `[[ ]]` spelling.
 #define CLANG_GNU_ROW(n, ...)                                                  \
     {n, ATTR_GNU, true, 0, 0, 0, 0, ATTR_CC_CLANG, __VA_ARGS__}
+// A clang-only attribute cccc does not implement: __has_attribute reports 0
+// and the parser warns it is unknown, but `-E --output-compiler` knows gcc
+// lacks it. TODO #2164: implement them.
+#define CLANG_GNU_REPORT_ROW(n) {n, ATTR_GNU, false, 0, 0, 0, 0, ATTR_CC_CLANG}
 
 static const AttrDef attr_table[] = {
     // CCCC-specific (cccc:: scoped); vendor attributes report 1, not a date
@@ -141,6 +145,13 @@ static const AttrDef attr_table[] = {
     CLANG_ROW("pass_dynamic_object_size", 0, attr_pass_object_size),
     CLANG_GNU_ROW("enable_if", 0, attr_enable_if),
     CLANG_GNU_ROW("diagnose_if", 0, attr_diagnose_if),
+    CLANG_GNU_REPORT_ROW("ext_vector_type"),
+    CLANG_GNU_REPORT_ROW("matrix_type"),
+    CLANG_GNU_REPORT_ROW("neon_vector_type"),
+    CLANG_GNU_REPORT_ROW("neon_polyvector_type"),
+    CLANG_GNU_REPORT_ROW("riscv_rvv_vector_bits"),
+    CLANG_GNU_REPORT_ROW("address_space"),
+    CLANG_GNU_REPORT_ROW("noderef"),
     // Recognized and ignored: there is no linker, per-function ISA, inliner,
     // branch layout, symbol-level DCE, strict-aliasing optimizer or machine
     // mode.
