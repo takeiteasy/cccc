@@ -185,6 +185,31 @@ __alignof__(v8f32);   // 32
 
 Use `__alignof__(type)` when checking where a vector-bearing member lands.
 
+## Vector Conversions
+
+A vector converts implicitly (initializer, assignment, argument, return) only
+to a compatible vector. A scalar and a vector never convert that way; a scalar
+splats only as an arithmetic operand (`v + 1.0f`) or through a cast. An
+explicit cast `(i4)q` always converts.
+
+| `--compiler-family` | A vector converts to |
+|---|---|
+| `gcc` (default) | the same element type and lane count; `int4` to `unsigned4` is an error |
+| `clang` | any vector of the same size (a bit cast), unless both are ext vectors, which need the same element type and lane count |
+
+```c
+typedef float v4 __attribute__((vector_size(16)));
+typedef int   i4 __attribute__((vector_size(16)));
+
+v4 q = {1, 2, 3, 4};
+i4 a = (i4)q;   // explicit cast
+i4 b = q;       // error under gcc; a bit cast under --compiler-family=clang
+float f = q;    // error
+```
+
+An [OpenCL C](opencl.md) translation unit also splats a scalar into a vector
+(`float4 v = 2.0f;`) and converts vectors only when they are compatible.
+
 ## Ext Vectors
 
 `__attribute__((ext_vector_type(N)))` is clang's vector of `N` lanes of an

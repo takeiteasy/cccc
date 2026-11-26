@@ -1156,6 +1156,8 @@ Type *bitint_type(VirtualMachine *vm, Token *tok, int width, bool is_unsigned);
 void add_type(VirtualMachine *vm, Node *node);
 void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to,
                               Token *tok);
+bool check_vector_conversion(VirtualMachine *vm, Node *expr, Type *to,
+                             const char *ctx, Token *tok);
 
 //
 // unicode.c

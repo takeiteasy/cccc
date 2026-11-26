@@ -455,6 +455,7 @@ static bool compat_body(Type *t1, Type *t2, bool strict,
             return true;
         case TY_VECTOR:
             return type_arr(t1)->vec_len == type_arr(t2)->vec_len &&
+                   type_arr(t1)->vec_visible == type_arr(t2)->vec_visible &&
                    compat_nested(t1->base, t2->base, strict, family);
         case TY_STRUCT:
         case TY_UNION: {
@@ -1231,6 +1232,63 @@ static void usual_arith_conv(VirtualMachine *vm, Node **lhs, Node **rhs) {
 //
 // Integer cases are suppressed when the source is a constant that fits in the
 // destination type (e.g. `char c = 0;` is silent).
+static void describe_conv_type(Type *ty, char *buf, size_t n) {
+    if (!is_vector(ty)) {
+        snprintf(buf, n, "scalar");
+        return;
+    }
+    int lanes = type_arr(ty)->vec_visible ? type_arr(ty)->vec_visible
+                                          : type_arr(ty)->vec_len;
+    snprintf(buf, n, "vector of %d %d-byte %s", lanes, ty->base->size,
+             is_flonum(ty->base)     ? "float"
+             : ty->base->is_unsigned ? "unsigned int"
+                                     : "int");
+}
+
+// gcc's vector comparison result converts to any vector of its size.
+static bool is_vector_compare(Node *expr) {
+    return expr->kind == ND_EQ || expr->kind == ND_NE || expr->kind == ND_LT ||
+           expr->kind == ND_LE;
+}
+
+// Implicit conversion involving a vector. gcc accepts only compatible
+// vectors; clang also accepts any same-size pair unless both are ext vectors;
+// OpenCL C splats a scalar and otherwise needs compatible vectors.
+// Returns false when an error was recovered from.
+bool check_vector_conversion(VirtualMachine *vm, Node *expr, Type *to,
+                             const char *ctx, Token *tok) {
+    Type *from = expr ? expr->ty : NULL;
+    if (!from || !to || is_error_type(from) || is_error_type(to) ||
+        (!is_vector(from) && !is_vector(to)))
+        return true;
+
+    bool ok;
+    if (is_vector(from) != is_vector(to))
+        ok = vm->compiler.opencl && is_vector(to) &&
+             (is_integer(from) || is_flonum(from));
+    else if (is_vector_compare(expr))
+        ok = from->size == to->size;
+    else if (vm->compiler.opencl ||
+             vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_GCC ||
+             (type_arr(from)->vec_ext && type_arr(to)->vec_ext))
+        ok = is_compatible(from, to);
+    else
+        ok = from->size == to->size;
+    if (ok)
+        return true;
+
+    char fb[64], tb[64];
+    describe_conv_type(from, fb, sizeof fb);
+    describe_conv_type(to, tb, sizeof tb);
+    if (vm->collect_errors &&
+        error_tok_recover(vm, tok,
+                          "incompatible types when %s: cannot convert %s to %s",
+                          ctx, fb, tb))
+        return false;
+    error_tok(vm, tok, "incompatible types when %s: cannot convert %s to %s",
+              ctx, fb, tb);
+}
+
 void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to,
                               Token *tok) {
     if (!vm || !expr || !to || !expr->ty)
@@ -1645,19 +1703,12 @@ void add_type(VirtualMachine *vm, Node *node) {
                 error_tok(vm, node->lhs->tok,
                           "cannot assign to const-qualified variable");
             }
-            // GCC vector_size vectors (tracker #72): matching real GCC/clang,
-            // a bare scalar cannot initialize or be assigned to a whole
-            // vector -- only an arithmetic operator broadcasts a scalar
-            // (`v + 5.0f`), which by this point has already produced a
-            // vector-typed rhs via usual_arith_conv. Reject the narrower
-            // "v = 5.0f" case explicitly so #72's semantics match upstream
-            // rather than silently diverging.
-            if (is_vector(node->lhs->ty) && node->rhs->ty &&
-                !is_vector(node->rhs->ty) && !is_error_type(node->rhs->ty))
-                error_tok(vm, node->tok,
-                          "cannot initialize/assign a vector type from a "
-                          "bare scalar; broadcast via an arithmetic operator "
-                          "instead (e.g. 'v + 5.0f')");
+            if (!is_initialization &&
+                !check_vector_conversion(vm, node->rhs, node->lhs->ty,
+                                         "assigning", node->tok)) {
+                node->ty = ty_error;
+                return;
+            }
             if (node->lhs->ty->kind != TY_STRUCT &&
                 node->lhs->ty->kind != TY_UNION) {
                 warn_implicit_conversion(vm, node->rhs, node->lhs->ty,

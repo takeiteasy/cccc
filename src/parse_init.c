@@ -1193,6 +1193,10 @@ static void initializer2(VirtualMachine *vm, Token **rest, Token *tok,
     }
 
     init->expr = cc_overload_convert(vm, assign(vm, rest, tok), init->ty);
+    if (init->expr->kind != ND_MACRO_CALL) {
+        add_type(vm, init->expr);
+        check_vector_conversion(vm, init->expr, init->ty, "initializing", tok);
+    }
 }
 
 static Type *copy_struct_type(VirtualMachine *vm, Type *ty) {

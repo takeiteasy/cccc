@@ -1592,6 +1592,8 @@ static Node *check_call_arg(VirtualMachine *vm, CheckedCallWatch *watch,
 
         arg = cc_overload_convert(vm, arg, param_ty);
         if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
+            check_vector_conversion(vm, arg, param_ty, "passing an argument",
+                                    tok);
             warn_implicit_conversion(vm, arg, param_ty, tok);
             cc_check_checked_scope_conv(vm, arg, param_ty, tok);
             cc_check_checked_call_arg(vm, watch, arg, param_ty, *index, tok);

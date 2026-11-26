@@ -1,7 +1,7 @@
 // EXPECT_COMPILE_ERROR
 // Matching real GCC/clang: a bare scalar cannot initialize or be assigned
 // to a whole vector_size vector -- only an arithmetic operator broadcasts
-// a scalar (`v + 5.0f`), not plain assignment/initialization (tracker #72).
+// a scalar (`v + 5.0f`), not plain assignment/initialization.
 // Verified against `gcc`/`clang` directly: both reject this with
 // "initializing 'v4sf' ... with an expression of incompatible type 'float'".
 

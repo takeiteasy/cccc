@@ -1,7 +1,6 @@
 // EXPECT_COMPILE_ERROR
 // Binary ops between incompatible vector_size types (different element type
-// / lane count, even at the same total byte size) must be rejected
-// (tracker #72).
+// / lane count, even at the same total byte size) must be rejected.
 
 typedef int  v4si __attribute__((vector_size(16))); // 4 x int32 lanes
 typedef long v2di __attribute__((vector_size(16))); // 2 x int64 lanes

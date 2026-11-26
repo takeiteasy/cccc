@@ -5383,6 +5383,8 @@ static void recheck_spliced_funcalls(VirtualMachine *vm, Node *node) {
         }
         Node *a = *ap;
         if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
+            check_vector_conversion(vm, a, param_ty, "passing an argument",
+                                    node->tok);
             warn_implicit_conversion(vm, a, param_ty, node->tok);
             Node *cast_node = new_cast(vm, a, param_ty);
             cast_node->next = a->next;

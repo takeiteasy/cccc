@@ -118,6 +118,10 @@ on Linux x86_64, C11 `_Alignof(type)` and `_Alignas(type)` of a 32- or
 64-byte vector cap at 16 under `gcc` and give the vector's size under
 `clang` (see [attributes.md](attributes-kernel.md#vector-size)).
 
+Implicit vector conversions are the third: `gcc` needs compatible vectors and
+`clang` accepts any same-size pair (see
+[attributes-kernel.md](attributes-kernel.md#vector-conversions)).
+
 A cast to a typedef with `aligned(N)` is the other: `_Alignof((i64)x)` is the
 plain type's alignment under `gcc` and `N` under `clang`.
 Likewise `x + g` for `int x` and an aligned `i64 g` is `N` under `gcc` (the
