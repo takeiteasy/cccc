@@ -1,6 +1,8 @@
 # -E --output-compiler: the dump compiles under the named compiler with no
 # attribute warnings, and cccc's __has_attribute under each target agrees
-# with the real compiler for every GNU registry row.
+# with the real compiler for every GNU registry row. __has_builtin agrees for
+# the builtins the compilers disagree on, and a nested function (gcc) or
+# block (clang) dump compiles under its compiler.
 REGISTRY=$(cd "$(dirname "$0")/../../src" && pwd)/attr_registry.c
 . "$(dirname "$0")/lib.sh"
 
@@ -23,13 +25,33 @@ while read -r n; do
     printf '#if __has_attribute(%s)\n%s 1\n#else\n%s 0\n#endif\n' "$n" "$n" "$n"
 done <names.txt >has.c
 
+BUILTINS="__builtin_shuffle __builtin_infd32 __builtin_infd64 __builtin_infd128
+__builtin_nand32 __builtin_nand64 __builtin_nand128 __builtin_assume
+__builtin_debugtrap __builtin_os_log_format __builtin_os_log_format_buffer_size"
+for n in $BUILTINS; do
+    printf '#if __has_builtin(%s)\n%s 1\n#else\n%s 0\n#endif\n' "$n" "$n" "$n"
+done >hasb.c
+
+cat >nested.c <<'EOS'
+int f(int x) {
+    int g(int y) { return x + y; }
+    return g(1);
+}
+EOS
+cat >blocks.c <<'EOS'
+int f(void) {
+    int (^b)(int) = ^(int y) { return y + 1; };
+    return b(1);
+}
+EOS
+
 check() {
     target=$1
     cc=$2
     flags=$3
     for at in auto c23; do
         "$CCCC" -E --attr-target=$at --output-compiler=$target \
-            -Wno-target-attributes in.c >out_$at.c ||
+            -Wno-target-compiler in.c >out_$at.c ||
             fail "-E --output-compiler=$target failed"
         expect_exit 0 "$cc" -std=c2x -fsyntax-only $flags out_$at.c
         [ -s err.txt ] && { cat err.txt >&2; fail "$target warned on $at output"; }
@@ -39,6 +61,14 @@ check() {
     expect_exit 42 "$CCCC" back.c
     grep -q 'Wunknown-attributes\|Wattributes' err.txt &&
         { cat err.txt >&2; fail "cccc warned reading back $target output"; }
+    if [ "$target" = gcc ]; then src=nested.c; else src=blocks.c; fi
+    "$CCCC" -E --output-compiler=$target $src >syntax_out.c ||
+        fail "-E --output-compiler=$target rejected $src"
+    [ "$target" = clang ] && blocks=-fblocks || blocks=
+    expect_exit 0 "$cc" $blocks -fsyntax-only syntax_out.c
+    "$CCCC" -E -P -Wno-target-compiler --output-compiler=$target hasb.c | grep . >cccc_b.txt
+    "$cc" -E -P -x c hasb.c | grep . >real_b.txt
+    diff real_b.txt cccc_b.txt >&2 || fail "__has_builtin differs from $target"
     # The mask matches gcc 12+ (unavailable) and clang 14+ (error, warning).
     major=$("$cc" -dM -E - </dev/null |
         sed -n "s/^#define __${4}__ //p")

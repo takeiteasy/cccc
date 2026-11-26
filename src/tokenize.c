@@ -117,7 +117,7 @@ static const WarningInfo warning_infos[] = {
     {"openmp", CCCC_WARN_OPENMP, false},
     {"checked-regions", CCCC_WARN_CHECKED_REGIONS, false},
     {"checked-calls", CCCC_WARN_CHECKED_CALLS, false},
-    {"target-attributes", CCCC_WARN_TARGET_ATTRIBUTES, false},
+    {"target-compiler", CCCC_WARN_TARGET_COMPILER, false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };
@@ -686,6 +686,17 @@ bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...) {
     exit(1);
 }
 
+void warn_target_syntax(VirtualMachine *vm, Token *tok, const char *what,
+                        unsigned cc) {
+    if (!vm->compiler.target_check)
+        return;
+    bool gcc = vm->compiler.output_compiler == CCCC_OUTPUT_COMPILER_GCC;
+    if (cc & (gcc ? ATTR_CC_GCC : ATTR_CC_CLANG))
+        return;
+    warn_tok(vm, tok, CCCC_WARN_TARGET_COMPILER, "%s are not supported by %s",
+             what, gcc ? "gcc" : "clang");
+}
+
 void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
               ...) {
     uint64_t mask = (uint64_t)category;
@@ -700,7 +711,8 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
                             : vm    ? vm->compiler.warning_errors
                                     : 0;
 
-    if (!vm || !(eff_warnings & mask))
+    if (!vm || !(eff_warnings & mask) ||
+        (vm->compiler.target_check && category != CCCC_WARN_TARGET_COMPILER))
         return;
 
     Token      *site      = diag_site(tok);
@@ -2526,7 +2538,7 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
                 warn_tok(vm, it.name, CCCC_WARN_UNKNOWN_ATTRIBUTES, "%s",
                          out.warn);
             if (k == 0 && out.target_miss)
-                warn_tok(vm, it.name, CCCC_WARN_TARGET_ATTRIBUTES,
+                warn_tok(vm, it.name, CCCC_WARN_TARGET_COMPILER,
                          "'%.*s' is not supported by %s and is dropped",
                          it.name->len, it.name->loc,
                          vm->compiler.output_compiler ==
@@ -2635,6 +2647,17 @@ static void output_tokens(FILE *f, VirtualMachine *vm, Token *t, Token *stop,
         // Output token based on kind
         switch (t->kind) {
             case TK_IDENT:
+                if (vm &&
+                    vm->compiler.output_compiler != CCCC_OUTPUT_COMPILER_ANY &&
+                    !builtin_on_output_compiler(vm, t->loc, t->len))
+                    warn_tok(vm, t, CCCC_WARN_TARGET_COMPILER,
+                             "'%.*s' is not supported by %s", t->len, t->loc,
+                             vm->compiler.output_compiler ==
+                                     CCCC_OUTPUT_COMPILER_GCC
+                                 ? "gcc"
+                                 : "clang");
+                fprintf(f, "%.*s", t->len, t->loc);
+                break;
             case TK_PP_NUM:
                 fprintf(f, "%.*s", t->len, t->loc);
                 break;
@@ -2723,6 +2746,28 @@ void cc_clear_errors(VirtualMachine *vm) {
     vm->error_count   = 0;
     vm->warning_count = 0;
     vm->error_message = NULL;
+}
+
+// Drops the diagnostics recorded after `last` (NULL: all of them) that are not
+// -Wtarget-compiler, so a check parse of text that is not valid C reports
+// nothing but the target findings.
+void cc_keep_target_diagnostics(VirtualMachine *vm, CompileError *last) {
+    CompileError **link = last ? &last->next : &vm->errors;
+    CompileError  *tail = last;
+    while (*link) {
+        CompileError *e = *link;
+        if (e->warn_name && !strcmp(e->warn_name, "target-compiler")) {
+            tail = e;
+            link = &e->next;
+            continue;
+        }
+        *link = e->next;
+        if (e->severity == 1)
+            vm->warning_count--;
+        else
+            vm->error_count--;
+    }
+    vm->errors_tail = tail;
 }
 
 void cc_print_all_errors(VirtualMachine *vm) {

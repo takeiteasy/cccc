@@ -812,6 +812,14 @@ bool cc_has_attribute(const char *name, int len);
 // False when --output-compiler names a compiler whose `-E` output lacks `a`;
 // CCCC-home rows, which `-E` drops, are always true.
 bool attr_on_output_compiler(const VirtualMachine *vm, const AttrDef *a);
+// False when --output-compiler names a compiler lacking the builtin `name`.
+bool builtin_on_output_compiler(const VirtualMachine *vm, const char *name,
+                                size_t len);
+// -E parse pass: -Wtarget-compiler when --output-compiler's compiler is not in
+// `cc` (ATTR_CC_*), for syntax the parser sees (`what` is plural).
+void warn_target_syntax(VirtualMachine *vm, Token *tok, const char *what,
+                        unsigned cc);
+void cc_keep_target_diagnostics(VirtualMachine *vm, CompileError *last);
 // The AttrCategory whose spelling preprocessed output uses, or -1 if unknown.
 int attr_output_home(const char *name, size_t len);
 

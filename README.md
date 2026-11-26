@@ -289,6 +289,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | Guide | Covers |
 |---|---|
 | [attributes.md](docs/attributes.md) | *hub* — `__attribute__`, `[[...]]` and `@name` support |
+| [output-compiler.md](docs/output-compiler.md) | `-E --output-compiler`: attributes, builtins, nested functions and blocks a gcc or clang dump lacks |
 | [syntax.md](docs/syntax.md) | CCCC-only syntax at a glance: `@name`, struct-body methods and operators, `<=>`, `^^`, quasi-quotes |
 | [methods.md](docs/methods.md) | `[[cccc::method(T)]]` struct methods: `s.f(x)` call-site lowering |
 | [operators.md](docs/operators.md) | `[[cccc::operator(...)]]` operator overloading for structs |
@@ -349,7 +350,7 @@ Options:
 	-m/--dump-expanded       Output macro-expanded source code (for gcc compatibility)
 	   --emit-only           With -c=generated: only emit explicitly tagged content ([[cccc::emit]])
 	   --attr-target=TARGET  Attribute spelling in -E output: auto, c23, gnu, msvc, strip
-	   --output-compiler=CC  Check -E attributes against a compiler: any (default),
+	   --output-compiler=CC  Check -E output against a compiler: any (default),
 	                         gcc, clang
 	   --compiler-family=FAM  Host family CCCC's front end models where gcc/clang
 	                         disagree (__builtin_types_compatible_p, -Wauto-declarator):

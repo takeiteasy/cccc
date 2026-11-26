@@ -857,6 +857,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // lesson, called out in #1056's own comment on this same function).
     bool   defines_body = !equal(tok, ";");
     bool   scoped       = is_nested && !defines_body && !attr->is_static;
+    if (is_nested && defines_body)
+        warn_target_syntax(vm, dn.tok, "nested functions", ATTR_CC_GCC);
     FnDecl found =
         find_fn_decl(vm, name_str, on.len,
                      attr->is_static || (is_nested && defines_body), dn.tok);

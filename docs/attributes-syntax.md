@@ -47,34 +47,12 @@ A list that mixes homes prints one group per spelling, `[[...]]` first.
 | Flag | Effect |
 |---|---|
 | `--attr-target=auto\|c23\|gnu\|msvc\|strip` | How `-E` prints the remaining attributes. `auto` is the table above; `c23` prints GNU ones as `[[gnu::name]]` and Clang ones as `[[clang::name]]` (`enable_if` and `diagnose_if`, which have no `[[ ]]` form, stay `__attribute__`); `gnu` always uses `__attribute__`; `msvc` prints the few attributes MSVC has as `__declspec`[^msvc] and drops the rest; `strip` drops them. Without `-E` it warns on the command line |
-| `--output-compiler=any\|gcc\|clang` | The compiler `-E` output is for. `any` (the default) checks nothing ([below](#checking-against-a-compiler)) |
+| `--output-compiler=any\|gcc\|clang` | The compiler `-E` output is for. `any` (the default) checks nothing ([output-compiler.md](output-compiler.md)) |
 | `--emit-cccc` | Keep `[[cccc::...]]` attributes and route markers, re-emit cccc-only includes, print checked-pointer qualifiers after the `*`, and keep `_Checked[N]`/`_Nt_checked[N]` array declarators[^emit] |
 
 ### Checking against a compiler
 
-`--output-compiler=gcc` or `=clang` checks each attribute `-E` prints against that compiler. One it lacks is an error under `-Wtarget-attributes` ([warnings.md](warnings.md)) and is left out of the output:
-
-```sh
-cccc -E --output-compiler=gcc overloads.c
-# error: 'overloadable' is not supported by gcc and is dropped [-Wtarget-attributes]
-```
-
-| Option | A missing attribute |
-|---|---|
-| (default) | Error |
-| `-Wno-error=target-attributes` | Warning, and dropped from the output |
-| `-Wno-target-attributes` | Dropped silently |
-
-`__has_attribute` and `__has_c_attribute` answer as the named compiler does, so `#if __has_attribute(overloadable)` takes its `#else` branch under `gcc`. CCCC attributes, which `-E` drops anyway, and names cccc does not know are not checked. Without `-E` the flag warns and does nothing. It cannot be combined with `--attr-target=msvc`.
-
-| Attributes | gcc | clang |
-|---|---|---|
-| `overloadable`, `enable_if`, `diagnose_if`, `pass_object_size`, `pass_dynamic_object_size` | No | Yes |
-| `optimize`, `designated_init` | Yes | No |
-| `no_unique_address` | No | No |
-| Every other attribute cccc knows, including `unavailable` | Yes | Yes |
-
-Under `--attr-target=c23`, `unavailable` prints as `[[clang::unavailable]]`, or `[[gnu::unavailable]]` with `--output-compiler=gcc`, since gcc has no `clang::` namespace. <!-- attr-ns: ok -->
+`--output-compiler=gcc` or `=clang` drops and reports the attributes the compiler lacks; see [output-compiler.md](output-compiler.md).
 
 [^stdgnu]: A standard attribute takes its GNU name when it has one: `nodiscard` (its message is dropped) becomes `warn_unused_result` and `maybe_unused` becomes `unused`. `no_unique_address` has no GNU form and is dropped. `deprecated`, `noreturn` and `fallthrough` keep their names.
 [^msvc]: `aligned(N)` prints as `align(N)`, `malloc` as `restrict`, and `deprecated`, `noreturn` and `noinline` keep their names; each is its own `__declspec(...)`, written where the attribute stood. `packed` has no `__declspec` form: it is dropped with a `-Wunknown-attributes` warning, so a packed struct needs `#pragma pack` in the output. A name cccc does not know is kept as written.

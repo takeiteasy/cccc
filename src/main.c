@@ -649,7 +649,7 @@ static void usage(const char *argv0, int exit_code) {
            "content ([[cccc::emit]])\n");
     printf("\t   --attr-target=TARGET  Attribute spelling in -E output: "
            "auto, c23, gnu, msvc, strip\n");
-    printf("\t   --output-compiler=CC  Check -E attributes against a compiler: "
+    printf("\t   --output-compiler=CC  Check -E output against a compiler: "
            "any (default),\n"
            "\t                         gcc, clang\n");
     printf("\t   --compiler-family=FAM  Host family CCCC's front end models "
@@ -1630,9 +1630,9 @@ int main(int argc, const char *argv[]) {
     int      max_errors         = 20; // --max-errors (default: 20)
     int      warnings_as_errors = 0;  // -Werror / --Werror
     uint64_t warnings = CCCC_WARN_UNKNOWN_ATTRIBUTES | CCCC_WARN_OPENMP |
-                        CCCC_WARN_CHECKED_REGIONS | CCCC_WARN_TARGET_ATTRIBUTES;
+                        CCCC_WARN_CHECKED_REGIONS | CCCC_WARN_TARGET_COMPILER;
     uint64_t warning_errors =
-        CCCC_WARN_CHECKED_REGIONS | CCCC_WARN_TARGET_ATTRIBUTES;
+        CCCC_WARN_CHECKED_REGIONS | CCCC_WARN_TARGET_COMPILER;
     uint64_t warning_no_errors  = 0;
     uint64_t warning_sticky_errors =
         0; // bits pinned by -Werror=<name>; resist -Wno-error=<name>
@@ -3408,7 +3408,27 @@ int main(int argc, const char *argv[]) {
             if (f != stdout)
                 fclose(f);
         }
+        // Nested functions and blocks need the parser to spot.
+        if (vm.compiler.output_compiler != CCCC_OUTPUT_COMPILER_ANY) {
+            CompileError *before    = vm.errors_tail;
+            jmp_buf      *saved_jmp = vm.error_jmp_buf;
+            jmp_buf       check_buf;
+            vm.error_jmp_buf         = &check_buf;
+            vm.compiler.target_check = true;
+            if (!setjmp(check_buf))
+                for (int i = 0; i < input_files_count; i++) {
+                    if (i > 0)
+                        cc_leave_top_file_scope(&vm);
+                    vm.compiler.cur_input = i;
+                    cc_parse(&vm, input_tokens[i]);
+                }
+            vm.error_jmp_buf         = saved_jmp;
+            vm.compiler.target_check = false;
+            cc_keep_target_diagnostics(&vm, before);
+        }
         cc_print_all_errors(&vm);
+        if (vm.error_count > 0)
+            exit_code = 1;
         goto BAIL;
     }
 

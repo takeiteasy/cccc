@@ -1,6 +1,6 @@
 # Warnings and Diagnostics
 
-gcc/clang-style warning categories. Everything is off by default except `-Wunknown-attributes`, `-Wopenmp`, `-Wchecked-regions` and `-Wtarget-attributes`.
+gcc/clang-style warning categories. Everything is off by default except `-Wunknown-attributes`, `-Wopenmp`, `-Wchecked-regions` and `-Wtarget-compiler`.
 
 ## Controls
 
@@ -103,7 +103,7 @@ Group: **A** is in `-Wall`, **E** in `-Wextra`, **D** on by default, blank is st
 | `unknown-attributes` | D | An `@name` with no registered handler (`@json_skp`). `[[name]]` and `__attribute__((name))` report under `attributes`. Silence with `-Wno-unknown-attributes` |
 | `openmp` | D | An `ordered depend(sink: ...)` that waits on the current or a later iteration, or on one the loop never runs; the sink is ignored ([openmp.md](openmp.md#doacross-loops)). Silence with `-Wno-openmp` |
 | `checked-regions` | D | A [checked-region](safety-checked-regions.md#downgrading-to-warnings) violation. An error by default; `-Wno-error=checked-regions` makes it a warning. `-Wno-checked-regions` does not silence it |
-| `target-attributes` | D | `-E --output-compiler=gcc\|clang` prints an attribute that compiler lacks ([attributes-syntax.md](attributes-syntax.md#checking-against-a-compiler)). An error by default; `-Wno-error=target-attributes` makes it a warning and `-Wno-target-attributes` drops the attribute silently |
+| `target-compiler` | D | `-E --output-compiler=gcc\|clang` prints an attribute, builtin, nested function or block that compiler lacks ([output-compiler.md](output-compiler.md)). An error by default; `-Wno-error=target-compiler` makes it a warning and `-Wno-target-compiler` silences it (an attribute is then dropped without a report) |
 | `checked-calls` | | A call from a [checked region](safety-checked-regions.md#call-boundaries) to a prototype with an unchecked pointer, or a checked pointer passed to a raw parameter. Header declarations and `[[cccc::trusted]]` prototypes are exempt |
 | `nodiscard` | A | Discarding a `nodiscard` result |
 | `fallthrough` | E | Implicit switch fallthrough |

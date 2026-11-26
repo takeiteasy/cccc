@@ -471,6 +471,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     obj_blk_mut(vm, desc_var)->block_desc_of = block_fn;
 
     // Create the block literal node
+    warn_target_syntax(vm, start, "blocks", ATTR_CC_CLANG);
     Node *node               = new_node(vm, ND_BLOCK_LITERAL, start);
     node_misc_mut(vm, node)->block_fn = block_fn;
     node_misc_mut(vm, node)->block_captures     = captures;

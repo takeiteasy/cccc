@@ -64,6 +64,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | Guide | Covers |
 |---|---|
 | [attributes.md](attributes.md) | *hub* — `__attribute__`, `[[...]]` and `@name` support |
+| [output-compiler.md](output-compiler.md) | `-E --output-compiler`: attributes, builtins, nested functions and blocks a gcc or clang dump lacks |
 | [syntax.md](syntax.md) | CCCC-only syntax at a glance: `@name`, struct-body methods and operators, `<=>`, `^^`, quasi-quotes |
 | [methods.md](methods.md) | `[[cccc::method(T)]]` struct methods: `s.f(x)` call-site lowering |
 | [operators.md](operators.md) | `[[cccc::operator(...)]]` operator overloading for structs |

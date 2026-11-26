@@ -1882,6 +1882,40 @@ static bool is_has_feature_supported(VirtualMachine *vm, char *name) {
     return false;
 }
 
+// Builtins only one compiler has, from each compiler's __has_builtin.
+static const struct {
+    const char *name;
+    unsigned    cc;
+} builtin_cc[] = {
+    {"__builtin_shuffle", ATTR_CC_GCC},
+    {"__builtin_infd32", ATTR_CC_GCC},
+    {"__builtin_infd64", ATTR_CC_GCC},
+    {"__builtin_infd128", ATTR_CC_GCC},
+    {"__builtin_nand32", ATTR_CC_GCC},
+    {"__builtin_nand64", ATTR_CC_GCC},
+    {"__builtin_nand128", ATTR_CC_GCC},
+    {"__builtin_assume", ATTR_CC_CLANG},
+    {"__builtin_debugtrap", ATTR_CC_CLANG},
+    {"__builtin_os_log_format", ATTR_CC_CLANG},
+    {"__builtin_os_log_format_buffer_size", ATTR_CC_CLANG},
+};
+
+bool builtin_on_output_compiler(const VirtualMachine *vm, const char *name,
+                                size_t len) {
+    unsigned want = vm->compiler.output_compiler == CCCC_OUTPUT_COMPILER_GCC
+                        ? ATTR_CC_GCC
+                    : vm->compiler.output_compiler == CCCC_OUTPUT_COMPILER_CLANG
+                        ? ATTR_CC_CLANG
+                        : 0;
+    if (!want)
+        return true;
+    for (size_t i = 0; i < sizeof(builtin_cc) / sizeof(*builtin_cc); i++)
+        if (strlen(builtin_cc[i].name) == len &&
+            !memcmp(builtin_cc[i].name, name, len))
+            return builtin_cc[i].cc & want;
+    return true;
+}
+
 static bool is_has_builtin_supported(char *name) {
     int libm_row, libm_variant;
     if (libm_builtin_lookup(name, (int)strlen(name), &libm_row, &libm_variant))
@@ -1957,6 +1991,14 @@ static bool is_has_builtin_supported(char *name) {
         "__builtin_expect_with_probability",
         "__builtin_prefetch",
         "__builtin_assume",
+        "__builtin_shuffle",
+        "__builtin_convertvector",
+        "__builtin_infd32",
+        "__builtin_infd64",
+        "__builtin_infd128",
+        "__builtin_nand32",
+        "__builtin_nand64",
+        "__builtin_nand128",
         "__builtin_cccc_dynamic_check",
         "__builtin_pc_function_name",
         "__builtin_pc_source_location",
@@ -2051,7 +2093,8 @@ static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok,
         return a && a->has_attr && attr_on_output_compiler(vm, a);
     }
     if (!strcmp(kind, "__has_builtin"))
-        return is_has_builtin_supported(name);
+        return is_has_builtin_supported(name) &&
+               builtin_on_output_compiler(vm, name, strlen(name));
     if (!strcmp(kind, "__has_c_attribute"))
         return is_has_c_attribute_supported(vm, name, vendor);
     if (!strcmp(kind, "__has_declspec_attribute"))

@@ -1,4 +1,4 @@
-// CCCC_FLAGS: -E --output-compiler=gcc -Wno-error=target-attributes
+// CCCC_FLAGS: -E --output-compiler=gcc -Wno-error=target-compiler
 // CCCC_EXPECT_STDERR: warning: 'overloadable' is not supported by gcc
 // CCCC_EXPECT_STDERR: warning: 'enable_if' is not supported by gcc
 // CCCC_EXPECT_STDERR: warning: 'pass_object_size' is not supported by gcc

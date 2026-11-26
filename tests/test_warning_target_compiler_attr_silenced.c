@@ -1,5 +1,5 @@
-// CCCC_FLAGS: -E --output-compiler=clang -Wno-target-attributes
-// CCCC_REJECT_STDERR: target-attributes|warning|error
+// CCCC_FLAGS: -E --output-compiler=clang -Wno-target-compiler
+// CCCC_REJECT_STDERR: target-compiler|warning|error
 // CCCC_EXPECT_STDOUT: __attribute__\(\(cold\)\) void k\(void\);
 // CCCC_EXPECT_STDOUT: __attribute__\(\(overloadable\)\) int f\(int\);
 // CCCC_REJECT_STDOUT: optimize|designated_init

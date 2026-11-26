@@ -1193,10 +1193,10 @@ typedef enum {
         (1ULL << 62), // `auto`/`__auto_type` with a pointer declarator or
                       // several declarators: accepted, but gcc rejects it;
                       // silent under --compiler-family=clang; part of -Wall
-    // -E --output-compiler: an attribute the named compiler lacks; dropped
-    // from the output. An error unless demoted (on by default).
+    // -E --output-compiler: an attribute, builtin, nested function or block
+    // the named compiler lacks. An error unless demoted (on by default).
     // TODO(#2159): the last free bit; a new category needs a wider mask.
-    CCCC_WARN_TARGET_ATTRIBUTES = (1ULL << 63),
+    CCCC_WARN_TARGET_COMPILER = (1ULL << 63),
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this
     // group.
@@ -4109,9 +4109,10 @@ typedef enum {
 
 /*!
  @brief The compiler -E output is checked against (--output-compiler).
- @details Under GCC or CLANG, an attribute that compiler lacks is dropped from
- -E output with -Wtarget-attributes, and __has_attribute answers as that
- compiler. ANY checks nothing.
+ @details Under GCC or CLANG, an attribute, builtin, nested function or block
+ that compiler lacks is reported with -Wtarget-compiler (an attribute is also
+ dropped from the -E output), and __has_attribute and __has_builtin answer as
+ that compiler. ANY checks nothing.
 */
 typedef enum {
     CCCC_OUTPUT_COMPILER_ANY,
@@ -5119,6 +5120,7 @@ typedef struct Compiler {
     bool           c_std_gnu;   // True for gnuXX variants (gnu17, gnu11, …)
     CCCCAttrTarget attr_target; // Generated/preprocessed attribute spelling
     CCCCOutputCompiler output_compiler; // -E attribute check target
+    bool target_check; // -E parse pass: only -Wtarget-compiler is reported
     CCCCCompilerFamily compiler_family; // --compiler-family: gcc vs clang
                                         // reading of front-end type-compat
                                         // divergences (never AUTO here --

@@ -1461,6 +1461,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
         Type *func_ty = type_suffix(vm, rest, after, ty);
 
         // Create a block type instead of function pointer
+        warn_target_syntax(vm, inner, "blocks", ATTR_CC_CLANG);
         Type *block_ty = block_type(vm, func_ty->return_ty, func_ty->params);
         block_ty->is_variadic = func_ty->is_variadic;
         block_ty->is_unprototyped = func_ty->is_unprototyped;
@@ -1557,6 +1558,7 @@ Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
         Type *func_ty = type_suffix(vm, rest, tok, ty);
 
         // Create a block type
+        warn_target_syntax(vm, tok, "blocks", ATTR_CC_CLANG);
         Type *block_ty = block_type(vm, func_ty->return_ty, func_ty->params);
         block_ty->is_variadic = func_ty->is_variadic;
         block_ty->is_unprototyped = func_ty->is_unprototyped;
