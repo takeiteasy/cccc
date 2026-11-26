@@ -7,7 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
-- Added: gcc's and clang's statement assumption, `[[gnu::assume(e)]];`, `[[clang::assume(e)]];` and `__attribute__((assume(e)));`. The expression is type-checked and not evaluated. `__attribute__((assume(e)))` was an error. The bare and `[[cccc::assume]]` spellings stay the bounds cast, and `-E` prints the vendor spellings as written. See [attributes.md](docs/attributes.md).
+- Added: gcc's and clang's statement assumption, `[[gnu::assume(e)]];`, `[[clang::assume(e)]];` and `__attribute__((assume(e)));`. The expression is type-checked and not evaluated. `__attribute__((assume(e)))` was an error. The bare and `[[cccc::assume]]` spellings stay the bounds cast, `-E` prints the vendor spellings as written, and `assume` anywhere but an empty statement is ignored with a `-Wunknown-attributes` warning. See [attributes.md](docs/attributes.md).
 
 - Added: `--output-compiler=gcc|clang|any` checks `-E` output against a compiler. An attribute that compiler lacks, such as `overloadable` under gcc or `optimize` under clang, is a `-Wtarget-attributes` error, on by default; `-Wno-error=target-attributes` makes it a warning and `-Wno-target-attributes` drops it silently. `__has_attribute` and `__has_c_attribute` answer as that compiler. See [attributes-syntax.md](docs/attributes-syntax.md#checking-against-a-compiler).
 

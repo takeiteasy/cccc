@@ -1236,7 +1236,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    VarAttr label_attr = {};
+    VarAttr label_attr = {.stmt_attrs = true};
     tok                = attribute_list(vm, tok, NULL, &label_attr);
     tok                = c23_attribute_list(vm, tok, NULL, &label_attr);
 

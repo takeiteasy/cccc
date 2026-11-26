@@ -3269,8 +3269,12 @@ Token *attr_assume(VirtualMachine *vm, Token *tok, const AttrSite *site,
                       "'assume' requires an expression argument");
         return tok;
     }
-    if (attr)
+    if (attr && attr->stmt_attrs)
         attr->assume_args = tok;
+    else if (!vm->compiler.in_type_lookahead)
+        warn_tok(vm, site->attr_tok, CCCC_WARN_UNKNOWN_ATTRIBUTES,
+                 "'assume' attribute ignored: it applies to an empty "
+                 "statement");
     return skip_optional_args(tok);
 }
 
