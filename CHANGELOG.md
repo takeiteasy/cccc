@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: arithmetic, bitwise and comparison operators accept two vectors that differ only in signedness (`int4 + unsigned4`), as gcc and clang do; the result takes the left operand's type. A comparison runs unsigned under `--compiler-family=gcc` and in the left operand's type under `clang`, and `?:` accepts such arms under `clang`. OpenCL C still rejects the pair. See [attributes-kernel.md](docs/attributes-kernel.md#vector-operators).
+
+- Fixed: `-c=native`, `-m` and `-c=generated` write the implicit scalar to vector conversion at an initializer, assignment, argument or return in OpenCL C (`float4 v = 2.0f;`) as an explicit splat, so the host compiler accepts the output.
+
 - Fixed: an implicit conversion between vectors is checked at initializers (including file-scope and `static` ones), assignments, arguments and returns, as gcc and clang do. `--compiler-family=gcc` (the default) needs compatible vectors, so `int4 k = float4q` and `v2 g = v4q` are errors; `--compiler-family=clang` also accepts any same-size pair except two ext vectors of different shape. A vector to scalar, or a scalar argument or return to a vector, is an error. In OpenCL C a scalar splats (`float4 v = 2.0f;`). Ext vectors of three and four lanes no longer count as compatible. See [attributes-kernel.md](docs/attributes-kernel.md#vector-conversions).
 
 - Fixed: comparing a vector with a scalar (`v > 2`, `2 == v`) splats the scalar and gives the -1/0 mask, as gcc and clang do; it used to be rejected.

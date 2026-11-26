@@ -1103,6 +1103,7 @@ static Node *new_comparison(VirtualMachine *vm, const char *sym, NodeKind kind,
     }
     if (is_aggregate(lhs->ty) || is_aggregate(rhs->ty))
         error_tok(vm, tok, "invalid operands to %s", sym);
+    unify_vector_sign(vm, &lhs, &rhs);
     return swap ? new_binary(vm, kind, rhs, lhs, tok)
                 : new_binary(vm, kind, lhs, rhs, tok);
 }

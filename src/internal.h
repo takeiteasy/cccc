@@ -1127,6 +1127,7 @@ enum { LV_NO_BITFIELD = 1, LV_TEMP_COMMA = 2, LV_NO_ARRAY = 4 };
 bool node_is_lvalue(Node *n, int flags);
 int c11_alignof(VirtualMachine *vm, Type *ty);
 Type *vector_mask_type(VirtualMachine *vm, Type *vecty);
+void  unify_vector_sign(VirtualMachine *vm, Node **lhs, Node **rhs);
 Type *vla_of(VirtualMachine *vm, Type *base, Node *expr);
 // #973 follow-up: true if ty is TY_VLA, or a chain of TY_PTR/TY_ARRAY whose
 // eventual base is TY_VLA (e.g. `int (*)[n]`) -- used to detect a local

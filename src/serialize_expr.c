@@ -143,6 +143,15 @@ static int operand_prec(NodeKind parent, Node *child, int prec) {
                                                        : prec;
 }
 
+// gcc and clang broadcast a bare scalar operand of a vector operator, so the
+// implicit scalar-to-vector cast is printed without its splat there.
+static Node *splat_operand(Node *n) {
+    if (n && n->kind == ND_CAST && !n->is_explicit_cast && n->lhs && n->ty &&
+        n->ty->kind == TY_VECTOR && n->lhs->ty && n->lhs->ty->kind != TY_VECTOR)
+        return n->lhs;
+    return n;
+}
+
 // Get operator string for binary operations
 static const char *get_binary_op_str(NodeKind kind) {
     switch (kind) {
@@ -2391,9 +2400,9 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             }
 
             // Plain arithmetic (int+int, float+float, ...).
-            serialize_expr(f, vm, ctx, node->lhs, node_prec);
+            serialize_expr(f, vm, ctx, splat_operand(node->lhs), node_prec);
             fprintf(f, " %s ", get_binary_op_str(node->kind));
-            serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+            serialize_expr(f, vm, ctx, splat_operand(node->rhs), node_prec + 1);
             break;
         }
 
@@ -2402,10 +2411,10 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // A shift only promotes each operand to `int`, so the ND_CAST
             // arm's kept widening-past-`int` cast decides the shift width:
             // `(long long)x << 32` is 64-bit, `x << 32` is undefined.
-            serialize_expr(f, vm, ctx, node->lhs,
+            serialize_expr(f, vm, ctx, splat_operand(node->lhs),
                            operand_prec(node->kind, node->lhs, node_prec));
             fprintf(f, " %s ", get_binary_op_str(node->kind));
-            serialize_expr(f, vm, ctx, node->rhs,
+            serialize_expr(f, vm, ctx, splat_operand(node->rhs),
                            operand_prec(node->kind, node->rhs, node_prec + 1));
             break;
 
@@ -2421,10 +2430,10 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
         case ND_LE:
         case ND_LOGAND:
         case ND_LOGOR:
-            serialize_expr(f, vm, ctx, node->lhs,
+            serialize_expr(f, vm, ctx, splat_operand(node->lhs),
                            operand_prec(node->kind, node->lhs, node_prec));
             fprintf(f, " %s ", get_binary_op_str(node->kind));
-            serialize_expr(f, vm, ctx, node->rhs,
+            serialize_expr(f, vm, ctx, splat_operand(node->rhs),
                            operand_prec(node->kind, node->rhs, node_prec + 1));
             break;
 
@@ -2674,18 +2683,10 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 break;
             }
             bool widening = cast_is_implicit_int_widening(dst, src);
-            // #1019: a scalar operand of a `vector op scalar` binary op gets an
-            // implicit ND_CAST(vector_ty, scalar) inserted by usual_arith_conv
-            // (type.c) as its internal marker for "broadcast this scalar across
-            // the vector's lanes" -- it is not source-level C. GCC/clang
-            // perform that broadcast themselves inside the operator and reject
-            // the same thing spelled as an explicit cast ("invalid conversion
-            // between vector type and integer type of different size"). Emit
-            // the bare scalar operand instead and let the host compiler's own
-            // vector extension do the broadcast, exactly as real vector_size
-            // source would. Only the scalar-source case is suppressed here -- a
-            // vector-to-vector cast (same-type no-op, or a genuine bitcast
-            // between differently-shaped vectors) still needs to print.
+            // usual_arith_conv (type.c) marks a broadcast with an implicit
+            // ND_CAST(vector_ty, scalar). Only a vector-source cast (same-type
+            // no-op, or a bitcast between differently-shaped vectors) prints
+            // as a plain cast; the scalar source is spelled as a splat below.
             bool scalar_splat =
                 dst && dst->kind == TY_VECTOR && src && src->kind != TY_VECTOR;
             // #1300 (item 3): a cast whose destination is a pointer to an
@@ -2714,9 +2715,9 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             bool anon_agg_null_cast = dst && dst->kind == TY_PTR &&
                                       expr_is_zero_constant(node->lhs) &&
                                       type_needs_anon_aggregate(ctx, dst);
-            if (scalar_splat && node->is_explicit_cast) {
-                // `(f4)x`: gcc and clang both reject the cast, and `x - 0`
-                // keeps the sign of a -0.0.
+            if (scalar_splat) {
+                // gcc and clang reject `(f4)x`, and `x - 0` keeps the sign of
+                // a -0.0. An operator operand prints bare via splat_operand().
                 fprintf(f, "((");
                 serialize_expr(f, vm, ctx, node->lhs, 0);
                 fprintf(f, ") - (");
@@ -2724,7 +2725,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 fprintf(f, "){0})");
             } else if (anon_agg_null_cast) {
                 fprintf(f, "((void *)0)");
-            } else if (widening || scalar_splat || anon_agg_ptr_cast) {
+            } else if (widening || anon_agg_ptr_cast) {
                 serialize_expr(f, vm, ctx, node->lhs, parent_prec);
             } else {
                 fprintf(f, "(");

@@ -1062,6 +1062,18 @@ static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     return unqualified(vm, arith_common_type(vm, ty1, ty2));
 }
 
+// Same-shape integer vectors that differ only in signedness: gcc and clang
+// accept them in operators; OpenCL C does not.
+static bool vectors_differ_in_sign(VirtualMachine *vm, Type *a, Type *b) {
+    if (vm->compiler.opencl || !is_vector(a) || !is_vector(b) ||
+        !is_integer(a->base) || !is_integer(b->base))
+        return false;
+    return a->size == b->size && a->base->size == b->base->size &&
+           type_arr(a)->vec_len == type_arr(b)->vec_len &&
+           type_arr(a)->vec_visible == type_arr(b)->vec_visible &&
+           a->base->is_unsigned != b->base->is_unsigned;
+}
+
 static Type *arith_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     // Handle error types - propagate error
     if (!ty1 || !ty2 || ty1->kind == TY_ERROR || ty2->kind == TY_ERROR)
@@ -1076,12 +1088,16 @@ static Type *arith_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     // GNU vector_size vectors (tracker #72): must go before the `ty1->base`
     // pointer-arithmetic check below, since a vector's `base` is its element
     // type (mirroring array/pointer duality), not a pointee to decay to.
-    // vec op vec requires identical vector types (no per-lane promotion, no
-    // decay); vec op scalar broadcasts the scalar (the caller inserts the
-    // splat cast via usual_arith_conv -> new_cast -> ND_CAST).
+    // vec op vec requires compatible vector types, or ones differing only in
+    // signedness (the result takes the left type); vec op scalar broadcasts
+    // the scalar (the caller inserts the splat cast via usual_arith_conv ->
+    // new_cast -> ND_CAST).
     if (is_vector(ty1) || is_vector(ty2)) {
         if (is_vector(ty1) && is_vector(ty2))
-            return is_compatible(ty1, ty2) ? ty1 : ty_error;
+            return is_compatible(ty1, ty2) ||
+                           vectors_differ_in_sign(vm, ty1, ty2)
+                       ? ty1
+                       : ty_error;
         return is_vector(ty1) ? ty1 : ty2;
     }
 
@@ -1565,6 +1581,18 @@ static void splat_scalar_operand(VirtualMachine *vm, Node *node) {
         usual_arith_conv(vm, &node->lhs, &node->rhs);
 }
 
+// A vector comparison of operands differing only in signedness runs in one
+// type: gcc's unsigned one when either side is unsigned, clang's left type.
+void unify_vector_sign(VirtualMachine *vm, Node **lhs, Node **rhs) {
+    if (!vectors_differ_in_sign(vm, (*lhs)->ty, (*rhs)->ty))
+        return;
+    if (vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_CLANG ||
+        (*lhs)->ty->base->is_unsigned)
+        *rhs = new_cast(vm, *rhs, (*lhs)->ty);
+    else
+        *lhs = new_cast(vm, *lhs, (*rhs)->ty);
+}
+
 void add_type(VirtualMachine *vm, Node *node) {
     if (!node || (node->ty && node->kind != ND_COMPLEX))
         return;
@@ -1640,7 +1668,8 @@ void add_type(VirtualMachine *vm, Node *node) {
             // MIN/-1 overflow (see op_DIVC_fn-style traps in ops.c).
             if (is_vector(node->lhs->ty) || is_vector(node->rhs->ty)) {
                 if (is_vector(node->lhs->ty) && is_vector(node->rhs->ty) &&
-                    !is_compatible(node->lhs->ty, node->rhs->ty))
+                    !is_compatible(node->lhs->ty, node->rhs->ty) &&
+                    !vectors_differ_in_sign(vm, node->lhs->ty, node->rhs->ty))
                     error_tok(vm, node->tok,
                               "vector types do not match in binary expression");
                 Type *elem = is_vector(node->lhs->ty) ? node->lhs->ty->base
@@ -1732,6 +1761,8 @@ void add_type(VirtualMachine *vm, Node *node) {
             // gcc/clang), not a scalar int.
             if (is_vector(node->lhs->ty) || is_vector(node->rhs->ty)) {
                 splat_scalar_operand(vm, node);
+                if (is_vector(node->lhs->ty) && is_vector(node->rhs->ty))
+                    unify_vector_sign(vm, &node->lhs, &node->rhs);
                 if (!is_vector(node->lhs->ty) || !is_vector(node->rhs->ty) ||
                     !is_compatible(node->lhs->ty, node->rhs->ty))
                     error_tok(vm, node->tok,
@@ -1751,6 +1782,8 @@ void add_type(VirtualMachine *vm, Node *node) {
                     "ordered comparison of complex values is not supported");
             if (is_vector(node->lhs->ty) || is_vector(node->rhs->ty)) {
                 splat_scalar_operand(vm, node);
+                if (is_vector(node->lhs->ty) && is_vector(node->rhs->ty))
+                    unify_vector_sign(vm, &node->lhs, &node->rhs);
                 if (!is_vector(node->lhs->ty) || !is_vector(node->rhs->ty) ||
                     !is_compatible(node->lhs->ty, node->rhs->ty))
                     error_tok(vm, node->tok,
@@ -1816,6 +1849,13 @@ void add_type(VirtualMachine *vm, Node *node) {
             // gen_vector_expr's ND_COND case dispatches between the two by
             // re-checking is_vector(node->cond->ty) at codegen time.
             if (is_vector(t) || is_vector(e)) {
+                if (vm->compiler.compiler_family ==
+                        CCCC_COMPILER_FAMILY_CLANG &&
+                    vectors_differ_in_sign(vm, t, e)) {
+                    node_ctl_mut(vm, node)->els =
+                        new_cast(vm, node_ctl(node)->els, t);
+                    e = t;
+                }
                 if (!is_vector(t) || !is_vector(e) || !is_compatible(t, e))
                     error_tok(vm, node->tok,
                               "vector types do not match in '?:' select");

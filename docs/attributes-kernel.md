@@ -210,6 +210,28 @@ float f = q;    // error
 An [OpenCL C](opencl.md) translation unit also splats a scalar into a vector
 (`float4 v = 2.0f;`) and converts vectors only when they are compatible.
 
+## Vector Operators
+
+Arithmetic, bitwise and comparison operators take two vectors that differ only
+in signedness (`int4` and `unsigned4`); an [OpenCL C](opencl.md) unit rejects
+the pair. The result of arithmetic takes the left operand's type. A comparison
+runs in one type and gives the -1/0 mask:
+
+| `--compiler-family` | A comparison of `int4` and `unsigned4` runs as |
+|---|---|
+| `gcc` (default) | unsigned |
+| `clang` | the left operand's type |
+
+`c ? a : b` with such a pair of arms is an error under `gcc`. Under `clang` it
+takes the type of the first arm.
+
+```c
+i4 a = {-1, 1, 5, 0};
+u4 b = {1, 1, 1, 1};
+i4 sum = a + b;   // an i4
+i4 lt  = a < b;   // lane 0 is 0 under gcc, -1 under clang
+```
+
 ## Ext Vectors
 
 `__attribute__((ext_vector_type(N)))` is clang's vector of `N` lanes of an
