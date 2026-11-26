@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `/` and `%` on unsigned vectors divide their lanes unsigned; they used to divide signed, so `0x80000000u / 2` in an `unsigned` vector gave a wrong lane.
+
 - Fixed: arithmetic, bitwise and comparison operators accept two vectors that differ only in signedness (`int4 + unsigned4`), as gcc and clang do; the result takes the left operand's type. A comparison runs unsigned under `--compiler-family=gcc` and in the left operand's type under `clang`, and `?:` accepts such arms under `clang`. OpenCL C still rejects the pair. See [attributes-kernel.md](docs/attributes-kernel.md#vector-operators).
 
 - Fixed: `-c=native`, `-m` and `-c=generated` write the implicit scalar to vector conversion at an initializer, assignment, argument or return in OpenCL C (`float4 v = 2.0f;`) as an explicit splat, so the host compiler accepts the output.

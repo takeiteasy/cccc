@@ -5040,6 +5040,38 @@ static inline int op_VNOT_fn(VirtualMachine *vm) {
         return 0;                                                              \
     }
 
+#define VEC_UDIVMOD(NAME, FIELD, CTYPE, OP, WHAT)                              \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        long long operands = cc_read_word(vm);                                 \
+        int       rd, rs1, rs2, count;                                         \
+        DECODE_RRRS(operands, rd, rs1, rs2, count);                            \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r = {0};                  \
+        for (int i = 0; i < count; i++) {                                      \
+            CTYPE bv = (CTYPE)b.FIELD[i];                                      \
+            if (bv == 0) {                                                     \
+                printf("\n========== DIVISION BY ZERO ==========\n");          \
+                printf("Attempted vector lane " WHAT " by zero (lane %d)\n",   \
+                       i);                                                     \
+                printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc, \
+                       (long long)vm->pc);                                     \
+                printf("======================================\n");            \
+                return -1;                                                     \
+            }                                                                  \
+            r.FIELD[i] = (CTYPE)((CTYPE)a.FIELD[i] OP bv);                     \
+        }                                                                      \
+        vm->vregs[rd] = r;                                                     \
+        return 0;                                                              \
+    }
+
+VEC_UDIVMOD(VDIVU_I64, i64, uint64_t, /, "division")
+VEC_UDIVMOD(VDIVU_I32, i32, uint32_t, /, "division")
+VEC_UDIVMOD(VDIVU_I16, i16, uint16_t, /, "division")
+VEC_UDIVMOD(VDIVU_I8, i8, uint8_t, /, "division")
+VEC_UDIVMOD(VMODU_I64, i64, uint64_t, %, "modulo")
+VEC_UDIVMOD(VMODU_I32, i32, uint32_t, %, "modulo")
+VEC_UDIVMOD(VMODU_I16, i16, uint16_t, %, "modulo")
+VEC_UDIVMOD(VMODU_I8, i8, uint8_t, %, "modulo")
+
 VEC_IDIV(VDIV_I64, i64, int64_t, INT64_MIN)
 VEC_IDIV(VDIV_I32, i32, int32_t, INT32_MIN)
 VEC_IDIV(VDIV_I16, i16, int16_t, INT16_MIN)

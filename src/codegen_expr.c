@@ -123,6 +123,30 @@ static int vector_modop_for(VecLaneFamily fam) {
     }
 }
 
+// Division and modulo read their lanes unsigned; other opcodes are unchanged.
+static int vector_unsigned_op(int op) {
+    switch (op) {
+        case VDIV_I64:
+            return VDIVU_I64;
+        case VDIV_I32:
+            return VDIVU_I32;
+        case VDIV_I16:
+            return VDIVU_I16;
+        case VDIV_I8:
+            return VDIVU_I8;
+        case VMOD_I64:
+            return VMODU_I64;
+        case VMOD_I32:
+            return VMODU_I32;
+        case VMOD_I16:
+            return VMODU_I16;
+        case VMOD_I8:
+            return VMODU_I8;
+        default:
+            return op;
+    }
+}
+
 // Bitwise (tracker #715): width-agnostic -- no per-lane-family variants
 // needed (VM handler loops over the operand-carried word count). add_type
 // rejects float-lane &|^~.
@@ -248,6 +272,8 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             gen_expr(vm, node->rhs, r_rhs);
             int op = node->kind == ND_MOD ? vector_modop_for(fam)
                                           : vector_binop_for(node->kind, fam);
+            if (is_integer(node->ty->base) && node->ty->base->is_unsigned)
+                op = vector_unsigned_op(op);
             emit_rrrs(vm, op, dest_reg, r_lhs, r_rhs,
                       type_arr(node->ty)->vec_len);
             free_temp_reg(r_rhs);

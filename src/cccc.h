@@ -379,6 +379,17 @@ extern "C" {
     X(VMOD_I32, 1) /* ditto, i32 lanes */                                            \
     X(VMOD_I16, 1) /* ditto, i16 lanes */                                            \
     X(VMOD_I8, 1)  /* ditto, i8 lanes */                                             \
+    /* Unsigned lanes: the same, over the unsigned view; only a zero divisor        \
+       traps. */                                                                    \
+    X(VDIVU_I64, 1) /* vregs[rd].i64[i] = (uint64_t)vregs[rs1].i64[i] /              \
+                       (uint64_t)vregs[rs2].i64[i], traps on 0, i<count */           \
+    X(VDIVU_I32, 1) /* ditto, u32 lanes */                                           \
+    X(VDIVU_I16, 1) /* ditto, u16 lanes */                                           \
+    X(VDIVU_I8, 1)  /* ditto, u8 lanes */                                            \
+    X(VMODU_I64, 1) /* ditto, % */                                                   \
+    X(VMODU_I32, 1) /* ditto, u32 lanes */                                           \
+    X(VMODU_I16, 1) /* ditto, u16 lanes */                                           \
+    X(VMODU_I8, 1)  /* ditto, u8 lanes */                                            \
     /* Comparisons (tracker #715): GCC semantics -- per-lane all-ones (-1) if        \
        true, all-zero if false, written into a same-width SIGNED integer lane.       \
        VCLT/VCLE compare the signed view; VCLTU/VCLEU compare the unsigned           \
