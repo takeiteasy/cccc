@@ -1249,6 +1249,16 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         }
     }
 
+    if (label_attr.assume_args) {
+        if (!equal(tok, ";"))
+            error_tok(vm, label_attr.assume_args,
+                      "'assume' attribute must be on an empty statement");
+        Token *args = label_attr.assume_args->next;
+        (void)expr(vm, &args, args);
+        *rest = tok->next;
+        return new_node(vm, ND_BLOCK, tok);
+    }
+
     // Checked C keyword spellings of [[cccc::checked]] / [[cccc::unchecked]],
     // recognized by position (a name followed by '{') rather than as
     // tokenizer keywords, so an identifier of either spelling stays usable.

@@ -30,6 +30,7 @@ Status: **yes** has full semantics, **~** is parsed and mostly informational.
 | `optimize(...)` | GNU, CCCC | ~ | Syntax-checked, then ignored with a warning |
 | `single`, `array`, `ntarray`, `count`, `byte_count`, `bounds` | CCCC (after `*`) | yes | Checked pointers ([attributes-bounds.md](attributes-bounds.md)) |
 | `assume`, `dynamic` | CCCC (cast type name) | yes | Bounds casts |
+| `assume(e)` | GNU, `gnu::`, `clang::` | yes | Optimizer hint: `[[gnu::assume(n > 0)]];` type-checks `e` and does not evaluate it |
 | `checked`, `unchecked` | CCCC (function or block) | yes | Regions that ban unchecked pointers, always on |
 | `kernel` | CCCC (function) | yes | Rejects anything a Metal or CUDA kernel cannot run ([attributes-kernel.md](attributes-kernel.md)) |
 | `global`, `local`, `constant`, `private`, `generic` | CCCC | yes | Address spaces ([attributes-kernel.md](attributes-kernel.md#address-spaces)) |

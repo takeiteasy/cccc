@@ -3118,6 +3118,11 @@ static Token *capture_checked_bounds_args(VirtualMachine *vm, Token *tok,
 Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
                               Type *ty, const char *name) {
     bool on_array = ty && ty->kind == TY_ARRAY;
+    if (!ty && !strcmp(name, "assume") && equal(tok, "("))
+        error_tok(vm, name_tok,
+                  "'assume' is cccc's bounds cast; for an optimizer "
+                  "assumption write [[gnu::assume(e)]] or "
+                  "[[clang::assume(e)]]");
     if (!ty || (ty->kind != TY_PTR && !on_array))
         error_tok(vm, name_tok,
                   "'%s' must be written immediately after '*' "

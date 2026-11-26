@@ -99,6 +99,7 @@ typedef struct VarAttr {
     bool           is_noreturn;
     bool           is_nodiscard;
     bool           is_fallthrough;
+    Token         *assume_args; // `(` of a [[gnu::assume(e)]] statement
     bool           is_pure;
     bool           is_func_const;
     bool           is_gnu_inline;

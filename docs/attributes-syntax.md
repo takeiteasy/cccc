@@ -8,7 +8,7 @@ Attribute spellings (`@`, `[[...]]`, `__attribute__`), where attributes may appe
 
 | Order | Kind | Rewrites to | Examples |
 |---|---|---|---|
-| 1 | CCCC-specific | `[[cccc::name]]` | `@comptime`, `@test`, `@test_setup`, `@single`, `@array`, `@ntarray`, `@count(n)`, `@byte_count(n)`, `@bounds(lo,hi)`, `@assume`, `@dynamic`, `@checked`, `@unchecked` |
+| 1 | CCCC-specific | `[[cccc::name]]` | `@comptime`, `@test`, `@test_setup`, `@single`, `@array`, `@ntarray`, `@count(n)`, `@byte_count(n)`, `@bounds(lo,hi)`, `@assume` (the bounds cast), `@dynamic`, `@checked`, `@unchecked` |
 | 2 | Standard C23 | `[[name]]` | `@nodiscard`, `@maybe_unused` |
 | 3 | Custom comptime | The handler registered by `@comptime(attribute("name"))` | `@serialize struct Point { ... };` |
 | 4 | GNU or unknown | `__attribute__((name))` | `@packed`, `@aligned(16)` |

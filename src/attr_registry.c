@@ -77,7 +77,10 @@ static const AttrDef attr_table[] = {
     CCCC_ROW("count", 0, attr_checked_ptr),
     CCCC_ROW("byte_count", 0, attr_checked_ptr),
     CCCC_ROW("bounds", 0, attr_checked_ptr),
-    CCCC_ROW("assume", 0, attr_checked_ptr),
+    // The bare and `cccc::` names are the bounds cast; gcc's and clang's
+    // statement assumption takes the vendor spellings.
+    {"assume", ATTR_CCCC, true, 1, CCCC_NS, ATTR_NS_GNU, ATTR_NS_CLANG,
+     ATTR_CC_BOTH, ATTR_OUT_GNU_VENDOR, attr_assume},
     CCCC_ROW("dynamic", 0, attr_checked_ptr),
     // Checked regions: a declaration or a compound statement
     CCCC_ROW("checked", 0, attr_checked),
@@ -238,6 +241,10 @@ static unsigned ns_all(const AttrDef *a) {
 
 bool attr_in_ns(const AttrDef *a, const char *ns, size_t len) {
     return ns_all(a) & ns_bit(ns, len);
+}
+
+bool attr_is_vendor_spelling(bool bracketed, const char *ns, size_t len) {
+    return !bracketed || (ns_bit(ns, len) & (ATTR_NS_GNU | ATTR_NS_CLANG));
 }
 
 bool attr_in_ns_for(const VirtualMachine *vm, const AttrDef *a, const char *ns,

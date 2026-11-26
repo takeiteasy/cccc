@@ -2435,6 +2435,10 @@ static AttrOut classify_home_attr(VirtualMachine *vm, const AttrItem *it,
         return (AttrOut){dropped ? OUT_DROP : OUT_C23, NULL, it->ns};
     }
     int  home      = attr_output_home(name, strlen(name));
+    if (known && (known->flags & ATTR_OUT_GNU_VENDOR) &&
+        attr_is_vendor_spelling(bracketed, it->ns ? it->ns->loc : NULL,
+                                it->ns ? (size_t)it->ns->len : 0))
+        home = ATTR_GNU;
     bool foreign   = false;
     if (home < 0) {
         if (attr_ns_is(it->ns, "cccc") ||

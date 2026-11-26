@@ -3256,6 +3256,24 @@ Token *attr_checked_ptr(VirtualMachine *vm, Token *tok, const AttrSite *site,
                                   site->def->name);
 }
 
+// `[[gnu::assume(e)]];` is an optimizer hint; the bare and `cccc::` names are
+// the bounds cast.
+Token *attr_assume(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                   Type *ty, VarAttr *attr) {
+    if (!attr_is_vendor_spelling(site->c23, site->ns ? site->ns->loc : NULL,
+                                 site->ns ? (size_t)site->ns->len : 0))
+        return attr_checked_ptr(vm, tok, site, ty, attr);
+    if (!equal(tok, "(")) {
+        if (!vm->compiler.in_type_lookahead)
+            error_tok(vm, site->name_tok,
+                      "'assume' requires an expression argument");
+        return tok;
+    }
+    if (attr)
+        attr->assume_args = tok;
+    return skip_optional_args(tok);
+}
+
 static Token *checked_scope(VirtualMachine *vm, Token *tok,
                             const AttrSite *site, VarAttr *attr,
                             bool is_checked) {

@@ -703,6 +703,9 @@ enum {
     ATTR_KEYWORD_ALIAS = 4, // also spelled `__name` / `__name__` outside [[ ]]
     ATTR_OUT_NO_GNU = 8, // a standard attribute with no GNU form: dropped from
                          // GNU-spelled output
+    ATTR_OUT_GNU_VENDOR = 16, // the `gnu::`/`clang::`/`__attribute__`
+                              // spellings print as GNU; the cccc ones stay
+                              // cccc
 };
 // The `[[ns::name]]` namespaces a row accepts (`ns | ns_gcc | ns_clang`);
 // `__attribute__` needs none.
@@ -783,12 +786,15 @@ AttrApplyFn attr_checked_ptr, attr_checked, attr_unchecked, attr_addr_space,
     attr_fallthrough, attr_no_unique_address, attr_pure, attr_kernel,
     attr_trusted, attr_const, attr_gnu_inline, attr_designated_init,
     attr_unused, attr_deprecated, attr_overloadable, attr_unavailable,
-    attr_pass_object_size, attr_enable_if, attr_diagnose_if;
+    attr_pass_object_size, attr_enable_if, attr_diagnose_if, attr_assume;
 // The attribute `name` (or its `__name__` spelling), or NULL.
 const AttrDef *lookup_attr(const char *name, size_t len);
 // True when `[[ns::name]]` names `a` in some compiler; `ns` NULL is the
 // unscoped form.
 bool attr_in_ns(const AttrDef *a, const char *ns, size_t len);
+// True for a vendor spelling: `__attribute__` (`bracketed` false) or a
+// `gnu::`/`clang::` namespace.
+bool attr_is_vendor_spelling(bool bracketed, const char *ns, size_t len);
 // As attr_in_ns, but under --output-compiler only that compiler's namespaces
 // (and cccc's own) count.
 bool attr_in_ns_for(const VirtualMachine *vm, const AttrDef *a, const char *ns,
