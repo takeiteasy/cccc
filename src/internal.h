@@ -813,6 +813,16 @@ bool cc_has_attribute(const char *name, int len);
 // False when --output-compiler names a compiler whose `-E` output lacks `a`;
 // CCCC-home rows, which `-E` drops, are always true.
 bool attr_on_output_compiler(const VirtualMachine *vm, const AttrDef *a);
+// A parser builtin and the compilers whose __has_builtin reports it
+// (ATTR_CC_*; 0 when only cccc has it).
+typedef struct {
+    const char *name;
+    unsigned    cc;
+} BuiltinDef;
+// True when __has_builtin(name) is supported by cccc, whatever the compiler.
+bool cc_has_builtin(const char *name, size_t len);
+// The sorted builtin table, for tests.
+const BuiltinDef *builtin_table(size_t *n);
 // False when --output-compiler names a compiler lacking the builtin `name`.
 bool builtin_on_output_compiler(const VirtualMachine *vm, const char *name,
                                 size_t len);

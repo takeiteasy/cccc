@@ -46,9 +46,12 @@ A builtin the compiler lacks is reported where it is written, and still printed.
 | Builtins | gcc | clang |
 |---|---|---|
 | `__builtin_shuffle`, `__builtin_infd32/64/128`, `__builtin_nand32/64/128` | Yes | No |
-| `__builtin_assume`, `__builtin_debugtrap`, `__builtin_os_log_format`, `__builtin_os_log_format_buffer_size` | No | Yes |
+| `__builtin_assume`, `__builtin_debugtrap`, `__builtin_os_log_format`, `__builtin_os_log_format_buffer_size`, `__c11_atomic_fetch_add/sub/and/or/xor` | No | Yes |
+| `__builtin_atomic_thread_fence`, `__builtin_atomic_signal_fence`, `__builtin_atomic_load/store/exchange`, `__builtin_compare_and_swap`, `__builtin_reg_class`, `__builtin_quote`, `__builtin_kernel_launch`, `__builtin_kernel_local`, `__builtin_decimal_to_chars`, `__builtin_pc_function_name`, `__builtin_pc_source_location`, `__builtin_cccc_dynamic_check` | No | No |
 
-`__has_builtin` answers as the named compiler, so guarded code takes the compiler's own branch. `__builtin_convertvector` is in both.
+`__has_builtin` answers as the named compiler, so guarded code takes the compiler's own branch. `__builtin_convertvector` is in both, as is every other builtin cccc has.
+
+Bundled `<stdatomic.h>` tests `__has_builtin(__builtin_atomic_thread_fence)` and `__has_builtin(__c11_atomic_fetch_add)`, so a dump made under either compiler uses that compiler's own spellings and builds with it.
 
 ## Nested functions and blocks
 

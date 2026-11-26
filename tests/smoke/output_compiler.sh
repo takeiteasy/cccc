@@ -1,9 +1,13 @@
 # -E --output-compiler: the dump compiles under the named compiler with no
 # attribute warnings, and cccc's __has_attribute under each target agrees
 # with the real compiler for every GNU registry row. __has_builtin agrees for
-# the builtins the compilers disagree on, and a nested function (gcc) or
-# block (clang) dump compiles under its compiler.
-REGISTRY=$(cd "$(dirname "$0")/../../src" && pwd)/attr_registry.c
+# every builtin in the builtin registry, the attributes cccc only reports
+# (CLANG_GNU_REPORT_ROW) are absent from gcc, a nested function (gcc) or
+# block (clang) dump compiles under its compiler, and a <stdatomic.h> dump
+# runs under it.
+SRC=$(cd "$(dirname "$0")/../../src" && pwd)
+REGISTRY=$SRC/attr_registry.c
+BUILTIN_REGISTRY=$SRC/builtin_registry.c
 . "$(dirname "$0")/lib.sh"
 
 cat >in.c <<'EOS'
@@ -25,12 +29,36 @@ while read -r n; do
     printf '#if __has_attribute(%s)\n%s 1\n#else\n%s 0\n#endif\n' "$n" "$n" "$n"
 done <names.txt >has.c
 
-BUILTINS="__builtin_shuffle __builtin_infd32 __builtin_infd64 __builtin_infd128
-__builtin_nand32 __builtin_nand64 __builtin_nand128 __builtin_assume
-__builtin_debugtrap __builtin_os_log_format __builtin_os_log_format_buffer_size"
-for n in $BUILTINS; do
+grep -oE '^    \{"[A-Za-z0-9_]+"' "$BUILTIN_REGISTRY" | sed -E 's/.*"(.*)"/\1/' >builtins.txt
+[ -s builtins.txt ] || fail "no builtin rows in $BUILTIN_REGISTRY"
+while read -r n; do
     printf '#if __has_builtin(%s)\n%s 1\n#else\n%s 0\n#endif\n' "$n" "$n" "$n"
-done >hasb.c
+done <builtins.txt >hasb.c
+
+grep -oE 'CLANG_GNU_REPORT_ROW\("[a-z_]+"' "$REGISTRY" | sed -E 's/.*"(.*)"/\1/' >report.txt
+[ -s report.txt ] || fail "no report-only rows in $REGISTRY"
+while read -r n; do
+    printf '#if __has_attribute(%s)\n%s 1\n#else\n%s 0\n#endif\n' "$n" "$n" "$n"
+done <report.txt >hasr.c
+
+cat >atomics.c <<'EOS'
+#include <stdatomic.h>
+int a[4];
+int *_Atomic p = a;
+long _Atomic n;
+int main(void) {
+    atomic_fetch_add_explicit(&p, 2, memory_order_seq_cst);
+    atomic_fetch_sub_explicit(&p, 1, memory_order_seq_cst);
+    atomic_fetch_add(&n, 5);
+    atomic_fetch_sub(&n, 2);
+    atomic_fetch_or(&n, 8);
+    atomic_fetch_and(&n, 0xf);
+    atomic_fetch_xor(&n, 1);
+    atomic_thread_fence(memory_order_seq_cst);
+    atomic_signal_fence(memory_order_seq_cst);
+    return p - a == 1 && n == 10 ? 42 : 1;
+}
+EOS
 
 cat >nested.c <<'EOS'
 int f(int x) {
@@ -66,9 +94,6 @@ check() {
         fail "-E --output-compiler=$target rejected $src"
     [ "$target" = clang ] && blocks=-fblocks || blocks=
     expect_exit 0 "$cc" $blocks -fsyntax-only syntax_out.c
-    "$CCCC" -E -P -Wno-target-compiler --output-compiler=$target hasb.c | grep . >cccc_b.txt
-    "$cc" -E -P -x c hasb.c | grep . >real_b.txt
-    diff real_b.txt cccc_b.txt >&2 || fail "__has_builtin differs from $target"
     # The mask matches gcc 12+ (unavailable) and clang 14+ (error, warning).
     major=$("$cc" -dM -E - </dev/null |
         sed -n "s/^#define __${4}__ //p")
@@ -76,6 +101,29 @@ check() {
         echo "skip: $target $major predates the registry mask"
         return
     fi
+    # Builtins cccc alone has read 0 under --output-compiler; the compilers
+    # lack them too.
+    "$CCCC" -E -P -Wno-target-compiler --output-compiler=$target hasb.c | grep . >cccc_b.txt
+    "$cc" -E -P -x c hasb.c | grep . >real_b.txt
+    diff real_b.txt cccc_b.txt >&2 || fail "__has_builtin differs from $target"
+
+    # Attributes cccc only reports are absent from gcc; cccc itself reads 0.
+    "$CCCC" -E -P --output-compiler=$target hasr.c | grep . >cccc_r.txt
+    grep -q ' 1$' cccc_r.txt && fail "cccc claims a report-only attribute"
+    if [ "$target" = gcc ]; then
+        "$cc" -E -P -x c hasr.c | grep . >real_r.txt
+        grep -q ' 1$' real_r.txt && { cat real_r.txt >&2; fail "gcc has a report-only attribute"; }
+    elif [ "${major:-0}" -ge 16 ]; then
+        "$cc" -E -P -x c hasr.c | grep . >real_r.txt
+        grep -q ' 0$' real_r.txt && { cat real_r.txt >&2; fail "clang lacks a report-only attribute"; }
+    fi
+
+    # The <stdatomic.h> dump builds and runs under the named compiler.
+    "$CCCC" --std=c11 -E --output-compiler=$target atomics.c >atomics_out.c ||
+        fail "-E --output-compiler=$target rejected atomics.c"
+    expect_exit 0 "$cc" -std=gnu11 -w -o atomics_bin atomics_out.c
+    expect_exit 42 ./atomics_bin
+
     "$CCCC" -E -P --output-compiler=$target has.c | grep . >cccc.txt
     "$cc" -E -P -x c has.c | grep . >real.txt
     [ "$(wc -l <real.txt)" -eq "$(wc -l <names.txt)" ] || fail "short probe"

@@ -51,13 +51,19 @@ typedef enum {
 /* there, and guest signal handlers dispatch at safe points */
 /* (cccc_call_guest_callback) rather than asynchronously -- see */
 /* codegen_expr.c's ND_FENCE case for the full reasoning. */
+#if __has_builtin(__builtin_atomic_thread_fence)
 #define atomic_thread_fence(order) __builtin_atomic_thread_fence(order)
 #define atomic_signal_fence(order) __builtin_atomic_signal_fence(order)
+#else
+#define atomic_thread_fence(order) __atomic_thread_fence(order)
+#define atomic_signal_fence(order) __atomic_signal_fence(order)
+#endif
 #define atomic_is_lock_free(x)     1
 
 /* A constant `order` reaches -c=native/-m as the host __atomic_* order (a */
 /* computed one is seq_cst); the VM runs every operation sequentially */
 /* consistent, which is never weaker than a requested order. */
+/* TODO #2167: clang rejects __atomic_*_n on an _Atomic object. */
 #define atomic_load_explicit(addr, order) __atomic_load_n((addr), (order))
 #define atomic_store_explicit(addr, val, order)                                \
     __atomic_store_n((addr), (val), (order))
@@ -66,6 +72,7 @@ typedef enum {
 
 /* Pointer operands scale by the pointee, as C11 requires (GCC's own */
 /* __atomic_fetch_add moves bytes). */
+#if __has_builtin(__c11_atomic_fetch_add)
 #define atomic_fetch_add_explicit(obj, val, order)                             \
     __c11_atomic_fetch_add((obj), (val), (order))
 #define atomic_fetch_sub_explicit(obj, val, order)                             \
@@ -76,6 +83,22 @@ typedef enum {
     __c11_atomic_fetch_xor((obj), (val), (order))
 #define atomic_fetch_and_explicit(obj, val, order)                             \
     __c11_atomic_fetch_and((obj), (val), (order))
+#else
+/* gcc has no __c11_atomic_*; its __atomic_fetch_add moves a pointer by bytes, */
+/* so the operand is scaled by the pointee size (1 for an integer). */
+#define __CCCC_ATOMIC_SCALE(obj)                                               \
+    ((__INTPTR_TYPE__)((__typeof__(*(obj) + 0))0 + 1))
+#define atomic_fetch_add_explicit(obj, val, order)                             \
+    __atomic_fetch_add((obj), (val) * __CCCC_ATOMIC_SCALE(obj), (order))
+#define atomic_fetch_sub_explicit(obj, val, order)                             \
+    __atomic_fetch_sub((obj), (val) * __CCCC_ATOMIC_SCALE(obj), (order))
+#define atomic_fetch_or_explicit(obj, val, order)                              \
+    __atomic_fetch_or((obj), (val), (order))
+#define atomic_fetch_xor_explicit(obj, val, order)                             \
+    __atomic_fetch_xor((obj), (val), (order))
+#define atomic_fetch_and_explicit(obj, val, order)                             \
+    __atomic_fetch_and((obj), (val), (order))
+#endif
 
 /* The VM's compare-exchange never fails spuriously, so weak behaves as */
 /* strong there; -c=native emits the weak flag. */
