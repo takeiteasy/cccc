@@ -20,7 +20,8 @@
 // OpenCL C vector syntax: swizzles (`v.xyzw`, `v.s01`, `v.lo`) and vector
 // literals (`(float4)(a, b, c, d)`). Both lower to per-lane reads and writes
 // through vector_lane_ref(), the way __builtin_shuffle does, so no opcode
-// depends on the vector's width.
+// depends on the vector's width. A clang ext_vector_type vector takes the same
+// swizzles in C, plus `v.rgba`.
 
 #include "./parse_internal.h"
 
@@ -42,7 +43,7 @@ static bool selector_is(Token *sel, const char *name) {
 
 // Lanes a selector names, written to `lanes`. Returns 0 if `sel` is not a
 // selector spelling at all.
-static int parse_selector(Token *sel, int total, int *lanes) {
+static int parse_selector(Token *sel, int total, int *lanes, bool rgba) {
     int n = 0;
     if (selector_is(sel, "lo") || selector_is(sel, "hi")) {
         int half = total / 2;
@@ -67,11 +68,12 @@ static int parse_selector(Token *sel, int total, int *lanes) {
     }
     if (sel->len > MAX_LANES)
         return 0;
+    const char *set = rgba && strchr("rgba", sel->loc[0]) ? "rgba" : "xyzw";
     for (int i = 0; i < sel->len; i++) {
-        const char *pos = strchr("xyzw", sel->loc[i]);
+        const char *pos = strchr(set, sel->loc[i]);
         if (!pos || !*pos)
             return 0;
-        lanes[n++] = (int)(pos - "xyzw");
+        lanes[n++] = (int)(pos - set);
     }
     return n;
 }
@@ -95,26 +97,34 @@ static Node *chain_after(VirtualMachine *vm, Node *chain, Node *next,
     return chain ? new_binary(vm, ND_COMMA, chain, next, tok) : next;
 }
 
-// The vector type of `n` lanes of `elem`. A 3-lane vector is stored as four.
+// The vector type of `n` lanes of `elem`. A lane count that is not a power of
+// two is stored in the next power of two. OpenCL has only 2, 3, 4, 8 and 16.
 static Type *swizzle_result_type(VirtualMachine *vm, Type *elem, int n,
-                                 Token *sel) {
-    int storage = n == 3 ? 4 : n;
-    int bytes   = storage * elem->size;
-    if ((n != 2 && n != 3 && n != 4 && n != 8 && n != 16) || bytes > 64)
+                                 Token *sel, bool ext) {
+    int storage = 1;
+    while (storage < n)
+        storage *= 2;
+    int bytes = storage * elem->size;
+    if ((vm->compiler.opencl && n != 2 && n != 3 && n != 4 && n != 8 &&
+         n != 16) ||
+        bytes > 64)
         error_tok(vm, sel,
                   "a swizzle of %d lanes would be a %d-byte vector; vectors "
                   "are at most 64 bytes",
                   n, bytes);
     Type *ty = vector_of(vm, elem, bytes);
-    if (n == 3)
-        type_arr_mut(vm, ty)->vec_visible = 3;
+    if (n != storage)
+        type_arr_mut(vm, ty)->vec_visible = n;
+    if (ext)
+        type_arr_mut(vm, ty)->vec_ext = true;
     return ty;
 }
 
 Node *opencl_swizzle(VirtualMachine *vm, Node *vec, Token *sel) {
     Type *vty = vec->ty;
     int   lanes[MAX_LANES];
-    int   n = parse_selector(sel, type_arr(vty)->vec_len, lanes);
+    int   n = parse_selector(sel, type_arr(vty)->vec_len, lanes,
+                             !vm->compiler.opencl);
     if (!n)
         error_tok(vm, sel, "'%.*s' is not a vector component", sel->len,
                   sel->loc);
@@ -140,7 +150,7 @@ Node *opencl_swizzle(VirtualMachine *vm, Node *vec, Token *sel) {
         return init ? new_binary(vm, ND_COMMA, init, lane, sel) : lane;
     }
 
-    Type *rty    = swizzle_result_type(vm, elem, n, sel);
+    Type *rty = swizzle_result_type(vm, elem, n, sel, type_arr(vty)->vec_ext);
     Obj  *result = new_lvar(vm, "", 0, rty);
     Node *chain  = init;
     for (int i = 0; i < type_arr(rty)->vec_len; i++) {

@@ -208,6 +208,7 @@ language coverage figures apply.
 | GNU extended asm (`asm [volatile\|inline\|goto] ("tpl" : outputs : inputs : clobbers : labels)`) | ✓ | The full grammar parses, including `[name]` symbolic operands, constraint strings, clobbers and `asm goto` labels (resolved like ordinary `goto` labels, including inside `Quote()` templates). [^n19] |
 | GNU `asm("symbol")` declaration labels | ~ | Supported on function declarations, including typedef-based and multi-declarator declarations; the label is used as the external FFI symbol name |
 | `__attribute__((vector_size(N)))` generic vectors | ~ | power-of-two vectors of 1 to 64 bytes — written before the type, after the type specifier, after the declarator or in a type-name (see [attributes.md](attributes-kernel.md#vector-size)) — e.g. `v2f32`, `v4f32`/`v8f32`/`v16f32`, `v2f64`/`v4f64`/`v8f64`, `v4i32`/`v8i32`/`v16i32`, and the corresponding `i64`/`i16`/`i8` lane layouts at each width; any other size (non-power-of-two byte counts, or wider than 64 bytes) is rejected with a diagnostic. [^n20] |
+| clang `ext_vector_type(N)`, `neon_vector_type(N)`, `neon_polyvector_type(N)` | ~ | Lane-count vectors of up to 64 bytes. An ext vector takes `.xyzw`, `.rgba`, `.sN`, `.lo`/`.hi`/`.even`/`.odd` selectors in C; a scalar splats. No `_Bool` elements; `matrix_type`, `address_space(N)` and `noderef` are not implemented (see [attributes-kernel.md](attributes-kernel.md#ext-vectors)) |
 
 ---
 

@@ -706,6 +706,7 @@ declspec_done:
     if (vs_attr->has_vector_size) {
         ty                       = apply_vector_size(vm, ty, vs_attr);
         vs_attr->has_vector_size = false;
+        vs_attr->vector_lanes    = 0;
         vs_attr->vec_visible     = 0;
     }
 
@@ -2821,28 +2822,83 @@ static void apply_semantic_attr(VirtualMachine *vm, Type *ty, VarAttr *attr,
 // __attribute__((vector_size(N))) rewrites the whole type (base scalar ->
 // TY_VECTOR), so it runs before any copy_type()+field-merge that assumes `ty`
 // keeps its original kind.
+static const char *vector_attr_name(VectorAttr kind) {
+    switch (kind) {
+        case VECTOR_ATTR_EXT:
+            return "ext_vector_type";
+        case VECTOR_ATTR_NEON:
+            return "neon_vector_type";
+        case VECTOR_ATTR_NEON_POLY:
+            return "neon_polyvector_type";
+        default:
+            return "vector_size";
+    }
+}
+
+static int next_pow2(int n) {
+    int p = 1;
+    while (p < n)
+        p *= 2;
+    return p;
+}
+
+// The byte size and visible lane count of an `attr->vector_lanes`-lane vector
+// of `ty`; ext_vector_type stores a non-power-of-two count in the next power
+// of two, like OpenCL's float3.
+static int lane_vector_bytes(VirtualMachine *vm, Type *ty, VarAttr *attr,
+                             int *visible) {
+    int         lanes = attr->vector_lanes;
+    const char *name  = vector_attr_name(attr->vector_attr);
+    if (attr->vector_attr == VECTOR_ATTR_EXT) {
+        if (ty->kind == TY_BOOL)
+            error_tok(vm, attr->vector_size_tok,
+                      "boolean 'ext_vector_type' vectors are not supported");
+        int storage = next_pow2(lanes);
+        *visible    = storage == lanes ? 0 : lanes;
+        return storage * ty->size;
+    }
+    int bytes = lanes * ty->size;
+    if (bytes != 8 && bytes != 16)
+        error_tok(vm, attr->vector_size_tok,
+                  "Neon vector size must be 64 or 128 bits");
+    if (attr->vector_attr == VECTOR_ATTR_NEON_POLY &&
+        (!is_integer(ty) || !ty->is_unsigned || ty->size == 4))
+        error_tok(vm, attr->vector_size_tok,
+                  "'%s' element must be an unsigned 8-, 16- or 64-bit "
+                  "integer",
+                  name);
+    return bytes;
+}
+
 static Type *apply_vector_size(VirtualMachine *vm, Type *ty, VarAttr *attr) {
-    int  bytes = attr->vector_size_bytes;
-    bool elem_size_ok =
+    int         bytes   = attr->vector_size_bytes;
+    int         visible = attr->vec_visible;
+    const char *name    = vector_attr_name(attr->vector_attr);
+    bool        elem_size_ok =
         ty->size == 1 || ty->size == 2 || ty->size == 4 || ty->size == 8;
     if ((!is_integer(ty) && !is_flonum(ty)) || !elem_size_ok)
         error_tok(vm, attr->vector_size_tok,
-                  "'vector_size' attribute applies only to 1/2/4/8-byte "
-                  "integer or floating-point scalar types");
-    else if (bytes <= 0 || bytes % ty->size != 0)
+                  "'%s' attribute applies only to 1/2/4/8-byte integer or "
+                  "floating-point scalar types",
+                  name);
+    if (attr->vector_lanes)
+        bytes = lane_vector_bytes(vm, ty, attr, &visible);
+    if (bytes <= 0 || bytes % ty->size != 0)
         error_tok(vm, attr->vector_size_tok,
                   "vector_size %d is not a positive multiple of the "
                   "element size (%d)",
                   bytes, ty->size);
     else if (bytes > 64 || (bytes & (bytes - 1)))
         error_tok(vm, attr->vector_size_tok,
-                  "vector_size %d is not supported: the size must be a power "
+                  "%s of %d bytes is not supported: the size must be a power "
                   "of two no larger than 64 bytes",
-                  bytes);
+                  name, bytes);
     else {
         ty = vector_of(vm, ty, bytes);
-        if (attr->vec_visible > 0 && attr->vec_visible < type_arr(ty)->vec_len)
-            type_arr_mut(vm, ty)->vec_visible = attr->vec_visible;
+        if (visible > 0 && visible < type_arr(ty)->vec_len)
+            type_arr_mut(vm, ty)->vec_visible = visible;
+        if (attr->vector_attr == VECTOR_ATTR_EXT)
+            type_arr_mut(vm, ty)->vec_ext = true;
     }
     return ty;
 }
@@ -3473,20 +3529,48 @@ Token *attr_visible_lanes(VirtualMachine *vm, Token *tok, const AttrSite *site,
 // vector_size(N) is recorded on `attr` and applied to the base type by
 // declspec(), or to the declarator's type by apply_var_attrs_to_type() when
 // written after the declarator.
-Token *attr_vector_size(VirtualMachine *vm, Token *tok, const AttrSite *site,
-                        Type *ty, VarAttr *attr) {
-    tok       = skip(vm, tok, "(");
-    int bytes = const_expr(vm, &tok, tok);
-    tok       = skip(vm, tok, ")");
+static Token *vector_attr(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                          Type *ty, VarAttr *attr, VectorAttr kind) {
+    tok     = skip(vm, tok, "(");
+    int arg = const_expr(vm, &tok, tok);
+    tok     = skip(vm, tok, ")");
     if (attr) {
+        bool lanes              = kind != VECTOR_ATTR_SIZE;
         attr->has_vector_size   = true;
-        attr->vector_size_bytes = bytes;
+        attr->vector_attr       = kind;
+        attr->vector_lanes      = lanes ? arg : 0;
+        attr->vector_size_bytes = lanes ? 0 : arg;
         attr->vector_size_tok   = site->attr_tok;
+        if (lanes && arg <= 0)
+            error_tok(vm, site->attr_tok,
+                      "'%s' needs a positive number of lanes",
+                      vector_attr_name(kind));
     } else if (ty && !vm->compiler.in_type_lookahead) {
         warn_tok(vm, site->attr_tok, CCCC_WARN_ATTRIBUTES,
-                 "'vector_size' ignored in this context");
+                 "'%s' ignored in this context", vector_attr_name(kind));
     }
     return tok;
+}
+
+Token *attr_vector_size(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                        Type *ty, VarAttr *attr) {
+    return vector_attr(vm, tok, site, ty, attr, VECTOR_ATTR_SIZE);
+}
+
+Token *attr_ext_vector_type(VirtualMachine *vm, Token *tok,
+                            const AttrSite *site, Type *ty, VarAttr *attr) {
+    return vector_attr(vm, tok, site, ty, attr, VECTOR_ATTR_EXT);
+}
+
+Token *attr_neon_vector_type(VirtualMachine *vm, Token *tok,
+                             const AttrSite *site, Type *ty, VarAttr *attr) {
+    return vector_attr(vm, tok, site, ty, attr, VECTOR_ATTR_NEON);
+}
+
+Token *attr_neon_polyvector_type(VirtualMachine *vm, Token *tok,
+                                 const AttrSite *site, Type *ty,
+                                 VarAttr *attr) {
+    return vector_attr(vm, tok, site, ty, attr, VECTOR_ATTR_NEON_POLY);
 }
 
 // Informational: not wired to nonnull inference (malloc can return NULL) or

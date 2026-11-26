@@ -1746,6 +1746,9 @@ typedef struct TypeArr {
     // Lanes a program may name (swizzles, literals) when fewer than vec_len: an
     // OpenCL float3 is stored as four lanes. 0 means all of them.
     int   vec_visible;
+    // Clang ext_vector_type: component selectors (`v.xyzw`) apply in C. Not
+    // part of type compatibility.
+    bool  vec_ext;
     Node *vla_len;  // # of elements
     Obj  *vla_size; // sizeof() value
     // TY_VLA: first token of the length expression, so a function definition

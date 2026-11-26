@@ -2714,7 +2714,15 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             bool anon_agg_null_cast = dst && dst->kind == TY_PTR &&
                                       expr_is_zero_constant(node->lhs) &&
                                       type_needs_anon_aggregate(ctx, dst);
-            if (anon_agg_null_cast) {
+            if (scalar_splat && node->is_explicit_cast) {
+                // `(f4)x`: gcc and clang both reject the cast, and `x - 0`
+                // keeps the sign of a -0.0.
+                fprintf(f, "((");
+                serialize_expr(f, vm, ctx, node->lhs, 0);
+                fprintf(f, ") - (");
+                serialize_type(f, ctx, node->ty);
+                fprintf(f, "){0})");
+            } else if (anon_agg_null_cast) {
                 fprintf(f, "((void *)0)");
             } else if (widening || scalar_splat || anon_agg_ptr_cast) {
                 serialize_expr(f, vm, ctx, node->lhs, parent_prec);

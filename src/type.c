@@ -1672,6 +1672,7 @@ void add_type(VirtualMachine *vm, Node *node) {
             // yields a per-lane all-ones(-1)/all-zero mask in a same-width
             // SIGNED integer vector (GCC semantics, verified against real
             // gcc/clang), not a scalar int.
+            // TODO: a scalar operand is not splatted as gcc/clang do; #2170
             if (is_vector(node->lhs->ty) || is_vector(node->rhs->ty)) {
                 if (!is_vector(node->lhs->ty) || !is_vector(node->rhs->ty) ||
                     !is_compatible(node->lhs->ty, node->rhs->ty))

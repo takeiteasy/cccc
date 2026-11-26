@@ -7,9 +7,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: clang's `ext_vector_type(N)`, `neon_vector_type(N)` and `neon_polyvector_type(N)` vectors. An ext vector takes `.xyzw`, `.rgba`, `.sN`, `.lo`, `.hi`, `.even` and `.odd` component selectors in C, reads and assigns several lanes at once, and splats a scalar operand; `__has_attribute` is 1 for all three, and they stay clang-only under `-E --output-compiler`. `matrix_type`, `address_space` and `noderef` are still ignored. See [attributes-kernel.md](docs/attributes-kernel.md#ext-vectors).
+
+- Fixed: a scalar added to, or splatted into, a vector of another element type converts first, so `float4 + 1` adds 1 and `int4 + 2.9f` adds 2; it used to leave the vector unchanged. `-c=native` output for an explicit `(float4)x` splat builds with gcc and clang.
+
 - Added: `vector_size` accepts any power-of-two size from the element size up to 64 bytes, so `float2`-style 8-byte and `char4`-style 4-byte vectors exist. OpenCL C gains `char2/3/4/8`, `uchar2/3/4/8`, `short2/3/4`, `ushort2/3/4`, `int2`, `uint2` and `float2`, and a swizzle such as `.xy` of a `float4` is a `float2`. Fixed: `&`, `|`, `^` and `~` on a 4-byte vector left the result zero. See [attributes-kernel.md](docs/attributes-kernel.md#vector-size) and [opencl.md](docs/opencl.md).
 
-- Fixed: `-E --output-compiler=gcc` reports `ext_vector_type`, `matrix_type`, `neon_vector_type`, `neon_polyvector_type`, `riscv_rvv_vector_bits`, `address_space` and `noderef`, which only clang has. cccc still ignores them with an `unknown attribute` warning.
+- Fixed: `-E --output-compiler=gcc` reports `ext_vector_type`, `matrix_type`, `neon_vector_type`, `neon_polyvector_type`, `riscv_rvv_vector_bits`, `address_space` and `noderef`, which only clang has. cccc still ignores `matrix_type`, `riscv_rvv_vector_bits`, `address_space` and `noderef` with an `unknown attribute` warning.
 
 - Added: gcc's and clang's statement assumption, `[[gnu::assume(e)]];`, `[[clang::assume(e)]];` and `__attribute__((assume(e)));`. The expression is type-checked and not evaluated. `__attribute__((assume(e)))` was an error. The bare and `[[cccc::assume]]` spellings stay the bounds cast, `-E` prints the vendor spellings as written, and `assume` anywhere but an empty statement is ignored with a `-Wunknown-attributes` warning. See [attributes.md](docs/attributes.md).
 

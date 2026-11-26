@@ -185,6 +185,49 @@ __alignof__(v8f32);   // 32
 
 Use `__alignof__(type)` when checking where a vector-bearing member lands.
 
+## Ext Vectors
+
+`__attribute__((ext_vector_type(N)))` is clang's vector of `N` lanes of an
+integer or floating-point type. It goes where `vector_size` does, and unlike
+it, `N` counts lanes and an ext vector takes component selectors in C:
+
+```c
+typedef float f4 __attribute__((ext_vector_type(4)));
+typedef float f2 __attribute__((ext_vector_type(2)));
+
+f4 v = {1, 2, 3, 4};
+f4 r = v.wzyx;          // (4, 3, 2, 1)
+f2 h = v.hi;            // (3, 4)
+v.xy = h;               // several lanes, with =
+f4 s = v + 1;           // a scalar splats to every lane
+f4 t = (f4)(2.0f);      // (2, 2, 2, 2)
+```
+
+The selectors are the [OpenCL component names](opencl.md#components) plus
+`.rgba`; one selector uses one set, so `.xg` is an error. A `vector_size`
+vector has no selectors, and converts to and from an ext vector with the same
+shape.
+
+| Lanes | Storage |
+|---|---|
+| a power of two | `N` lanes: `sizeof` is `N` times the element size |
+| otherwise | the next power of two, exposing `N`: `sizeof` of three floats is 16 |
+
+An ext vector is at most 64 bytes, and its element is not `_Bool`.
+
+`neon_vector_type(N)` and `neon_polyvector_type(N)` are the Arm NEON types:
+`N` lanes that fill 64 or 128 bits, with no selectors. A polynomial vector's
+element is an unsigned 8-, 16- or 64-bit integer:
+
+```c
+typedef int            int32x2_t __attribute__((neon_vector_type(2)));
+typedef unsigned char  poly8x8_t __attribute__((neon_polyvector_type(8)));
+```
+
+All three are clang-only. [`-E --output-compiler`](output-compiler.md) reports
+them under `gcc`, and `-c=native` writes them as `vector_size` vectors, so the
+output builds with either compiler.
+
 ## Visible Lanes
 
 `__attribute__((cccc_visible_lanes(N)))` on a `vector_size` typedef makes the

@@ -84,6 +84,14 @@ typedef struct {
 } VarScope;
 
 // Variable attributes such as typedef or extern.
+// Which attribute asked for a vector type.
+typedef enum {
+    VECTOR_ATTR_SIZE,
+    VECTOR_ATTR_EXT,
+    VECTOR_ATTR_NEON,
+    VECTOR_ATTR_NEON_POLY,
+} VectorAttr;
+
 typedef struct VarAttr {
     bool           is_typedef;
     bool           is_static;
@@ -157,6 +165,9 @@ typedef struct VarAttr {
     // __attribute__((vector_size(N))) / [[gnu::vector_size(N)]] (tracker #72)
     bool   has_vector_size;
     int    vector_size_bytes;
+    // ext_vector_type/neon_*_type(N): lane count, 0 for vector_size
+    int        vector_lanes;
+    VectorAttr vector_attr;
     Token *vector_size_tok; // for diagnostics
     int    vec_visible;     // __attribute__((cccc_visible_lanes(N)))
 

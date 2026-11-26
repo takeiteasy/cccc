@@ -989,7 +989,8 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
 
         if (equal(tok, ".")) {
             add_type(vm, node);
-            if (vm->compiler.opencl && node->ty && is_vector(node->ty)) {
+            if (node->ty && is_vector(node->ty) &&
+                (vm->compiler.opencl || type_arr(node->ty)->vec_ext)) {
                 node = opencl_swizzle(vm, node, tok->next);
             } else {
                 Node *call = method_call(vm, &tok, node, tok);

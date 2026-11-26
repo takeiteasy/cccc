@@ -35,6 +35,7 @@ Status: **yes** has full semantics, **~** is parsed and mostly informational.
 | `kernel` | CCCC (function) | yes | Rejects anything a Metal or CUDA kernel cannot run ([attributes-kernel.md](attributes-kernel.md)) |
 | `global`, `local`, `constant`, `private`, `generic` | CCCC | yes | Address spaces ([attributes-kernel.md](attributes-kernel.md#address-spaces)) |
 | `vector_size(N)`, `cccc_visible_lanes(N)` | GNU | yes | Vectors ([attributes-kernel.md](attributes-kernel.md#vector-size)) |
+| `ext_vector_type(N)`, `neon_vector_type(N)`, `neon_polyvector_type(N)` | clang | yes | Vectors by lane count, with component selectors ([attributes-kernel.md](attributes-kernel.md#ext-vectors)) |
 | everything else | both | ~ | Parsed and ignored ([attributes-ignored.md](attributes-ignored.md)) |
 
 ## Pages

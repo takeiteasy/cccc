@@ -1108,6 +1108,11 @@ Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty) {
     cc_overload_reject(vm, expr);
     if (expr->ty && expr->ty->kind == TY_VOID && ty && ty->kind != TY_VOID)
         error_tok(vm, expr->tok, "void value not ignored as it ought to be");
+    // A scalar splats in the vector's element type, so `float4 + 1` converts
+    // the int first.
+    if (ty && is_vector(ty) && expr->ty && !is_vector(expr->ty) &&
+        (is_integer(expr->ty) || is_flonum(expr->ty)))
+        expr = new_cast(vm, expr, ty->base);
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = ND_CAST;
