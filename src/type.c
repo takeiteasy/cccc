@@ -678,7 +678,7 @@ Type *array_of(VirtualMachine *vm, Type *base, int len) {
 // GNU __attribute__((vector_size(N))) type: `base` must be an arithmetic
 // scalar (int/float family), `bytes` is the total vector byte size (must be
 // an exact multiple of base->size). The VM substrate (tracker #72/#463,
-// widened by #722) supports 16-, 32-, and 64-byte vectors (128/256/512-bit).
+// widened by #722) supports power-of-two widths from 1 to 64 bytes.
 // The caller is expected to have already validated divisibility/size/width
 // via the vector_size attribute check in parse.c.
 Type *vector_of(VirtualMachine *vm, Type *base, int bytes) {

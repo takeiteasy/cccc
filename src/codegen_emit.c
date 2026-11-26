@@ -551,7 +551,7 @@ long long alloc_decimal_temp(VirtualMachine *vm, int bytes) {
 // copied out to memory before its address can be handed to the callee.
 // Reuses alloc_wide_bitint_temp's per-function scratch allocator (same ENT3
 // extra-stack pool as wide _BitInt temporaries), sized to arg->ty->size/8
-// words -- 2/4/8 words for the 16/32/64-byte vectors #722 supports.
+// words, rounded up -- 1 to 8 words for the 1..64-byte vectors.
 void gen_vector_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg) {
     int v = alloc_temp_reg();
     gen_expr(vm, arg, v); // vector value -> vregs[v]

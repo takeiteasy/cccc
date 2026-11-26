@@ -204,7 +204,7 @@ typedef struct __cccc_va_list va_list;
  * 8-byte slot: the call site (gen_vector_arg_ptr, #714) always passes it BY
  * POINTER to a caller-frame scratch copy, regardless of the vector's width,
  * so it always occupies exactly one slot no matter how large the vector is
- * (16/32/64 bytes, #722) and never straddles the register/stack boundary.
+ * (1..64 bytes, #722) and never straddles the register/stack boundary.
  * The vector arm therefore reads the slot as a pointer and derefs it, one
  * extra level of indirection versus the scalar arms.
  *

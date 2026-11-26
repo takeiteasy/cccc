@@ -95,18 +95,15 @@ static Node *chain_after(VirtualMachine *vm, Node *chain, Node *next,
     return chain ? new_binary(vm, ND_COMMA, chain, next, tok) : next;
 }
 
-// The vector type of `n` lanes of `elem`.
-// TODO: vectors under 16 bytes do not exist, so a 2-lane result of 4-byte
-// elements is rejected; #1407 A 3-lane vector is stored as four.
+// The vector type of `n` lanes of `elem`. A 3-lane vector is stored as four.
 static Type *swizzle_result_type(VirtualMachine *vm, Type *elem, int n,
                                  Token *sel) {
     int storage = n == 3 ? 4 : n;
     int bytes   = storage * elem->size;
-    if ((n != 2 && n != 3 && n != 4 && n != 8 && n != 16) ||
-        (bytes != 16 && bytes != 32 && bytes != 64))
+    if ((n != 2 && n != 3 && n != 4 && n != 8 && n != 16) || bytes > 64)
         error_tok(vm, sel,
                   "a swizzle of %d lanes would be a %d-byte vector; vectors "
-                  "must be 16, 32 or 64 bytes",
+                  "are at most 64 bytes",
                   n, bytes);
     Type *ty = vector_of(vm, elem, bytes);
     if (n == 3)

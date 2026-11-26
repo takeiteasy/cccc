@@ -67,24 +67,39 @@ typedef unsigned long  ulong;
 // A cast's type-name cannot start with an address-space attribute
 typedef [[cccc::__generic__]] unsigned __cl_generic_uint;
 
-// Vector types of 16, 32 and 64 bytes. A 3-lane type is stored as four lanes
-// and exposes three. Narrower ones (float2, int2, char4, ...) do not exist
-// yet. char is signed here whatever the target's char is.
+// Vector types of 2 to 64 bytes. A 3-lane type is stored as four lanes and
+// exposes three. char is signed here whatever the target's char is.
 #define __CL_VECTOR(base, name, bytes)                                         \
     typedef base name __attribute__((vector_size(bytes)))
 #define __CL_VECTOR3(base, name, bytes)                                        \
     typedef base name __attribute__((vector_size(bytes), cccc_visible_lanes(3)))
 
+__CL_VECTOR(signed char, char2, 2);
+__CL_VECTOR3(signed char, char3, 4);
+__CL_VECTOR(signed char, char4, 4);
+__CL_VECTOR(signed char, char8, 8);
 __CL_VECTOR(signed char, char16, 16);
+__CL_VECTOR(unsigned char, uchar2, 2);
+__CL_VECTOR3(unsigned char, uchar3, 4);
+__CL_VECTOR(unsigned char, uchar4, 4);
+__CL_VECTOR(unsigned char, uchar8, 8);
 __CL_VECTOR(unsigned char, uchar16, 16);
+__CL_VECTOR(short, short2, 4);
+__CL_VECTOR3(short, short3, 8);
+__CL_VECTOR(short, short4, 8);
 __CL_VECTOR(short, short8, 16);
 __CL_VECTOR(short, short16, 32);
+__CL_VECTOR(unsigned short, ushort2, 4);
+__CL_VECTOR3(unsigned short, ushort3, 8);
+__CL_VECTOR(unsigned short, ushort4, 8);
 __CL_VECTOR(unsigned short, ushort8, 16);
 __CL_VECTOR(unsigned short, ushort16, 32);
+__CL_VECTOR(int, int2, 8);
 __CL_VECTOR3(int, int3, 16);
 __CL_VECTOR(int, int4, 16);
 __CL_VECTOR(int, int8, 32);
 __CL_VECTOR(int, int16, 64);
+__CL_VECTOR(unsigned int, uint2, 8);
 __CL_VECTOR3(unsigned int, uint3, 16);
 __CL_VECTOR(unsigned int, uint4, 16);
 __CL_VECTOR(unsigned int, uint8, 32);
@@ -97,6 +112,7 @@ __CL_VECTOR(unsigned long, ulong2, 16);
 __CL_VECTOR3(unsigned long, ulong3, 32);
 __CL_VECTOR(unsigned long, ulong4, 32);
 __CL_VECTOR(unsigned long, ulong8, 64);
+__CL_VECTOR(float, float2, 8);
 __CL_VECTOR3(float, float3, 16);
 __CL_VECTOR(float, float4, 16);
 __CL_VECTOR(float, float8, 32);

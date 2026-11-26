@@ -2834,11 +2834,10 @@ static Type *apply_vector_size(VirtualMachine *vm, Type *ty, VarAttr *attr) {
                   "vector_size %d is not a positive multiple of the "
                   "element size (%d)",
                   bytes, ty->size);
-    else if (bytes != 16 && bytes != 32 && bytes != 64)
+    else if (bytes > 64 || (bytes & (bytes - 1)))
         error_tok(vm, attr->vector_size_tok,
-                  "vector_size %d is not supported: only 16-, 32-, or "
-                  "64-byte (128/256/512-bit) vectors are currently "
-                  "supported",
+                  "vector_size %d is not supported: the size must be a power "
+                  "of two no larger than 64 bytes",
                   bytes);
     else {
         ty = vector_of(vm, ty, bytes);

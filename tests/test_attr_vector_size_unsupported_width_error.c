@@ -1,9 +1,7 @@
 // EXPECT_COMPILE_ERROR
-// The VM substrate supports 16-, 32-, and 64-byte vector registers
-// (tracker #72/#463, widened to 256/512-bit by #722). Any other width --
-// including a non-power-of-two multiple like 24 bytes, or a vector wider
-// than the 64-byte substrate -- must be rejected with a clear diagnostic,
-// not silently truncated or padded.
+// vector_size must be a power of two no larger than 64 bytes. A multiple of
+// the element size that is not a power of two, like 24 bytes, is rejected with
+// a clear diagnostic, not silently truncated or padded.
 
 typedef float v6sf __attribute__((vector_size(24)));
 

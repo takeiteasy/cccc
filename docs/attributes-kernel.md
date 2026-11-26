@@ -140,9 +140,10 @@ error: converting a pointer from the global to the private address space is not 
 ## Vector Size
 
 `__attribute__((vector_size(N)))` or `[[gnu::vector_size(N)]]` turns an integer
-or floating-point scalar into an `N`-byte vector. It works before the type, after
-the type specifier, after the declarator, and in cast, compound-literal and
-`sizeof` type-names. Before or after the specifier, it applies to the base type
+or floating-point scalar into an `N`-byte vector; `N` is a power of two from the
+element size up to 64, so `float` allows 4 to 64 and `char` 1 to 64. It works
+before the type, after the type specifier, after the declarator, and in cast,
+compound-literal and `sizeof` type-names. Before or after the specifier, it applies to the base type
 of every declarator. After a declarator, it applies to the innermost scalar,
 through pointers, arrays and function return types:
 
@@ -158,7 +159,8 @@ int mk(void) VS;            // function returning a vector
 int n = sizeof((VS int){0});  // 16
 ```
 
-Vector alignment follows the host ABI, so locals, struct members and
+A vector narrower than 16 bytes aligns to its size. Vector alignment follows
+the host ABI, so locals, struct members and
 `-c=native` output agree with the host compiler:
 
 | Host | alignment of a 32- or 64-byte vector (layout, `__alignof__`) |

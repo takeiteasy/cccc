@@ -1,7 +1,5 @@
 // CCCC_FLAGS: --testing -x cl
-// Suite: OpenCL C vector types, swizzles and vector literals. Vectors under 16
-// bytes (float2, int2, char4, ...) do not exist, so a swizzle that would make
-// one is rejected; see tests/test_opencl_*_error.c.
+// Suite: OpenCL C vector types, swizzles and vector literals.
 
 #pragma cccc suite begin "opencl_vectors"
 
@@ -161,6 +159,46 @@ int test_vectors_in_global_memory(void) {
     return out[0].x == 4 && out[0].w == 1 && out[1].x == 8 && out[1].w == 5 &&
                    d[0].s0 == 100 && d[0].s4 == 0 && d[0].s5 == 2 &&
                    d[0].s7 == 6
+               ? 42
+               : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_narrow_vector_sizes(void) {
+    return sizeof(char2) == 2 && sizeof(char3) == 4 && sizeof(char4) == 4 &&
+                   sizeof(uchar8) == 8 && sizeof(short2) == 4 &&
+                   sizeof(short3) == 8 && sizeof(ushort4) == 8 &&
+                   sizeof(int2) == 8 && sizeof(uint2) == 8 &&
+                   sizeof(float2) == 8
+               ? 42
+               : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_narrow_vector_arithmetic(void) {
+    float2 a = (float2)(1, 2);
+    float2 b = a * 3.0f + (float2)(1.0f);
+    char4  c = (char4)(1, 2, 3, 4);
+    char4  d = (c & (char4)(6)) | (char4)(8);
+    short2 e = (short2)(5, 6) + (short2)(1);
+    return b.x == 4 && b.y == 7 && d.x == 8 && d.y == 10 && d.z == 10 &&
+                   d.w == 12 && e.x == 6 && e.y == 7
+               ? 42
+               : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_narrow_swizzle_results(void) {
+    float4 v = (float4)(1, 2, 3, 4);
+    float2 a = v.xy;
+    float2 b = v.hi;
+    float2 c = v.wx;
+    char4  q = (char4)(1, 2, 3, 4);
+    char3  d = q.xyz;
+    short8 h = (short8)(0, 1, 2, 3, 4, 5, 6, 7);
+    short4 e = h.hi;
+    return a.x == 1 && a.y == 2 && b.x == 3 && c.x == 4 && c.y == 1 &&
+                   d.z == 3 && e.w == 7
                ? 42
                : 1;
 }

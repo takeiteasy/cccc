@@ -135,6 +135,9 @@ __kernel void count(__global int *total, __global int *first) {
 
 | Types | Total size |
 |---|---|
+| `char2`, `uchar2` | 2 bytes |
+| `char3`, `char4`, `uchar3`, `uchar4`, `short2`, `ushort2` | 4 bytes |
+| `char8`, `uchar8`, `short3`, `short4`, `ushort3`, `ushort4`, `int2`, `uint2`, `float2` | 8 bytes |
 | `char16`, `uchar16`, `short8`, `ushort8`, `int3`, `int4`, `uint3`, `uint4`, `long2`, `ulong2`, `float3`, `float4` | 16 bytes |
 | `short16`, `ushort16`, `int8`, `uint8`, `long3`, `long4`, `ulong3`, `ulong4`, `float8` | 32 bytes |
 | `int16`, `uint16`, `long8`, `ulong8`, `float16` | 64 bytes |
@@ -164,7 +167,7 @@ w.lo = (float4)(0);           // several lanes, with =
 ```
 
 A swizzle that names several lanes is a vector, so it must be one of the types
-above; `.xy` of a `float4` is rejected. Several lanes assign with `=` only, and
+above, so `.xy` of a `float4` is a `float2` and a lane count whose vector would pass 64 bytes is rejected. Several lanes assign with `=` only, and
 each lane can appear once.
 
 ### Vector literals
@@ -187,8 +190,6 @@ enforced; the launch's local size is the one that applies.
 
 ## Limitations
 
-- Vectors smaller than 16 bytes (`float2`, `int2`, `char4`, ...) do not exist
- .
 - 128-byte vectors (`long16`, `ulong16`) do not exist
  .
 - The OpenCL built-in library (`sqrt`, `min`, `max`, `clamp`, `mad`, `dot`,

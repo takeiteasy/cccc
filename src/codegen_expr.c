@@ -23,12 +23,12 @@
 // ========== GNU vector_size Expressions (tracker #72) ==========
 //
 // A vector local/global lives in a memory slot aligned/sized to its own
-// width (16/32/64 bytes), exactly like a small struct (gen_addr() already
-// handles this generically -- no frame-layout changes needed). The *value*
-// of a vector expression, however, flows through a vreg index in dest_reg,
-// mirroring how FReg-typed expressions flow through fregs[] even though
-// float locals also live in memory: VLDR/VSTR move between the slot and a
-// vreg around each operation, carrying the value's byte width in the
+// width (a power of two up to 64 bytes), exactly like a small struct
+// (gen_addr() already handles this generically -- no frame-layout changes
+// needed). The *value* of a vector expression, however, flows through a vreg
+// index in dest_reg, mirroring how FReg-typed expressions flow through fregs[]
+// even though float locals also live in memory: VLDR/VSTR move between the slot
+// and a vreg around each operation, carrying the value's byte width in the
 // instruction operand.
 //
 // tracker #715 adds: bitwise &|^~ (integer lanes), integer lane / and %
@@ -36,9 +36,10 @@
 // (GCC per-lane all-ones/all-zero SIGNED mask; >/>= are parsed as swapped
 // </<=), GNU vector ?: select, and __builtin_convertvector.
 //
-// tracker #722 widens the substrate from 128-bit only to 128/256/512-bit
-// (16/32/64-byte vectors), carrying the runtime lane count / byte width in
-// the instruction operand instead of baking a fixed count into each opcode.
+// tracker #722 widens the substrate from 128-bit only to 8..512-bit
+// (1..64-byte power-of-two vectors), carrying the runtime lane count / byte
+// width in the instruction operand instead of baking a fixed count into each
+// opcode.
 //
 // Still deliberately out of scope (see follow-up tickets): __builtin_shuffle
 // with a non-constant (runtime) index mask (the constant-mask form is
@@ -262,7 +263,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int r_rhs = alloc_temp_reg();
             gen_expr(vm, node->rhs, r_rhs);
             emit_rrrs(vm, vector_bitop_for(node->kind), dest_reg, r_lhs, r_rhs,
-                      node->ty->size / 8);
+                      (node->ty->size + 7) / 8);
             free_temp_reg(r_rhs);
             free_temp_reg(r_lhs);
             return;
@@ -270,7 +271,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         case ND_BITNOT: {
             int r_src = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_src);
-            emit_rrs(vm, VNOT, dest_reg, r_src, node->ty->size / 8);
+            emit_rrs(vm, VNOT, dest_reg, r_src, (node->ty->size + 7) / 8);
             free_temp_reg(r_src);
             return;
         }

@@ -291,7 +291,7 @@ extern "C" {
                       Format: [DYNOBJSZ][rd:8|rs:8|roff:8|unused:8][type:i64];       \
                       DYNOBJSZ_SUBOBJECT in type caps the result at                  \
                       (type >> 8) - regs[roff], the rest of a member. */             \
-    /* SIMD vector registers, 128/256/512-bit (tracker #72/#463, widened by          \
+    /* SIMD vector registers, 1..64 bytes (tracker #72/#463, widened by              \
        #722). The lane type is carried by the opcode, mirroring the                  \
        FADD3/FADD3_F32 scalar split; the register itself (VReg) is a raw             \
        union sized to the widest supported vector (64 bytes). The active             \
@@ -304,7 +304,7 @@ extern "C" {
        (unchanged from #72). Opcode names below no longer carry a fixed              \
        lane count suffix (that was true only while                                   \
        every vector was exactly 128 bits); one opcode per element family             \
-       now serves all three widths. */                                               \
+       now serves every width. */                                                    \
     X(VLDR,                                                                          \
       1) /* vregs[rd] = <width> raw bytes at regs[rs] (unaligned-safe) */            \
     X(VSTR, 1) /* <width> raw bytes at regs[rs] = vregs[rd] */                       \
@@ -361,7 +361,7 @@ extern "C" {
     X(VMUL_I8, 1) /* ditto, * */                                                     \
     X(VNEG_I8, 1) /* vregs[rd].i8[i] = -vregs[rs1].i8[i], i<count */                 \
     /* Bitwise (tracker #715): width-agnostic, over i64[0..words-1] where            \
-       words = <width bytes>/8 (rides in the operand, like VLDR/VSTR). */            \
+       words = <width bytes>/8 rounded up (rides in the operand). */                 \
     X(VAND, 1) /* vregs[rd].i64[i] = vregs[rs1].i64[i] & vregs[rs2].i64[i],          \
                   i<words */                                                         \
     X(VOR, 1)  /* ditto, | */                                                        \
@@ -3487,8 +3487,8 @@ typedef struct {
  * sized to the widest currently-supported vector_size (64 bytes). The active
  * lane view AND the active width are determined entirely by the opcode/
  * operand that touches it (mirrors the FReg design: the opcode carries the
- * type, not the register) -- a 128- or 256-bit value only occupies a prefix
- * of the union; handlers loop up to the operand-carried lane count, not
+ * type, not the register) -- a value narrower than 64 bytes only occupies a
+ * prefix of the union; handlers loop up to the operand-carried lane count, not
  * sizeof(VReg). Backs GCC vector_size(N) types (tracker #72, widened to
  * 256/512-bit by #722) and the autovectorizer (#463). */
 typedef union {

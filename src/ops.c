@@ -4708,16 +4708,16 @@ static inline void st_vN(void *p, const VReg *v, int bytes) {
     __builtin_memcpy(p, v, (size_t)bytes);
 }
 
-// The compiler only ever emits width == 16/32/64 (parse.c's vector_size
-// gate), but the width rides in an unauthenticated 8-bit bytecode operand
-// (0-255) -- unlike pre-#722, where VLDR/VSTR always moved a fixed
+// The compiler only ever emits a power-of-two width up to 64 (parse.c's
+// vector_size gate), but the width rides in an unauthenticated 8-bit bytecode
+// operand (0-255) -- unlike pre-#722, where VLDR/VSTR always moved a fixed
 // sizeof(VReg) with no attacker/corruption-controlled length at all. A
 // malformed or hand-crafted .c4 file could otherwise drive ld_vN/st_vN to
 // memcpy up to 255 bytes into/out of a 64-byte vregs[] slot, corrupting
 // adjacent VM state. Reject anything else outright, same trapping style as
 // VEC_IDIV/VEC_IMOD's zero-divisor check below.
 static inline bool vreg_width_ok(int width) {
-    return width == 16 || width == 32 || width == 64;
+    return width >= 1 && width <= 64 && (width & (width - 1)) == 0;
 }
 
 static inline int op_VLDR_fn(VirtualMachine *vm) {
@@ -4729,8 +4729,9 @@ static inline int op_VLDR_fn(VirtualMachine *vm) {
     (void)rs2;
     if (!vreg_width_ok(width)) {
         printf("\n========== CORRUPT BYTECODE ==========\n");
-        printf("Invalid vector load width %d (expected 16, 32, or 64)\n",
-               width);
+        printf(
+            "Invalid vector load width %d (expected a power of two up to 64)\n",
+            width);
         printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
                (long long)vm->pc);
         printf("======================================\n");
@@ -4752,7 +4753,8 @@ static inline int op_VSTR_fn(VirtualMachine *vm) {
     (void)rs2;
     if (!vreg_width_ok(width)) {
         printf("\n========== CORRUPT BYTECODE ==========\n");
-        printf("Invalid vector store width %d (expected 16, 32, or 64)\n",
+        printf("Invalid vector store width %d (expected a power of two up to "
+               "64)\n",
                width);
         printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
                (long long)vm->pc);
