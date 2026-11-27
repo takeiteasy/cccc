@@ -34,7 +34,7 @@ Self-hosting (`ouroboros`) and the full suite stay green after every step; they 
 
 ## Hooks
 
-The pivotal open design. P1 settles it on methods, the plainest typed hook: `s.f(x)` where `f` is not a member.
+The pivotal open design. P1 settles it on methods, the plainest typed hook: `s.f(x)` where `f` is not a member. The detailed design is [PLAN-hooks.md](PLAN-hooks.md).
 
 ### Pilot scope
 
@@ -52,7 +52,7 @@ The pivotal open design. P1 settles it on methods, the plainest typed hook: `s.f
 | How is it registered? | Comptime registers a function for a key; the attribute form is sugar for it |
 | Dispatch | A C-side registry keyed by (type, name); no registered key means no VM entry, so normal code pays nothing |
 | What does the hook receive and return? | The receiver expression, the name and the arguments; it returns a replacement node, which the compiler type-checks |
-| Re-type-checking | The returned node is type-checked like parsed code; a hook that returns another hooked construct is followed up to a depth limit |
+| Re-type-checking | The returned node is type-checked like parsed code; hooks fire only at parse sites, so a result never re-triggers one |
 | Conflicts | Two registrations for one key are an error at the second registration |
 | Diagnostics | Errors in the returned node point at the original call |
 | Handles | P1 runs on today's comptime API. `Node *` is already opaque to comptime, so a later switch to handles ([Comptime API v2](#comptime-api-v2)) keeps hook signatures |
